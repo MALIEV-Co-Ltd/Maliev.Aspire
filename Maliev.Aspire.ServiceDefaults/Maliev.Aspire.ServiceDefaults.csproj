@@ -1,11 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsAspireSharedProject>true</IsAspireSharedProject>
+
+    <!-- NuGet Package Configuration -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Maliev.Aspire.ServiceDefaults</PackageId>
+    <Authors>MALIEV</Authors>
+    <Company>MALIEV Co., Ltd.</Company>
+    <Description>Shared Aspire ServiceDefaults for Maliev microservices. Provides OpenTelemetry, health checks, service discovery, and HTTP resilience.</Description>
+    <PackageTags>aspire;servicedefaults;opentelemetry;healthchecks</PackageTags>
+    <RepositoryUrl>https://github.com/MALIEV-Co-Ltd/Maliev.Aspire</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
