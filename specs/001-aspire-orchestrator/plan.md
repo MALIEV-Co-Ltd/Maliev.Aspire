@@ -61,3 +61,68 @@ Maliev.Aspire/
 ## Complexity Tracking
 
 No constitutional violations were identified that require justification.
+---
+
+## Phase 6: CI/CD Integration
+
+**Added**: 2025-11-21
+
+### Problem Statement
+
+Each microservice has its own Git repository with independent CI/CD pipelines. When a microservice references ServiceDefaults via a project reference (`../../Maliev.Aspire/...`), CI builds fail because the Aspire project doesn't exist in the microservice's checkout.
+
+### Solution: ServiceDefaults as NuGet Package
+
+Publish `Maliev.Aspire.ServiceDefaults` as a NuGet package to GitHub Packages. Microservices consume it as a package reference instead of a project reference.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Maliev.Aspire Repo (publishes to GitHub Packages)          │
+│  - Maliev.Aspire.ServiceDefaults → NuGet Package            │
+│  - .github/workflows/publish-nuget.yml                      │
+└─────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+    │ AuthService  │  │ OrderService │  │ ... (18 more)│
+    │    Repo      │  │    Repo      │  │              │
+    │              │  │              │  │              │
+    │ nuget.config │  │ nuget.config │  │ nuget.config │
+    │ (GitHub Pkg) │  │ (GitHub Pkg) │  │ (GitHub Pkg) │
+    └──────────────┘  └──────────────┘  └──────────────┘
+```
+
+### Key Implementation Details
+
+1. **ServiceDefaults.csproj** - Package configuration:
+   - Multi-target: `net9.0;net10.0`
+   - PackageId: `Maliev.Aspire.ServiceDefaults`
+   - IsPackable: true
+
+2. **GitHub Actions Workflow** - Auto-publish on push to main:
+   - Triggers on changes to `Maliev.Aspire.ServiceDefaults/**`
+   - Uses `GITHUB_TOKEN` with `packages: write` permission
+   - Supports manual version override via workflow_dispatch
+
+3. **Microservice nuget.config** - GitHub Packages source with auth:
+   - Uses environment variables: `%NUGET_USERNAME%`, `%NUGET_PASSWORD%`
+   - CI sets these from `github.actor` and `secrets.GITOPS_PAT`
+
+4. **Docker BuildKit Secrets** - Secure credential handling:
+   - Avoids `ARG` for secrets (security warning)
+   - Uses `--mount=type=secret` in Dockerfile
+   - Passes via `--secret id=...,env=...` in docker build
+
+### Security Considerations
+
+- `GITHUB_TOKEN` cannot access packages from other repositories
+- Must use PAT with `read:packages` scope (stored as `GITOPS_PAT`)
+- Docker ARG exposes secrets in image layers; use BuildKit secrets instead
+
+### Merge Order
+
+1. Merge Aspire PR first (publishes the package)
+2. Then merge microservice PRs (can now restore the package)

@@ -2,7 +2,8 @@
 
 **Feature Branch**: `001-aspire-orchestrator`
 **Created**: 2025-01-21
-**Status**: Draft
+**Updated**: 2025-11-21
+**Status**: In Progress
 **Input**: User description: "Generate a detailed technical specification for the Maliev.Aspire project based on the correct secret management structure."
 
 ## User Scenarios & Testing *(mandatory)*
@@ -83,6 +84,22 @@ A developer debugging a cross-service request needs to trace the flow through mu
   - Service should start but fail gracefully when accessing the missing configuration, with clear logging
 - What happens when port conflicts occur (e.g., PostgreSQL port 5432 already in use)?
   - System should report the conflict and suggest resolution (stop conflicting process or change port)
+
+### User Story 5 - CI/CD Integration with ServiceDefaults Package (Priority: P1)
+
+Each microservice has its own Git repository with independent CI/CD pipelines. The CI builds must be able to reference ServiceDefaults without access to the Aspire project source code.
+
+**Why this priority**: Critical for CI/CD. Without this, all microservice CI pipelines fail because they cannot resolve the ServiceDefaults project reference.
+
+**Independent Test**: Push a commit to any microservice repo and verify the CI pipeline completes successfully.
+
+**Acceptance Scenarios**:
+
+1. **Given** ServiceDefaults is published as a NuGet package to GitHub Packages, **When** a microservice CI runs `dotnet restore`, **Then** the package is successfully restored from GitHub Packages.
+2. **Given** a microservice Dockerfile runs `dotnet restore`, **When** Docker builds the image, **Then** the restore succeeds using BuildKit secrets for authentication.
+3. **Given** the ServiceDefaults package is updated, **When** a new version is published, **Then** microservices can update their package reference to use the new version.
+
+---
 
 ## Requirements *(mandatory)*
 
