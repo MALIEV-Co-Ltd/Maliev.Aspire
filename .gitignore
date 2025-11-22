@@ -55,3 +55,9 @@ nunit-*.xml
 
 # Aspire local development secrets
 sharedsecrets.json
+
+# Visual Studio
+.vs/
+
+# Aspire
+.aspire/
