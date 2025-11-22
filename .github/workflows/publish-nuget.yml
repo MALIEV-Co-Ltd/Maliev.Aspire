@@ -16,7 +16,7 @@ on:
         type: string
 
 env:
-  DOTNET_VERSION: '9.0.x'
+  DOTNET_VERSION: '10.0.x'
   PROJECT_PATH: 'Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj'
 
 jobs:
@@ -33,9 +33,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: |
-            9.0.x
-            10.0.x
+          dotnet-version: '10.0.x'
 
       - name: Restore dependencies
         run: dotnet restore ${{ env.PROJECT_PATH }}
