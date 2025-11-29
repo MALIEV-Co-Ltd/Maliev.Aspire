@@ -113,10 +113,12 @@ public static class Extensions
     /// Maps default health and metrics endpoints for the application.
     /// This includes mapping health checks to "/health" and "/alive" endpoints,
     /// and adding a Prometheus scraping endpoint for metrics.
+    /// Optionally maps service-specific health check endpoints with a custom prefix.
     /// </summary>
     /// <param name="app">The <see cref="WebApplication"/> to configure.</param>
+    /// <param name="servicePrefix">Optional service prefix for custom health endpoints (e.g., "auth" will map "/auth/liveness" and "/auth/readiness").</param>
     /// <returns>The configured <see cref="WebApplication"/>.</returns>
-    public static WebApplication MapDefaultEndpoints(this WebApplication app)
+    public static WebApplication MapDefaultEndpoints(this WebApplication app, string? servicePrefix = null)
     {
         // All health checks must pass for app to be considered ready to accept traffic after starting
         app.MapHealthChecks("/health");
@@ -124,8 +126,30 @@ public static class Extensions
         // Only health checks tagged with the "live" tag must pass for app to be considered alive
         app.MapHealthChecks("/alive", new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
 
+        // Map service-specific health check endpoints if a prefix is provided
+        if (!string.IsNullOrEmpty(servicePrefix))
+        {
+            // Liveness endpoint - simple check that always returns healthy (for ingress)
+            app.MapGet($"/{servicePrefix}/liveness", () => "Healthy").AllowAnonymous();
+            
+            // Readiness endpoint - checks all dependencies (for ingress)
+            app.MapHealthChecks($"/{servicePrefix}/readiness", new HealthCheckOptions
+            {
+                Predicate = _ => true // All health checks must pass
+            });
+        }
+
         // Add the Prometheus scraping endpoint for metrics
-        app.MapPrometheusScrapingEndpoint();
+        // Wrapped in try-catch to prevent startup failures if Prometheus endpoint fails
+        try
+        {
+            app.MapPrometheusScrapingEndpoint();
+        }
+        catch (Exception ex)
+        {
+            var logger = app.Services.GetRequiredService<ILogger<WebApplication>>();
+            logger.LogWarning(ex, "Failed to map Prometheus scraping endpoint - continuing without metrics");
+        }
 
         return app;
     }
