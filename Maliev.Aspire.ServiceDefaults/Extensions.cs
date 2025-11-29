@@ -10,8 +10,20 @@ using OpenTelemetry.Trace;
 
 namespace Microsoft.Extensions.Hosting;
 
+/// <summary>
+/// Provides extension methods for configuring service defaults in a distributed application.
+/// This class includes methods for setting up OpenTelemetry, health checks, service discovery, and resilience.
+/// </summary>
 public static class Extensions
 {
+    /// <summary>
+    /// Adds default service configurations to the application builder.
+    /// This includes setting up OpenTelemetry for logging, metrics, and tracing,
+    /// configuring health checks for the application and its dependencies,
+    /// and enabling service discovery and resilience for HTTP clients.
+    /// </summary>
+    /// <param name="builder">The <see cref="IHostApplicationBuilder"/> to configure.</param>
+    /// <returns>The configured <see cref="IHostApplicationBuilder"/>.</returns>
     public static IHostApplicationBuilder AddServiceDefaults(this IHostApplicationBuilder builder)
     {
         // --- OpenTelemetry ---
@@ -21,6 +33,8 @@ public static class Extensions
             logging.IncludeScopes = true;
         });
 
+        var useOtlpExporter = !string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+
         builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics =>
             {
@@ -28,28 +42,55 @@ public static class Extensions
                     .AddHttpClientInstrumentation()
                     .AddRuntimeInstrumentation()
                     .AddPrometheusExporter(); // Export metrics for Prometheus
+
+                if (useOtlpExporter)
+                {
+                    metrics.AddOtlpExporter();
+                }
             })
             .WithTracing(tracing =>
             {
                 tracing.AddAspNetCoreInstrumentation()
                        .AddHttpClientInstrumentation();
-            });
 
-        // Add the OTLP exporter if configured
-        if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
-        {
-            builder.Services.AddOpenTelemetry().UseOtlpExporter();
-        }
+                if (useOtlpExporter)
+                {
+                    tracing.AddOtlpExporter();
+                }
+            });
 
 
         // --- Health Checks ---
-        builder.Services.AddHealthChecks()
+        var healthChecksBuilder = builder.Services.AddHealthChecks()
             // Add a default liveness check to ensure app is responsive
-            .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"])
-            // Add health checks for external dependencies
-            .AddNpgSql(builder.Configuration.GetConnectionString("postgres")!)
-            .AddRedis(builder.Configuration.GetConnectionString("redis")!)
-            .AddRabbitMQ(builder.Configuration.GetConnectionString("rabbitmq")!);
+            .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
+
+        // Add health checks for external dependencies (only if connection strings are configured)
+        var postgresConnectionString = builder.Configuration.GetConnectionString("postgres");
+        if (!string.IsNullOrEmpty(postgresConnectionString))
+        {
+            healthChecksBuilder.AddNpgSql(postgresConnectionString);
+        }
+
+        var redisConnectionString = builder.Configuration.GetConnectionString("redis");
+        if (!string.IsNullOrEmpty(redisConnectionString))
+        {
+            healthChecksBuilder.AddRedis(redisConnectionString);
+        }
+
+        var rabbitMqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
+        if (!string.IsNullOrEmpty(rabbitMqConnectionString))
+        {
+            // Register health check without blocking during startup
+            // Connection is created lazily when health check runs
+            healthChecksBuilder.AddRabbitMQ(
+                name: "rabbitmq",
+                setup: factory =>
+                {
+                    factory.Uri = new Uri(rabbitMqConnectionString);
+                },
+                tags: new[] { "ready" });
+        }
 
 
         // --- Service Discovery and Resilience ---
@@ -66,6 +107,13 @@ public static class Extensions
         return builder;
     }
 
+    /// <summary>
+    /// Maps default health and metrics endpoints for the application.
+    /// This includes mapping health checks to "/health" and "/alive" endpoints,
+    /// and adding a Prometheus scraping endpoint for metrics.
+    /// </summary>
+    /// <param name="app">The <see cref="WebApplication"/> to configure.</param>
+    /// <returns>The configured <see cref="WebApplication"/>.</returns>
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
         // All health checks must pass for app to be considered ready to accept traffic after starting
