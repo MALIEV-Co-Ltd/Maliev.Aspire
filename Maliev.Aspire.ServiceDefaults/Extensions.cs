@@ -78,21 +78,23 @@ public static class Extensions
             healthChecksBuilder.AddRedis(redisConnectionString);
         }
 
-        var rabbitMqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
-        if (!string.IsNullOrEmpty(rabbitMqConnectionString))
-        {
-            // Use async delegate for connection creation (RabbitMQ.Client v7)
-            healthChecksBuilder.AddRabbitMQ(async sp =>
-            {
-                var factory = new RabbitMQ.Client.ConnectionFactory
-                {
-                    Uri = new Uri(rabbitMqConnectionString)
-                };
-                return await factory.CreateConnectionAsync();
-            },
-            name: "rabbitmq",
-            tags: new[] { "ready" });
-        }
+        // RabbitMQ health check removed - it blocks during startup and causes timeouts
+        // MassTransit already manages RabbitMQ connections and will retry automatically
+        // If needed, health checks can be added at the application level instead
+        // var rabbitMqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
+        // if (!string.IsNullOrEmpty(rabbitMqConnectionString))
+        // {
+        //     healthChecksBuilder.AddRabbitMQ(async sp =>
+        //     {
+        //         var factory = new RabbitMQ.Client.ConnectionFactory
+        //         {
+        //             Uri = new Uri(rabbitMqConnectionString)
+        //         };
+        //         return await factory.CreateConnectionAsync();
+        //     },
+        //     name: "rabbitmq",
+        //     tags: new[] { "ready" });
+        // }
 
 
         // --- Service Discovery and Resilience ---

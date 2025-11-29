@@ -15,7 +15,6 @@
     <PackageTags>aspire;servicedefaults;opentelemetry;healthchecks</PackageTags>
     <RepositoryUrl>https://github.com/MALIEV-Co-Ltd/Maliev.Aspire</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
