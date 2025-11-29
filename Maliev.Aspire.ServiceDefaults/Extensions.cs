@@ -81,11 +81,17 @@ public static class Extensions
         var rabbitMqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
         if (!string.IsNullOrEmpty(rabbitMqConnectionString))
         {
-            // Use positional argument for connection string to avoid parameter name mismatch
-            healthChecksBuilder.AddRabbitMQ(
-                rabbitMqConnectionString,
-                name: "rabbitmq",
-                tags: new[] { "ready" });
+            // Use async delegate for connection creation (RabbitMQ.Client v7)
+            healthChecksBuilder.AddRabbitMQ(async sp =>
+            {
+                var factory = new RabbitMQ.Client.ConnectionFactory
+                {
+                    Uri = new Uri(rabbitMqConnectionString)
+                };
+                return await factory.CreateConnectionAsync();
+            },
+            name: "rabbitmq",
+            tags: new[] { "ready" });
         }
 
 
