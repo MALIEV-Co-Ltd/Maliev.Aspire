@@ -81,9 +81,9 @@ public static class Extensions
         var rabbitMqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
         if (!string.IsNullOrEmpty(rabbitMqConnectionString))
         {
-            // Use the standard overload which handles connection creation internally
+            // Use positional argument for connection string to avoid parameter name mismatch
             healthChecksBuilder.AddRabbitMQ(
-                rabbitConnectionString: rabbitMqConnectionString,
+                rabbitMqConnectionString,
                 name: "rabbitmq",
                 tags: new[] { "ready" });
         }
