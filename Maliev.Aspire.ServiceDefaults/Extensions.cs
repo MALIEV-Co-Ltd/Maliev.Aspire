@@ -81,14 +81,10 @@ public static class Extensions
         var rabbitMqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
         if (!string.IsNullOrEmpty(rabbitMqConnectionString))
         {
-            // Register health check without blocking during startup
-            // Connection is created lazily when health check runs
+            // Use the standard overload which handles connection creation internally
             healthChecksBuilder.AddRabbitMQ(
+                rabbitConnectionString: rabbitMqConnectionString,
                 name: "rabbitmq",
-                setup: factory =>
-                {
-                    factory.Uri = new Uri(rabbitMqConnectionString);
-                },
                 tags: new[] { "ready" });
         }
 

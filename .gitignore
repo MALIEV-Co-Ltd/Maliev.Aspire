@@ -61,3 +61,6 @@ sharedsecrets.json
 
 # Aspire
 .aspire/
+
+# RedisInsight data
+**/redisinsight-data/
