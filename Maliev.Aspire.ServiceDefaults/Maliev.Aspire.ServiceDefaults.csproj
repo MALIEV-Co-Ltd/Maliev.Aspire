@@ -23,11 +23,13 @@
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+
+    <!-- Health Checks -->
     <PackageReference Include="AspNetCore.HealthChecks.NpgSql" Version="9.0.0" />
     <PackageReference Include="AspNetCore.HealthChecks.Rabbitmq" Version="9.0.0" />
-    <PackageReference Include="RabbitMQ.Client" Version="7.2.0" />
     <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
 
+    <!-- OpenTelemetry -->
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.0.0" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.14.0" />
@@ -36,6 +38,22 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.14.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.14.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.14.0" />
+
+    <!-- Infrastructure -->
+    <PackageReference Include="RabbitMQ.Client" Version="7.2.0" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="8.3.5" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="9.0.0" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.2" />
+
+    <!-- Authentication -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
+
+    <!-- API Documentation -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.0" />
+    <PackageReference Include="Scalar.AspNetCore" Version="1.2.45" />
   </ItemGroup>
 
 </Project>
