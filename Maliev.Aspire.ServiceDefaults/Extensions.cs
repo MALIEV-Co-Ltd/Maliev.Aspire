@@ -112,46 +112,58 @@ public static class Extensions
     }
 
     /// <summary>
+    /// Adds service-specific meters to OpenTelemetry metrics collection.
+    /// Call this AFTER AddServiceDefaults() to register custom business metrics meters.
+    /// </summary>
+    /// <param name="builder">The <see cref="IHostApplicationBuilder"/> to configure.</param>
+    /// <param name="meterNames">Names of meters to add (e.g., "customer-service", "payment-service").</param>
+    /// <returns>The configured <see cref="IHostApplicationBuilder"/>.</returns>
+    public static IHostApplicationBuilder AddServiceMeters(this IHostApplicationBuilder builder, params string[] meterNames)
+    {
+        builder.Services.ConfigureOpenTelemetryMeterProvider(metrics =>
+        {
+            foreach (var meterName in meterNames)
+            {
+                metrics.AddMeter(meterName);
+            }
+        });
+
+        return builder;
+    }
+
+    /// <summary>
     /// Maps default health and metrics endpoints for the application.
     /// This includes mapping health checks to "/health" and "/alive" endpoints,
-    /// and adding a Prometheus scraping endpoint for metrics.
-    /// Optionally maps service-specific health check endpoints with a custom prefix.
+    /// and adding an OpenTelemetry Prometheus scraping endpoint at /{servicePrefix}/metrics.
+    /// Also maps service-specific health check endpoints at /{servicePrefix}/liveness and /{servicePrefix}/readiness.
     /// </summary>
     /// <param name="app">The <see cref="WebApplication"/> to configure.</param>
-    /// <param name="servicePrefix">Optional service prefix for custom health endpoints (e.g., "auth" will map "/auth/liveness" and "/auth/readiness").</param>
+    /// <param name="servicePrefix">Required service prefix for health and metrics endpoints (e.g., "auth" will map "/auth/liveness", "/auth/readiness", "/auth/metrics").</param>
     /// <returns>The configured <see cref="WebApplication"/>.</returns>
-    public static WebApplication MapDefaultEndpoints(this WebApplication app, string? servicePrefix = null)
+    public static WebApplication MapDefaultEndpoints(this WebApplication app, string servicePrefix)
     {
+        if (string.IsNullOrWhiteSpace(servicePrefix))
+        {
+            throw new ArgumentException("Service prefix is required for MapDefaultEndpoints", nameof(servicePrefix));
+        }
+
         // All health checks must pass for app to be considered ready to accept traffic after starting
         app.MapHealthChecks("/health");
 
         // Only health checks tagged with the "live" tag must pass for app to be considered alive
         app.MapHealthChecks("/alive", new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
 
-        // Map service-specific health check endpoints if a prefix is provided
-        if (!string.IsNullOrEmpty(servicePrefix))
-        {
-            // Liveness endpoint - simple check that always returns healthy (for ingress)
-            app.MapGet($"/{servicePrefix}/liveness", () => "Healthy").AllowAnonymous();
-            
-            // Readiness endpoint - checks all dependencies (for ingress)
-            app.MapHealthChecks($"/{servicePrefix}/readiness", new HealthCheckOptions
-            {
-                Predicate = _ => true // All health checks must pass
-            });
-        }
+        // Liveness endpoint - simple check that always returns healthy (for ingress)
+        app.MapGet($"/{servicePrefix}/liveness", () => "Healthy").AllowAnonymous();
 
-        // Add the Prometheus scraping endpoint for metrics
-        // Wrapped in try-catch to prevent startup failures if Prometheus endpoint fails
-        try
+        // Readiness endpoint - checks all dependencies (for ingress)
+        app.MapHealthChecks($"/{servicePrefix}/readiness", new HealthCheckOptions
         {
-            app.MapPrometheusScrapingEndpoint();
-        }
-        catch (Exception ex)
-        {
-            var logger = app.Services.GetRequiredService<ILogger<WebApplication>>();
-            logger.LogWarning(ex, "Failed to map Prometheus scraping endpoint - continuing without metrics");
-        }
+            Predicate = _ => true // All health checks must pass
+        });
+
+        // OpenTelemetry Prometheus metrics endpoint at /{servicePrefix}/metrics
+        app.MapPrometheusScrapingEndpoint($"/{servicePrefix}/metrics");
 
         return app;
     }
