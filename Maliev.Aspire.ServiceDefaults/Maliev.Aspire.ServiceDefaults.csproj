@@ -9,7 +9,6 @@
     <!-- NuGet Package Configuration -->
     <IsPackable>true</IsPackable>
     <PackageId>Maliev.Aspire.ServiceDefaults</PackageId>
-    <Version>1.0.2</Version>
     <Authors>MALIEV</Authors>
     <Company>MALIEV Co., Ltd.</Company>
     <Description>Shared Aspire ServiceDefaults for Maliev microservices. Provides OpenTelemetry, health checks, service discovery, and HTTP resilience.</Description>
