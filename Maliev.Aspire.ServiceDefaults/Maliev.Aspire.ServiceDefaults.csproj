@@ -9,13 +9,16 @@
     <!-- NuGet Package Configuration -->
     <IsPackable>true</IsPackable>
     <PackageId>Maliev.Aspire.ServiceDefaults</PackageId>
-    <Version>1.0.1</Version>
+    <Version>1.0.2</Version>
     <Authors>MALIEV</Authors>
     <Company>MALIEV Co., Ltd.</Company>
     <Description>Shared Aspire ServiceDefaults for Maliev microservices. Provides OpenTelemetry, health checks, service discovery, and HTTP resilience.</Description>
     <PackageTags>aspire;servicedefaults;opentelemetry;healthchecks</PackageTags>
     <RepositoryUrl>https://github.com/MALIEV-Co-Ltd/Maliev.Aspire</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- Suppress prerelease dependency warning - OpenTelemetry.Exporter.Prometheus.AspNetCore beta is required for .NET 10.0 -->
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
