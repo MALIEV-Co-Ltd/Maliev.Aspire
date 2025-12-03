@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Scalar.AspNetCore;
 
 namespace Microsoft.Extensions.Hosting;
@@ -11,19 +10,15 @@ namespace Microsoft.Extensions.Hosting;
 public static class ApiDocumentationExtensions
 {
     /// <summary>
-    /// Adds OpenAPI (Swagger) documentation with Scalar UI.
-    /// Only enabled in Development and Staging environments.
+    /// Placeholder for API documentation setup.
+    /// Services must call AddEndpointsApiExplorer() and AddOpenApi("v1") themselves
+    /// in their Program.cs for XML comments to work via source generator.
     /// </summary>
     /// <param name="builder">The host application builder.</param>
     /// <returns>The configured builder.</returns>
     public static IHostApplicationBuilder AddApiDocumentation(this IHostApplicationBuilder builder)
     {
-        if (builder.Environment.IsDevelopment() || builder.Environment.IsStaging())
-        {
-            builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddOpenApi();
-        }
-
+        // Empty - services handle AddOpenApi registration themselves
         return builder;
     }
 
@@ -33,35 +28,42 @@ public static class ApiDocumentationExtensions
     /// </summary>
     /// <param name="app">The web application.</param>
     /// <param name="servicePrefix">Optional service prefix (e.g., "auth" for /auth/openapi).</param>
+    /// <param name="documentName">The OpenAPI document name (default: "v1").</param>
     /// <param name="configureScalar">Optional action to configure Scalar options.</param>
     /// <returns>The configured application.</returns>
     public static WebApplication MapApiDocumentation(
         this WebApplication app,
         string? servicePrefix = null,
+        string documentName = "v1",
         Action<ScalarOptions>? configureScalar = null)
     {
-        if (!app.Environment.IsDevelopment() && !app.Environment.IsStaging())
+        if (app.Environment.IsProduction())
         {
             return app;
         }
 
         var prefix = string.IsNullOrEmpty(servicePrefix) ? "" : $"/{servicePrefix}";
-        var openApiPath = $"{prefix}/openapi/{{documentName}}.json";
-        var scalarPath = $"{prefix}/scalar";
+        var openApiPattern = $"{prefix}/openapi/{{documentName}}.json";
+        var scalarEndpoint = $"{prefix}/scalar";
 
-        // Map OpenAPI endpoint
-        app.MapOpenApi(openApiPath);
+        // Resolved path for Scalar to fetch the OpenAPI document
+        var resolvedOpenApiPath = $"{prefix}/openapi/{documentName}.json";
 
-        // Map Scalar UI
-        app.MapScalarApiReference(options =>
+        // Map OpenAPI endpoint with the pattern
+        app.MapOpenApi(openApiPattern);
+
+        // Map Scalar UI with explicit OpenAPI route pattern
+        app.MapScalarApiReference(scalarEndpoint, opt =>
         {
-            options.WithOpenApiRoutePattern(openApiPath);
+            opt.Title = string.IsNullOrEmpty(servicePrefix)
+                ? "API Documentation"
+                : $"{servicePrefix.ToUpper()} API Documentation";
 
-            // Set custom endpoint path
-            options.EndpointPathPrefix = prefix;
+            // Set OpenAPI document location (Scalar 2.x property)
+            opt.OpenApiRoutePattern = resolvedOpenApiPath;
 
             // Apply custom configuration if provided
-            configureScalar?.Invoke(options);
+            configureScalar?.Invoke(opt);
         });
 
         return app;
@@ -72,12 +74,14 @@ public static class ApiDocumentationExtensions
     /// Only maps in Development and Staging environments.
     /// </summary>
     /// <param name="app">The web application.</param>
+    /// <param name="documentName">The OpenAPI document name (default: "v1").</param>
     /// <param name="configureScalar">Optional action to configure Scalar options.</param>
     /// <returns>The configured application.</returns>
     public static WebApplication MapApiDocumentationDefault(
         this WebApplication app,
+        string documentName = "v1",
         Action<ScalarOptions>? configureScalar = null)
     {
-        return app.MapApiDocumentation(servicePrefix: null, configureScalar: configureScalar);
+        return app.MapApiDocumentation(servicePrefix: null, documentName: documentName, configureScalar: configureScalar);
     }
 }
