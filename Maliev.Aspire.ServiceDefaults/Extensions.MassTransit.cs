@@ -58,6 +58,17 @@ public static class MassTransitExtensions
             options.StopTimeout = TimeSpan.FromSeconds(30);
         });
 
+        // Add RabbitMQ health check using connection factory
+        builder.Services.AddHealthChecks()
+            .AddRabbitMQ(sp =>
+            {
+                var factory = new RabbitMQ.Client.ConnectionFactory
+                {
+                    Uri = new Uri(rabbitmqConnectionString)
+                };
+                return factory.CreateConnectionAsync().GetAwaiter().GetResult();
+            }, name: "rabbitmq", tags: new[] { "messaging", "ready" });
+
         return builder;
     }
 }

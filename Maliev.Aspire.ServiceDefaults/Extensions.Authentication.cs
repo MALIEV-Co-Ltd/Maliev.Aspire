@@ -33,6 +33,33 @@ public static class AuthenticationExtensions
 
         if (string.IsNullOrEmpty(publicKeyBase64))
         {
+            // In Testing environment, the key might be configured later by the test infrastructure
+            if (builder.Environment.IsEnvironment("Testing"))
+            {
+                builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                    .AddJwtBearer(options =>
+                    {
+                        // Minimal configuration for tests - will be overridden by PostConfigureAll in tests
+                        options.TokenValidationParameters = new TokenValidationParameters
+                        {
+                            ValidateIssuer = false,
+                            ValidateAudience = false,
+                            ValidateLifetime = false,
+                            ValidateIssuerSigningKey = false,
+                            SignatureValidator = delegate (string token, TokenValidationParameters parameters)
+                            {
+                                var jwt = new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(token);
+                                return jwt;
+                            }
+                        };
+                        
+                        configureOptions?.Invoke(options);
+                    });
+                
+                builder.Services.AddAuthorization();
+                return builder;
+            }
+
             throw new InvalidOperationException("JWT PublicKey not configured. Set Jwt:PublicKey in configuration.");
         }
 

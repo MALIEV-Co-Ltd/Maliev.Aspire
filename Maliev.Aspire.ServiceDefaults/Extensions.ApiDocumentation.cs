@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Routing;
 using Scalar.AspNetCore;
+using System.Globalization;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -9,19 +10,6 @@ namespace Microsoft.Extensions.Hosting;
 /// </summary>
 public static class ApiDocumentationExtensions
 {
-    /// <summary>
-    /// Placeholder for API documentation setup.
-    /// Services must call AddEndpointsApiExplorer() and AddOpenApi("v1") themselves
-    /// in their Program.cs for XML comments to work via source generator.
-    /// </summary>
-    /// <param name="builder">The host application builder.</param>
-    /// <returns>The configured builder.</returns>
-    public static IHostApplicationBuilder AddApiDocumentation(this IHostApplicationBuilder builder)
-    {
-        // Empty - services handle AddOpenApi registration themselves
-        return builder;
-    }
-
     /// <summary>
     /// Maps OpenAPI and Scalar endpoints with optional service prefix.
     /// Only maps in Development and Staging environments.
@@ -42,25 +30,29 @@ public static class ApiDocumentationExtensions
             return app;
         }
 
-        var prefix = string.IsNullOrEmpty(servicePrefix) ? "" : $"/{servicePrefix}";
-        var openApiPattern = $"{prefix}/openapi/{{documentName}}.json";
-        var scalarEndpoint = $"{prefix}/scalar";
+        IEndpointRouteBuilder endpoints = app;
+        var urlPrefix = "";
 
-        // Resolved path for Scalar to fetch the OpenAPI document
-        var resolvedOpenApiPath = $"{prefix}/openapi/{documentName}.json";
-
-        // Map OpenAPI endpoint with the pattern
-        app.MapOpenApi(openApiPattern);
-
-        // Map Scalar UI with explicit OpenAPI route pattern
-        app.MapScalarApiReference(scalarEndpoint, opt =>
+        if (!string.IsNullOrEmpty(servicePrefix))
         {
+            endpoints = app.MapGroup(servicePrefix);
+            urlPrefix = $"/{servicePrefix}";
+        }
+
+        // Map OpenAPI endpoint
+        endpoints.MapOpenApi("/openapi/{documentName}.json");
+
+        // Map Scalar UI
+        endpoints.MapScalarApiReference("/scalar", opt =>
+        {
+            TextInfo documentationTitle = new CultureInfo("en-US").TextInfo;
             opt.Title = string.IsNullOrEmpty(servicePrefix)
                 ? "API Documentation"
-                : $"{servicePrefix.ToUpper()} API Documentation";
+                : $"{documentationTitle.ToTitleCase(servicePrefix)} API Documentation";
 
             // Set OpenAPI document location (Scalar 2.x property)
-            opt.OpenApiRoutePattern = resolvedOpenApiPath;
+            // This must be the absolute path that the browser can use to fetch the spec
+            opt.OpenApiRoutePattern = $"{urlPrefix}/openapi/{documentName}.json";
 
             // Apply custom configuration if provided
             configureScalar?.Invoke(opt);

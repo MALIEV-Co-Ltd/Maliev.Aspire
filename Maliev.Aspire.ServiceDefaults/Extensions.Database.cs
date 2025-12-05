@@ -17,11 +17,13 @@ public static class DatabaseExtensions
     /// <typeparam name="TContext">The DbContext type to register.</typeparam>
     /// <param name="builder">The host application builder.</param>
     /// <param name="connectionStringName">The name of the connection string (defaults to TContext name).</param>
+    /// <param name="enableDynamicJson">Whether to enable dynamic JSON support for storing polymorphic types.</param>
     /// <param name="configureOptions">Optional action to configure DbContext options.</param>
     /// <returns>The configured builder.</returns>
     public static IHostApplicationBuilder AddPostgresDbContext<TContext>(
         this IHostApplicationBuilder builder,
         string? connectionStringName = null,
+        bool enableDynamicJson = false,
         Action<DbContextOptionsBuilder>? configureOptions = null)
         where TContext : DbContext
     {
@@ -35,22 +37,52 @@ public static class DatabaseExtensions
         var connectionString = builder.Configuration.GetConnectionString(connStringName)
             ?? throw new InvalidOperationException($"Database connection string '{connStringName}' not configured");
 
+        // Build data source (optionally with dynamic JSON)
+        Npgsql.NpgsqlDataSource? dataSource = null;
+        if (enableDynamicJson)
+        {
+            var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
+            dataSourceBuilder.EnableDynamicJson();
+            dataSource = dataSourceBuilder.Build();
+        }
+
         builder.Services.AddDbContext<TContext>(options =>
         {
-            options.UseNpgsql(connectionString, npgsqlOptions =>
+            if (dataSource != null)
             {
-                npgsqlOptions.EnableRetryOnFailure(
-                    maxRetryCount: 5,
-                    maxRetryDelay: TimeSpan.FromSeconds(10),
-                    errorCodesToAdd: null);
+                options.UseNpgsql(dataSource, npgsqlOptions =>
+                {
+                    npgsqlOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorCodesToAdd: null);
 
-                // Set command timeout to 30 seconds (default is often too short for migrations)
-                npgsqlOptions.CommandTimeout(30);
-            });
+                    npgsqlOptions.CommandTimeout(30);
+                });
+            }
+            else
+            {
+                options.UseNpgsql(connectionString, npgsqlOptions =>
+                {
+                    npgsqlOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorCodesToAdd: null);
+
+                    npgsqlOptions.CommandTimeout(30);
+                });
+            }
 
             // Suppress noisy EF Core logs during migration checks
             options.ConfigureWarnings(warnings =>
                 warnings.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.CommandError));
+
+            // Enable detailed logging in development for debugging
+            if (builder.Environment.IsDevelopment())
+            {
+                options.EnableSensitiveDataLogging();
+                options.EnableDetailedErrors();
+            }
 
             // Apply custom configuration if provided
             configureOptions?.Invoke(options);

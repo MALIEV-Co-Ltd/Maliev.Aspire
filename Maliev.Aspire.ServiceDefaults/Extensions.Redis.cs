@@ -54,6 +54,10 @@ public static class RedisExtensions
                 options.ConfigurationOptions = redisOptions;
                 options.InstanceName = instanceName ?? $"{builder.Environment.ApplicationName}:";
             });
+
+            // Add Redis health check
+            builder.Services.AddHealthChecks()
+                .AddRedis(redisConnectionString, name: "redis", tags: new[] { "redis", "ready" });
         }
         catch (Exception ex)
         {
