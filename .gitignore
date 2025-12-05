@@ -64,3 +64,28 @@ sharedsecrets.json
 
 # RedisInsight data
 **/redisinsight-data/
+
+# Temporary/debug files
+*.bak
+*.log
+*.sql
+build_errors.txt
+all_tests_results.txt
+dotnet_test_output.log
+
+# Docker compose test files (using Testcontainers instead)
+docker-compose.test.yml
+docker-compose.dev.yml
+
+# OpenAPI exports
+*-openapi.json
+*-openapi-*.json
+
+# Temporary tracking docs
+*MIGRATION*.md
+*SUMMARY*.md
+*AUDIT*.md
+*.Improvements.md
+TESTING_STRATEGY.md
+constitution-compliance.md
+implementation-status.md
