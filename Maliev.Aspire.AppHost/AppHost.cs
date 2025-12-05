@@ -1,9 +1,5 @@
-using Aspire.Hosting;
-using Aspire.Hosting.Postgres;
-using Aspire.Hosting.RabbitMQ;
-using Aspire.Hosting.Redis;
-using Microsoft.Extensions.Configuration;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
+using Microsoft.Extensions.Configuration;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -72,7 +68,7 @@ static partial class Program
 
         var redis = builder.AddRedis("redis")
                             .WithImageTag("8.4")
-                            .WithRedisInsight(insight => 
+                            .WithRedisInsight(insight =>
                             {
                                 insight.WithBindMount("redisinsight-data", "/data");
                             });
@@ -80,7 +76,7 @@ static partial class Program
         // --- PostgreSQL Database Server ---
         var postgres = builder.AddPostgres("postgres-server")
                               .WithImageTag("18.1")
-                              .WithPgAdmin();
+                              .WithPgAdmin(option => option.WithImageTag("9.10"));
 
         return new Infrastructure(rabbitmq, redis, postgres);
     }
@@ -103,6 +99,7 @@ static partial class Program
             Order: postgres.AddDatabase("order-app-db"),
             Payment: postgres.AddDatabase("payment-app-db"),
             PurchaseOrder: postgres.AddDatabase("purchaseorder-app-db"),
+            Quotation: postgres.AddDatabase("quotation-app-db"),
             Supplier: postgres.AddDatabase("supplier-app-db")
         );
     }
@@ -248,12 +245,21 @@ static partial class Program
             config);
 
         // var quotationRequestService = WithSharedSecrets(builder.AddProject<Projects.Maliev_QuotationRequestService_Api>("maliev-quotationrequestservice-api").WithReference(postgres).WithReference(rabbitmq).WithReference(redis), config);
-        // var quotationService = WithSharedSecrets(builder.AddProject<Projects.Maliev_QuotationService_Api>("maliev-quotationservice-api").WithReference(postgres).WithReference(rabbitmq).WithReference(redis), config);
+
+        var quotationService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_QuotationService_Api>("maliev-quotationservice-api")
+                .WithReference(databases.Quotation, "QuotationDbContext")
+                .WaitFor(databases.Quotation)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis),
+            config);
+
         // var receiptService = WithSharedSecrets(builder.AddProject<Projects.Maliev_ReceiptService_Api>("maliev-receiptservice-api").WithReference(postgres).WithReference(rabbitmq).WithReference(redis), config);
 
         var supplierService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_SupplierService_Api>("maliev-supplierservice-api")
-                .WithReference(databases.Supplier, "ServiceDbContext")
+                .WithReference(databases.Supplier, "SupplierDbContext")
                 .WaitFor(databases.Supplier)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
@@ -315,4 +321,5 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Order,
     IResourceBuilder<PostgresDatabaseResource> Payment,
     IResourceBuilder<PostgresDatabaseResource> PurchaseOrder,
+    IResourceBuilder<PostgresDatabaseResource> Quotation,
     IResourceBuilder<PostgresDatabaseResource> Supplier);
