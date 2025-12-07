@@ -65,38 +65,6 @@ public static class Extensions
             // Add a default liveness check to ensure app is responsive
             .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
 
-        // Add health checks for external dependencies (only if connection strings are configured)
-        var postgresConnectionString = builder.Configuration.GetConnectionString("postgres");
-        if (!string.IsNullOrEmpty(postgresConnectionString))
-        {
-            healthChecksBuilder.AddNpgSql(postgresConnectionString);
-        }
-
-        var redisConnectionString = builder.Configuration.GetConnectionString("redis");
-        if (!string.IsNullOrEmpty(redisConnectionString))
-        {
-            healthChecksBuilder.AddRedis(redisConnectionString);
-        }
-
-        // RabbitMQ health check removed - it blocks during startup and causes timeouts
-        // MassTransit already manages RabbitMQ connections and will retry automatically
-        // If needed, health checks can be added at the application level instead
-        // var rabbitMqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
-        // if (!string.IsNullOrEmpty(rabbitMqConnectionString))
-        // {
-        //     healthChecksBuilder.AddRabbitMQ(async sp =>
-        //     {
-        //         var factory = new RabbitMQ.Client.ConnectionFactory
-        //         {
-        //             Uri = new Uri(rabbitMqConnectionString)
-        //         };
-        //         return await factory.CreateConnectionAsync();
-        //     },
-        //     name: "rabbitmq",
-        //     tags: new[] { "ready" });
-        // }
-
-
         // --- Service Discovery and Resilience ---
         builder.Services.AddServiceDiscovery();
         builder.Services.ConfigureHttpClientDefaults(http =>
@@ -146,12 +114,6 @@ public static class Extensions
         {
             throw new ArgumentException("Service prefix is required for MapDefaultEndpoints", nameof(servicePrefix));
         }
-
-        // All health checks must pass for app to be considered ready to accept traffic after starting
-        app.MapHealthChecks("/health");
-
-        // Only health checks tagged with the "live" tag must pass for app to be considered alive
-        app.MapHealthChecks("/alive", new HealthCheckOptions { Predicate = r => r.Tags.Contains("live") });
 
         // Liveness endpoint - simple check that always returns healthy (for ingress)
         app.MapGet($"/{servicePrefix}/liveness", () => "Healthy").AllowAnonymous();

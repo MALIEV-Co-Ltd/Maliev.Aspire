@@ -1,7 +1,6 @@
 using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -58,16 +57,18 @@ public static class MassTransitExtensions
             options.StopTimeout = TimeSpan.FromSeconds(30);
         });
 
-        // Add RabbitMQ health check using connection factory
+        // RabbitMQ health check
         builder.Services.AddHealthChecks()
-            .AddRabbitMQ(sp =>
+            .AddRabbitMQ(async sp =>
             {
                 var factory = new RabbitMQ.Client.ConnectionFactory
                 {
                     Uri = new Uri(rabbitmqConnectionString)
                 };
-                return factory.CreateConnectionAsync().GetAwaiter().GetResult();
-            }, name: "rabbitmq", tags: new[] { "messaging", "ready" });
+                return await factory.CreateConnectionAsync();
+            },
+            name: "rabbitmq",
+            tags: new[] { "ready" });
 
         return builder;
     }
