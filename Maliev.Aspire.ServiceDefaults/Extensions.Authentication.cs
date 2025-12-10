@@ -52,10 +52,10 @@ public static class AuthenticationExtensions
                                 return jwt;
                             }
                         };
-                        
+
                         configureOptions?.Invoke(options);
                     });
-                
+
                 builder.Services.AddAuthorization();
                 return builder;
             }
