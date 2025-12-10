@@ -27,11 +27,7 @@ public static class DatabaseExtensions
         Action<DbContextOptionsBuilder>? configureOptions = null)
         where TContext : DbContext
     {
-        // Skip database configuration in Testing environment
-        if (builder.Environment.IsEnvironment("Testing"))
-        {
-            return builder;
-        }
+
 
         var connStringName = connectionStringName ?? typeof(TContext).Name;
         var connectionString = builder.Configuration.GetConnectionString(connStringName)
