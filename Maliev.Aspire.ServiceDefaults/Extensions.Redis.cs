@@ -106,7 +106,7 @@ public static class RedisExtensions
         configureOptions?.Invoke(redisOptions);
 
         // Register IConnectionMultiplexer as a singleton
-        builder.Services.AddSingleton<IConnectionMultiplexer>(sp => 
+        builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
             ConnectionMultiplexer.Connect(redisOptions));
 
         return builder;

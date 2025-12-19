@@ -27,8 +27,6 @@ public static class MassTransitExtensions
         var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbitmq")
             ?? builder.Configuration.GetConnectionString("RabbitMQ");
 
-        try { File.WriteAllText("test_mt_config.txt", $"[{DateTime.UtcNow}] Configured RabbitMQ: {rabbitmqConnectionString}\nIsTesting: {builder.Environment.IsEnvironment("Testing")}\n"); } catch {}
-
         if (string.IsNullOrEmpty(rabbitmqConnectionString))
         {
             if (builder.Environment.IsEnvironment("Testing"))
