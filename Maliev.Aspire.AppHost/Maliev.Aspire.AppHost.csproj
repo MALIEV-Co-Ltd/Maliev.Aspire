@@ -35,11 +35,12 @@
     <!-- <ProjectReference Include="..\..\Maliev.PdfService\Maliev.PdfService.Api\Maliev.PdfService.Api.csproj" /> -->
     <!-- <ProjectReference Include="..\..\Maliev.PredictionService\Maliev.PredictionService.Api\Maliev.PredictionService.Api.csproj" /> -->
     <ProjectReference Include="..\..\Maliev.PurchaseOrderService\Maliev.PurchaseOrderService.Api\Maliev.PurchaseOrderService.Api.csproj" />
-    <!-- <ProjectReference Include="..\..\Maliev.QuotationRequestService\Maliev.QuotationRequestService.Api\Maliev.QuotationRequestService.Api.csproj" /> -->
     <ProjectReference Include="..\..\Maliev.QuotationService\Maliev.QuotationService.Api\Maliev.QuotationService.Api.csproj" />
-    <!-- <ProjectReference Include="..\..\Maliev.ReceiptService\Maliev.ReceiptService.Api\Maliev.ReceiptService.Api.csproj" /> -->
     <ProjectReference Include="..\..\Maliev.SupplierService\Maliev.SupplierService.Api\Maliev.SupplierService.Api.csproj" />
-    <!-- <ProjectReference Include="..\..\Maliev.UploadService\Maliev.UploadService.Api\Maliev.UploadService.Api.csproj" /> -->
+    <ProjectReference Include="..\..\Maliev.AccountingService\Maliev.AccountingService.Api\Maliev.AccountingService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.ReceiptService\Maliev.ReceiptService.Api\Maliev.ReceiptService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.UploadService\Maliev.UploadService.Api\Maliev.UploadService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.NotificationService\Maliev.NotificationService.Api\Maliev.NotificationService.Api.csproj" />
   </ItemGroup>
 
 </Project>

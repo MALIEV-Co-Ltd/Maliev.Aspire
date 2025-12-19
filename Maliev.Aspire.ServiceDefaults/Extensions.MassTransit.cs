@@ -1,6 +1,7 @@
 using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.IO;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -11,26 +12,36 @@ public static class MassTransitExtensions
 {
     /// <summary>
     /// Adds MassTransit with RabbitMQ configuration.
-    /// Automatically configures from "rabbitmq" connection string if present.
-    /// Skips configuration in Testing environment.
+    /// Requires "rabbitmq" or "RabbitMQ" connection string to be configured.
     /// </summary>
     /// <param name="builder">The host application builder.</param>
     /// <param name="configure">Optional action to configure MassTransit consumers and settings.</param>
+    /// <param name="configureRabbitMq">Optional action to configure RabbitMQ bus settings (e.g., custom queues, routing).</param>
     /// <returns>The configured builder.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when RabbitMQ connection string is not configured.</exception>
     public static IHostApplicationBuilder AddMassTransitWithRabbitMq(
         this IHostApplicationBuilder builder,
-        Action<IBusRegistrationConfigurator>? configure = null)
+        Action<IBusRegistrationConfigurator>? configure = null,
+        Action<IBusRegistrationContext, IRabbitMqBusFactoryConfigurator>? configureRabbitMq = null)
     {
-        // Skip MassTransit in Testing environment
-        if (builder.Environment.IsEnvironment("Testing"))
-        {
-            return builder;
-        }
+        var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbitmq")
+            ?? builder.Configuration.GetConnectionString("RabbitMQ");
 
-        var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbitmq");
+        try { File.WriteAllText("test_mt_config.txt", $"[{DateTime.UtcNow}] Configured RabbitMQ: {rabbitmqConnectionString}\nIsTesting: {builder.Environment.IsEnvironment("Testing")}\n"); } catch {}
+
         if (string.IsNullOrEmpty(rabbitmqConnectionString))
         {
-            return builder;
+            if (builder.Environment.IsEnvironment("Testing"))
+            {
+                // In Testing environment, the connection string might be configured later by the test infrastructure
+                rabbitmqConnectionString = "host=localhost";
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    "RabbitMQ connection string 'rabbitmq' not configured. " +
+                    "RabbitMQ is required in all environments.");
+            }
         }
 
         builder.Services.AddMassTransit(x =>
@@ -45,7 +56,16 @@ public static class MassTransitExtensions
                     h.Heartbeat(TimeSpan.FromSeconds(60));
                 });
 
-                cfg.ConfigureEndpoints(context);
+                // Allow custom RabbitMQ configuration (queues, exchanges, routing)
+                if (configureRabbitMq != null)
+                {
+                    configureRabbitMq(context, cfg);
+                }
+                else
+                {
+                    // Default: auto-configure endpoints
+                    cfg.ConfigureEndpoints(context);
+                }
             });
         });
 

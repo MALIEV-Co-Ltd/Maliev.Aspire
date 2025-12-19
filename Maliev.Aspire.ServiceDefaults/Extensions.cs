@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -127,7 +128,28 @@ public static class Extensions
         // Readiness endpoint - checks all dependencies (for ingress)
         app.MapHealthChecks($"/{servicePrefix}/readiness", new HealthCheckOptions
         {
-            Predicate = _ => true // All health checks must pass
+            Predicate = _ => true, // All health checks must pass
+            ResponseWriter = async (context, report) =>
+            {
+                // Return detailed JSON health check response for monitoring and debugging
+                context.Response.ContentType = "application/json";
+                var result = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    status = report.Status.ToString(),
+                    checks = report.Entries.ToDictionary(
+                        e => e.Key,
+                        e => new
+                        {
+                            status = e.Value.Status.ToString(),
+                            description = e.Value.Description ?? string.Empty,
+                            duration = e.Value.Duration.TotalMilliseconds,
+                            exception = e.Value.Exception?.Message ?? string.Empty,
+                            data = e.Value.Data
+                        }),
+                    totalDuration = report.TotalDuration.TotalMilliseconds
+                });
+                await context.Response.WriteAsync(result);
+            }
         });
 
         // OpenTelemetry Prometheus metrics endpoint at /{servicePrefix}/metrics

@@ -87,6 +87,7 @@ static partial class Program
     public static ServiceDatabases ConfigureDatabases(IResourceBuilder<PostgresServerResource> postgres)
     {
         return new ServiceDatabases(
+            Accounting: postgres.AddDatabase("accounting-app-db"),
             Auth: postgres.AddDatabase("auth-app-db"),
             Career: postgres.AddDatabase("career-app-db"),
             Contact: postgres.AddDatabase("contact-app-db"),
@@ -96,11 +97,14 @@ static partial class Program
             Employee: postgres.AddDatabase("employee-app-db"),
             Invoice: postgres.AddDatabase("invoice-app-db"),
             Material: postgres.AddDatabase("material-app-db"),
+            Notification: postgres.AddDatabase("notification-app-db"),
             Order: postgres.AddDatabase("order-app-db"),
             Payment: postgres.AddDatabase("payment-app-db"),
             PurchaseOrder: postgres.AddDatabase("purchaseorder-app-db"),
             Quotation: postgres.AddDatabase("quotation-app-db"),
-            Supplier: postgres.AddDatabase("supplier-app-db")
+            Receipt: postgres.AddDatabase("receipt-app-db"),
+            Supplier: postgres.AddDatabase("supplier-app-db"),
+            Upload: postgres.AddDatabase("upload-app-db")
         );
     }
 
@@ -165,6 +169,15 @@ static partial class Program
             config);
 
         // --- Business Services ---
+        var accountingService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_AccountingService_Api>("maliev-accountingservice-api")
+                .WithReference(databases.Accounting, "AccountingDbContext")
+                .WaitFor(databases.Accounting)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis),
+            config);
+
         var careerService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CareerService_Api>("maliev-careerservice-api")
                 .WithReference(databases.Career, "CareerDbContext")
@@ -214,6 +227,15 @@ static partial class Program
                 .WithReference(infrastructure.Redis),
             config);
 
+        var notificationService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_NotificationService_Api>("maliev-notificationservice-api")
+                .WithReference(databases.Notification, "NotificationDbContext")
+                .WaitFor(databases.Notification)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis),
+            config);
+
         var orderService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_OrderService_Api>("maliev-orderservice-api")
                 .WithReference(databases.Order, "OrderDbContext")
@@ -255,7 +277,14 @@ static partial class Program
                 .WithReference(infrastructure.Redis),
             config);
 
-        // var receiptService = WithSharedSecrets(builder.AddProject<Projects.Maliev_ReceiptService_Api>("maliev-receiptservice-api").WithReference(postgres).WithReference(rabbitmq).WithReference(redis), config);
+        var receiptService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_ReceiptService_Api>("maliev-receiptservice-api")
+                .WithReference(databases.Receipt, "ReceiptDbContext")
+                .WaitFor(databases.Receipt)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis),
+            config);
 
         var supplierService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_SupplierService_Api>("maliev-supplierservice-api")
@@ -269,7 +298,14 @@ static partial class Program
                 .WithReference(materialService),
             config);
 
-        // var uploadService = WithSharedSecrets(builder.AddProject<Projects.Maliev_UploadService_Api>("maliev-uploadservice-api").WithReference(postgres).WithReference(rabbitmq).WithReference(redis), config);
+        var uploadService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_UploadService_Api>("maliev-uploadservice-api")
+                .WithReference(databases.Upload, "UploadDbContext")
+                .WaitFor(databases.Upload)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis),
+            config);
     }
 
     /// <summary>
@@ -309,6 +345,7 @@ record Infrastructure(
 /// Database references for all microservices.
 /// </summary>
 record ServiceDatabases(
+    IResourceBuilder<PostgresDatabaseResource> Accounting,
     IResourceBuilder<PostgresDatabaseResource> Auth,
     IResourceBuilder<PostgresDatabaseResource> Career,
     IResourceBuilder<PostgresDatabaseResource> Contact,
@@ -318,8 +355,11 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Employee,
     IResourceBuilder<PostgresDatabaseResource> Invoice,
     IResourceBuilder<PostgresDatabaseResource> Material,
+    IResourceBuilder<PostgresDatabaseResource> Notification,
     IResourceBuilder<PostgresDatabaseResource> Order,
     IResourceBuilder<PostgresDatabaseResource> Payment,
     IResourceBuilder<PostgresDatabaseResource> PurchaseOrder,
     IResourceBuilder<PostgresDatabaseResource> Quotation,
-    IResourceBuilder<PostgresDatabaseResource> Supplier);
+    IResourceBuilder<PostgresDatabaseResource> Receipt,
+    IResourceBuilder<PostgresDatabaseResource> Supplier,
+    IResourceBuilder<PostgresDatabaseResource> Upload);
