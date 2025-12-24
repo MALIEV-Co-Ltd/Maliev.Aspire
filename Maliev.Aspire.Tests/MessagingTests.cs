@@ -43,7 +43,7 @@ public class MessagingTests : IAsyncLifetime
         var orderId = Guid.NewGuid();
         var paymentId = Guid.NewGuid();
 
-        _output.WriteLine($"=== RabbitMQ Integration Test Starting ===");
+        _output.WriteLine("=== RabbitMQ Integration Test Starting ===");
         _output.WriteLine($"Order ID: {orderId}");
         _output.WriteLine($"Payment ID: {paymentId}");
 

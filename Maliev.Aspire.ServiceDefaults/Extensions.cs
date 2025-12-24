@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Logs;
+using Maliev.Aspire.ServiceDefaults.IAM;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -102,6 +103,33 @@ public static class Extensions
                 metrics.AddMeter(meterName);
             }
         });
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the IAM service client for permission checking and resolution.
+    /// This enables services to perform live permission checks and resolve permissions from the central IAM service.
+    /// Call this AFTER AddServiceDefaults() if your service needs to make live IAM permission checks (resource-scoped authorization).
+    /// </summary>
+    /// <param name="builder">The <see cref="IHostApplicationBuilder"/> to configure.</param>
+    /// <param name="iamServiceUrl">Optional IAM service URL. If not provided, uses service discovery with "IAMService" name.</param>
+    /// <returns>The configured <see cref="IHostApplicationBuilder"/>.</returns>
+    public static IHostApplicationBuilder AddIamServiceClient(this IHostApplicationBuilder builder, string? iamServiceUrl = null)
+    {
+        // Configure the named HttpClient for IAM service
+        builder.Services.AddHttpClient("IAMService", client =>
+        {
+            if (!string.IsNullOrEmpty(iamServiceUrl))
+            {
+                client.BaseAddress = new Uri(iamServiceUrl);
+            }
+            // If no URL provided, service discovery will handle it via "IAMService" name
+        })
+        .AddStandardResilienceHandler(); // Add resilience (retry, circuit breaker, etc.)
+
+        // Register the IAM service client
+        builder.Services.AddSingleton<IIamServiceClient, IamServiceClient>();
 
         return builder;
     }

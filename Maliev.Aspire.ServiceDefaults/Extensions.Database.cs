@@ -11,24 +11,13 @@ namespace Microsoft.Extensions.Hosting;
 /// </summary>
 public static class DatabaseExtensions
 {
-    /// <summary>
-    /// Adds a PostgreSQL DbContext with resilience and optimized configuration.
-    /// </summary>
-    /// <typeparam name="TContext">The DbContext type to register.</typeparam>
-    /// <param name="builder">The host application builder.</param>
-    /// <param name="connectionStringName">The name of the connection string (defaults to TContext name).</param>
-    /// <param name="enableDynamicJson">Whether to enable dynamic JSON support for storing polymorphic types.</param>
-    /// <param name="configureOptions">Optional action to configure DbContext options.</param>
-    /// <returns>The configured builder.</returns>
     public static IHostApplicationBuilder AddPostgresDbContext<TContext>(
         this IHostApplicationBuilder builder,
         string? connectionStringName = null,
         bool enableDynamicJson = false,
-        Action<DbContextOptionsBuilder>? configureOptions = null)
+        Action<IServiceProvider, DbContextOptionsBuilder>? configureOptions = null)
         where TContext : DbContext
     {
-
-
         var connStringName = connectionStringName ?? typeof(TContext).Name;
         var connectionString = builder.Configuration.GetConnectionString(connStringName)
             ?? throw new InvalidOperationException($"Database connection string '{connStringName}' not configured");
@@ -42,7 +31,7 @@ public static class DatabaseExtensions
             dataSource = dataSourceBuilder.Build();
         }
 
-        builder.Services.AddDbContext<TContext>(options =>
+        builder.Services.AddDbContext<TContext>((sp, options) =>
         {
             if (dataSource != null)
             {
@@ -81,7 +70,7 @@ public static class DatabaseExtensions
             }
 
             // Apply custom configuration if provided
-            configureOptions?.Invoke(options);
+            configureOptions?.Invoke(sp, options);
         });
 
         // Add DbContext to health checks
@@ -89,6 +78,28 @@ public static class DatabaseExtensions
             .AddDbContextCheck<TContext>(tags: new[] { "db", "ready" });
 
         return builder;
+    }
+
+    /// <summary>
+    /// Adds a PostgreSQL DbContext with resilience and optimized configuration.
+    /// </summary>
+    /// <typeparam name="TContext">The DbContext type to register.</typeparam>
+    /// <param name="builder">The host application builder.</param>
+    /// <param name="connectionStringName">The name of the connection string (defaults to TContext name).</param>
+    /// <param name="enableDynamicJson">Whether to enable dynamic JSON support for storing polymorphic types.</param>
+    /// <param name="configureOptions">Optional action to configure DbContext options.</param>
+    /// <returns>The configured builder.</returns>
+    public static IHostApplicationBuilder AddPostgresDbContext<TContext>(
+        this IHostApplicationBuilder builder,
+        Action<DbContextOptionsBuilder> configureOptions,
+        string? connectionStringName = null,
+        bool enableDynamicJson = false)
+        where TContext : DbContext
+    {
+        return builder.AddPostgresDbContext<TContext>(
+            connectionStringName, 
+            enableDynamicJson, 
+            (sp, options) => configureOptions(options));
     }
 
     /// <summary>
