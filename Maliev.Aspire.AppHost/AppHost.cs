@@ -8,7 +8,7 @@ var infrastructure = Program.ConfigureInfrastructure(builder);
 var databases = Program.ConfigureDatabases(infrastructure.Postgres);
 
 // --- Monitoring (simple relative paths exactly like the sample) ---
-var prometheus = builder.AddContainer("prometheus", "prom/prometheus", "v3.2.1")
+var prometheus = builder.AddContainer("prometheus", "prom/prometheus", "v3.0.1")
     .WithBindMount("../prometheus", "/etc/prometheus", isReadOnly: true)
     .WithArgs("--web.enable-otlp-receiver", "--config.file=/etc/prometheus/prometheus.yml")
     .WithHttpEndpoint(targetPort: 9090)
@@ -41,11 +41,15 @@ static partial class Program
         // Load shared secrets from sharedsecrets.json and user secrets
         builder.Configuration.AddJsonFile("sharedsecrets.json", optional: true);
 
-        // These will be injected into all services via environment variables
-        var jwtPublicKey = builder.Configuration["Jwt:PublicKey"] ?? "";
-        var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "";
-        var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "";
-        var corsAllowedOrigins = builder.Configuration["CORS:AllowedOrigins"] ?? "";
+        // Define these as formal Aspire Parameters to show up in the Dashboard
+        var jwtPublicKey = builder.AddParameterFromConfig("JwtPublicKey", "Jwt:PublicKey", secret: true);
+        var jwtIssuer = builder.AddParameterFromConfig("JwtIssuer", "Jwt:Issuer");
+        var jwtAudience = builder.AddParameterFromConfig("JwtAudience", "Jwt:Audience");
+
+        var corsAllowedOrigins = builder.AddParameter("CorsAllowedOrigins");
+        // Convert the JSON array to a comma-separated string for easier environment injection
+        var origins = builder.Configuration.GetSection("CORS:AllowedOrigins").Get<string[]>();
+        builder.Configuration["Parameters:CorsAllowedOrigins"] = origins != null ? string.Join(",", origins) : string.Empty;
 
         return new SharedConfiguration(jwtPublicKey, jwtIssuer, jwtAudience, corsAllowedOrigins);
     }
@@ -56,18 +60,14 @@ static partial class Program
     public static Infrastructure ConfigureInfrastructure(IDistributedApplicationBuilder builder)
     {
         // --- Messaging and Caching ---
-        var erlangCookie = builder.Configuration["RabbitMQ:ErlangCookie"];
-        if (string.IsNullOrEmpty(erlangCookie))
-        {
-            throw new InvalidOperationException(
-                "RabbitMQ ErlangCookie is not configured. Please add 'RabbitMQ:ErlangCookie' to sharedsecrets.json or another configuration source.");
-        }
+        var erlangCookie = builder.AddParameterFromConfig("ErlangCookie", "RabbitMQ:ErlangCookie", secret: true);
 
         var rabbitmq = builder.AddRabbitMQ("rabbitmq")
-                              .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie);
+                                .WithImageTag("4.2-alpine")
+                                .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie);
 
         var redis = builder.AddRedis("redis")
-                            .WithImageTag("8.4")
+                            .WithImageTag("8.4-alpine")
                             .WithRedisInsight(insight =>
                             {
                                 insight.WithBindMount("redisinsight-data", "/data");
@@ -75,10 +75,21 @@ static partial class Program
 
         // --- PostgreSQL Database Server ---
         var postgres = builder.AddPostgres("postgres-server")
-                              .WithImageTag("18.1")
-                              .WithPgAdmin(option => option.WithImageTag("9.10"));
+                              .WithImageTag("18.1-alpine")
+                              .WithPgAdmin(option => option.WithImageTag("8.14"));
 
         return new Infrastructure(rabbitmq, redis, postgres);
+    }
+
+    private static IResourceBuilder<ParameterResource> AddParameterFromConfig(
+        this IDistributedApplicationBuilder builder, 
+        string parameterName, 
+        string configKey, 
+        bool secret = false)
+    {
+        var parameter = builder.AddParameter(parameterName, secret: secret);
+        builder.Configuration[$"Parameters:{parameterName}"] = builder.Configuration[configKey];
+        return parameter;
     }
 
     /// <summary>
@@ -95,11 +106,13 @@ static partial class Program
             Currency: postgres.AddDatabase("currency-app-db"),
             Customer: postgres.AddDatabase("customer-app-db"),
             Employee: postgres.AddDatabase("employee-app-db"),
+            IAM: postgres.AddDatabase("iam-app-db"),
             Invoice: postgres.AddDatabase("invoice-app-db"),
             Material: postgres.AddDatabase("material-app-db"),
             Notification: postgres.AddDatabase("notification-app-db"),
             Order: postgres.AddDatabase("order-app-db"),
             Payment: postgres.AddDatabase("payment-app-db"),
+            Pdf: postgres.AddDatabase("pdf-app-db"),
             PurchaseOrder: postgres.AddDatabase("purchaseorder-app-db"),
             Quotation: postgres.AddDatabase("quotation-app-db"),
             Receipt: postgres.AddDatabase("receipt-app-db"),
@@ -120,6 +133,16 @@ static partial class Program
         IResourceBuilder<ContainerResource> grafana)
     {
         // --- Core Services (dependencies for Auth) ---
+        var iamService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_IAMService_Api>("maliev-iamservice-api")
+                .WithReference(databases.IAM, "IAMDatabase")
+                .WaitFor(databases.IAM)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithHttpHealthCheck("/iam/readiness"),
+            config);
+
         // Note: CountryService must be declared before CustomerService to be referenced
         var countryService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CountryService_Api>("maliev-countryservice-api")
@@ -127,7 +150,9 @@ static partial class Program
                 .WaitFor(databases.Country)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/country/readiness"),
             config);
 
         var customerService = WithSharedSecrets(
@@ -138,8 +163,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(countryService)  // Enable service discovery
-                .WithEnvironment("ExternalServices__CountryService__BaseUrl", countryService.GetEndpoint("http"))  // Map to standard config path
-                .WithEnvironment("ExternalServices__CountryService__TimeoutInSeconds", "10")
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/customer/readiness")
                 .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http")),  // Reference grafana to trigger monitoring stack
             config);
 
@@ -149,14 +174,11 @@ static partial class Program
                 .WaitFor(databases.Employee)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/employee/readiness"),
             config);
 
-        // --- Auth Service ---
-        // Note: .WithReference(customerService) enables service discovery.
-        // The AuthService can now find the CustomerService using the endpoint injected by Aspire.
-        // The configuration key for the URL will be "services:maliev-customerservice-api:http:0"
-        // Your service code will need to read this key from IConfiguration.
         var authService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_AuthService_Api>("maliev-authservice-api")
                 .WithReference(databases.Auth, "AuthDbContext")
@@ -164,8 +186,10 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
-                .WithReference(customerService)  // Enables AuthService to call CustomerService
-                .WithReference(employeeService), // Enables AuthService to call EmployeeService
+                .WithReference(customerService)
+                .WithReference(employeeService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/auth/readiness"),
             config);
 
         // --- Business Services ---
@@ -175,7 +199,31 @@ static partial class Program
                 .WaitFor(databases.Accounting)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/accounting/readiness"),
+            config);
+
+        var notificationService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_NotificationService_Api>("maliev-notificationservice-api")
+                .WithReference(databases.Notification, "NotificationDbContext")
+                .WaitFor(databases.Notification)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/notification/readiness"),
+            config);
+
+        var uploadService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_UploadService_Api>("maliev-uploadservice-api")
+                .WithReference(databases.Upload, "UploadDbContext")
+                .WaitFor(databases.Upload)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/upload/readiness"),
             config);
 
         var careerService = WithSharedSecrets(
@@ -184,7 +232,13 @@ static partial class Program
                 .WaitFor(databases.Career)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(employeeService)
+                .WithReference(uploadService)
+                .WithReference(countryService)
+                .WithReference(notificationService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/career/readiness"),
             config);
 
         var contactService = WithSharedSecrets(
@@ -194,11 +248,11 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
-                .WithReference(countryService)  // Enable service discovery
-                .WithEnvironment("ExternalServices__CountryService__BaseUrl", countryService.GetEndpoint("http"))  // Map to standard config path
-                .WithEnvironment("ExternalServices__CountryService__TimeoutInSeconds", "10"),
+                .WithReference(uploadService)
+                .WithReference(countryService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/contact/readiness"),
             config);
-
 
         var currencyService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CurrencyService_Api>("maliev-currencyservice-api")
@@ -206,7 +260,20 @@ static partial class Program
                 .WaitFor(databases.Currency)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/currency/readiness"),
+            config);
+
+        var quotationService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_QuotationService_Api>("maliev-quotationservice-api")
+                .WithReference(databases.Quotation, "QuotationDbContext")
+                .WaitFor(databases.Quotation)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/quotation/readiness"),
             config);
 
         var invoiceService = WithSharedSecrets(
@@ -215,7 +282,11 @@ static partial class Program
                 .WaitFor(databases.Invoice)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(currencyService)
+                .WithReference(quotationService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/invoice/readiness"),
             config);
 
         var materialService = WithSharedSecrets(
@@ -224,16 +295,9 @@ static partial class Program
                 .WaitFor(databases.Material)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
-            config);
-
-        var notificationService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_NotificationService_Api>("maliev-notificationservice-api")
-                .WithReference(databases.Notification, "NotificationDbContext")
-                .WaitFor(databases.Notification)
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/material/readiness"),
             config);
 
         var orderService = WithSharedSecrets(
@@ -242,7 +306,15 @@ static partial class Program
                 .WaitFor(databases.Order)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(customerService)
+                .WithReference(materialService)
+                .WithReference(uploadService)
+                .WithReference(authService)
+                .WithReference(employeeService)
+                .WithReference(notificationService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/order/readiness"),
             config);
 
         var paymentService = WithSharedSecrets(
@@ -251,11 +323,22 @@ static partial class Program
                 .WaitFor(databases.Payment)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/payment/readiness"),
             config);
 
-        // var pdfService = WithSharedSecrets(builder.AddProject<Projects.Maliev_PdfService_Api>("maliev-pdfservice-api").WithReference(postgres).WithReference(rabbitmq).WithReference(redis), config);
-        // var predictionService = WithSharedSecrets(builder.AddProject<Projects.Maliev_PredictionService_Api>("maliev-predictionservice-api").WithReference(postgres).WithReference(rabbitmq).WithReference(redis), config);
+        var pdfService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_PdfService_Api>("maliev-pdfservice-api")
+                .WithReference(databases.Pdf, "PdfDbContext")
+                .WaitFor(databases.Pdf)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(uploadService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/pdf/readiness"),
+            config);
 
         var purchaseOrderService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PurchaseOrderService_Api>("maliev-purchaseorderservice-api")
@@ -263,18 +346,9 @@ static partial class Program
                 .WaitFor(databases.PurchaseOrder)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
-            config);
-
-        // var quotationRequestService = WithSharedSecrets(builder.AddProject<Projects.Maliev_QuotationRequestService_Api>("maliev-quotationrequestservice-api").WithReference(postgres).WithReference(rabbitmq).WithReference(redis), config);
-
-        var quotationService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_QuotationService_Api>("maliev-quotationservice-api")
-                .WithReference(databases.Quotation, "QuotationDbContext")
-                .WaitFor(databases.Quotation)
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/purchase-order/readiness"),
             config);
 
         var receiptService = WithSharedSecrets(
@@ -283,7 +357,10 @@ static partial class Program
                 .WaitFor(databases.Receipt)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(infrastructure.Redis)
+                .WithReference(invoiceService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/receipt/readiness"),
             config);
 
         var supplierService = WithSharedSecrets(
@@ -295,16 +372,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(purchaseOrderService)
                 .WithReference(invoiceService)
-                .WithReference(materialService),
-            config);
-
-        var uploadService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_UploadService_Api>("maliev-uploadservice-api")
-                .WithReference(databases.Upload, "UploadDbContext")
-                .WaitFor(databases.Upload)
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis),
+                .WithReference(materialService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/supplier/readiness"),
             config);
     }
 
@@ -328,10 +398,10 @@ static partial class Program
 /// Shared configuration values loaded from configuration sources.
 /// </summary>
 record SharedConfiguration(
-    string JwtPublicKey,
-    string JwtIssuer,
-    string JwtAudience,
-    string CorsAllowedOrigins);
+    IResourceBuilder<ParameterResource> JwtPublicKey,
+    IResourceBuilder<ParameterResource> JwtIssuer,
+    IResourceBuilder<ParameterResource> JwtAudience,
+    IResourceBuilder<ParameterResource> CorsAllowedOrigins);
 
 /// <summary>
 /// Infrastructure resource references (messaging, caching, database server).
@@ -353,11 +423,13 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Currency,
     IResourceBuilder<PostgresDatabaseResource> Customer,
     IResourceBuilder<PostgresDatabaseResource> Employee,
+    IResourceBuilder<PostgresDatabaseResource> IAM,
     IResourceBuilder<PostgresDatabaseResource> Invoice,
     IResourceBuilder<PostgresDatabaseResource> Material,
     IResourceBuilder<PostgresDatabaseResource> Notification,
     IResourceBuilder<PostgresDatabaseResource> Order,
     IResourceBuilder<PostgresDatabaseResource> Payment,
+    IResourceBuilder<PostgresDatabaseResource> Pdf,
     IResourceBuilder<PostgresDatabaseResource> PurchaseOrder,
     IResourceBuilder<PostgresDatabaseResource> Quotation,
     IResourceBuilder<PostgresDatabaseResource> Receipt,

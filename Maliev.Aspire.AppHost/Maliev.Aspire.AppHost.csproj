@@ -1,4 +1,4 @@
-<Project Sdk="Aspire.AppHost.Sdk/13.0.2">
+<Project Sdk="Aspire.AppHost.Sdk/13.1.0">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -15,25 +15,24 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
-    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.0.2" />
-    <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.0.2" />
-    <PackageReference Include="Aspire.Hosting.Redis" Version="13.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.1" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.1.0" />
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.1.0" />
+    <PackageReference Include="Aspire.Hosting.Redis" Version="13.1.0" />
 
     <ProjectReference Include="..\..\Maliev.AuthService\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CareerService\Maliev.CareerService.Api\Maliev.CareerService.Api.csproj" />
-    <!-- <ProjectReference Include="..\..\Maliev.ChatbotService\Maliev.ChatbotService.Api\Maliev.ChatbotService.Api.csproj" /> -->
     <ProjectReference Include="..\..\Maliev.ContactService\Maliev.ContactService.Api\Maliev.ContactService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CountryService\Maliev.CountryService.Api\Maliev.CountryService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CurrencyService\Maliev.CurrencyService.Api\Maliev.CurrencyService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CustomerService\Maliev.CustomerService.Api\Maliev.CustomerService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.EmployeeService\Maliev.EmployeeService.Api\Maliev.EmployeeService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.InvoiceService\Maliev.InvoiceService.Api\Maliev.InvoiceService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.MaterialService\Maliev.MaterialService.Api\Maliev.MaterialService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.OrderService\Maliev.OrderService.Api\Maliev.OrderService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PaymentService\Maliev.PaymentService.Api\Maliev.PaymentService.Api.csproj" />
-    <!-- <ProjectReference Include="..\..\Maliev.PdfService\Maliev.PdfService.Api\Maliev.PdfService.Api.csproj" /> -->
-    <!-- <ProjectReference Include="..\..\Maliev.PredictionService\Maliev.PredictionService.Api\Maliev.PredictionService.Api.csproj" /> -->
+    <ProjectReference Include="..\..\Maliev.PdfService\Maliev.PdfService.Api\Maliev.PdfService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PurchaseOrderService\Maliev.PurchaseOrderService.Api\Maliev.PurchaseOrderService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.QuotationService\Maliev.QuotationService.Api\Maliev.QuotationService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.SupplierService\Maliev.SupplierService.Api\Maliev.SupplierService.Api.csproj" />
