@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
+using Microsoft.AspNetCore.Authorization;
+using Maliev.Aspire.ServiceDefaults.Authorization;
 using Polly;
 
 namespace Maliev.Aspire.ServiceDefaults;
@@ -20,32 +22,40 @@ public static class IAMExtensions
     {
         services.AddHttpClient("IAMService", client =>
         {
-            var iamConfig = configuration.GetSection("ExternalServices:IAM");
-            var baseUrl = iamConfig["BaseUrl"] ?? throw new InvalidOperationException("IAM BaseUrl not configured");
+            var iamConfig = configuration.GetSection("IAM");
+            var baseUrl = iamConfig["BaseUrl"] ?? "http://maliev-iamservice-api";
 
             client.BaseAddress = new Uri(baseUrl);
             client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);
 
-            var timeout = iamConfig.GetValue<int?>("Timeout") ?? 5000;
+            var timeout = iamConfig.GetValue<int?>("Timeout") ?? 30000;
             client.Timeout = TimeSpan.FromMilliseconds(timeout);
 
             var token = iamConfig["ServiceAccountToken"];
             if (!string.IsNullOrEmpty(token))
             {
-                client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             }
         })
-        .AddStandardResilienceHandler(options =>
-        {
-            // Configure standard resilience (Retries, Circuit Breaker, etc.)
-            // By default, this adds:
-            // 1. Rate Limiter
-            // 2. Total Request Timeout
-            // 3. Retry (3 attempts, exponential backoff)
-            // 4. Circuit Breaker
-            // 5. Attempt Timeout
-        });
+        .AddStandardResilienceHandler();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Adds permission-based authorization infrastructure.
+    /// </summary>
+    public static IServiceCollection AddPermissionAuthorization(this IServiceCollection services)
+    {
+        services.AddHttpContextAccessor();
+#pragma warning disable ASPDEPR006
+        services.AddSingleton<Microsoft.AspNetCore.Mvc.Infrastructure.IActionContextAccessor, Microsoft.AspNetCore.Mvc.Infrastructure.ActionContextAccessor>();
+#pragma warning restore ASPDEPR006
+        services.AddSingleton<IAuthorizationPolicyProvider, PermissionAuthorizationPolicyProvider>();
+        services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+        
+        services.AddAuthorizationBuilder();
+        
         return services;
     }
 }
