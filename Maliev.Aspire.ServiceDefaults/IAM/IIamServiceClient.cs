@@ -26,9 +26,9 @@ public interface IIamServiceClient
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if the principal has the permission (globally or on the specified resource).</returns>
     Task<bool> CheckPermissionAsync(
-        string principalId, 
-        string permissionId, 
-        string? resourcePath = null, 
+        string principalId,
+        string permissionId,
+        string? resourcePath = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

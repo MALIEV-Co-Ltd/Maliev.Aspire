@@ -41,8 +41,8 @@ public static class ApiDocumentationExtensions
     }
 
     public static IHostApplicationBuilder AddStandardOpenApi(
-        this IHostApplicationBuilder builder, 
-        string? title = null, 
+        this IHostApplicationBuilder builder,
+        string? title = null,
         string? description = null,
         string documentName = "v1")
     {

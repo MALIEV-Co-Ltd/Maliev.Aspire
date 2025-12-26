@@ -41,7 +41,7 @@ public class BackgroundIAMRegistrationService : BackgroundService
 
         const int maxAttempts = 10;
         int attempt = 0;
-        
+
         while (!stoppingToken.IsCancellationRequested && !_statusTracker.IsRegistered)
         {
             try
@@ -58,7 +58,7 @@ public class BackgroundIAMRegistrationService : BackgroundService
             catch (Exception ex)
             {
                 attempt++;
-                
+
                 if (attempt >= maxAttempts)
                 {
                     _logger.LogError(ex, "IAM registration FAILED after {Max} attempts. Service will continue with potential authorization limitations.", maxAttempts);

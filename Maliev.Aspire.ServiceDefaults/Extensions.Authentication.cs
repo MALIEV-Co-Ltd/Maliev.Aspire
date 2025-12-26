@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
+using Maliev.Aspire.ServiceDefaults;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -61,7 +62,7 @@ public static class AuthenticationExtensions
                         configureOptions?.Invoke(options);
                     });
 
-                builder.Services.AddAuthorization();
+                builder.Services.AddPermissionAuthorization();
                 return builder;
             }
 
@@ -97,7 +98,7 @@ public static class AuthenticationExtensions
                 configureOptions?.Invoke(options);
             });
 
-        builder.Services.AddAuthorization();
+        builder.Services.AddPermissionAuthorization();
 
         return builder;
     }
@@ -151,7 +152,7 @@ public static class AuthenticationExtensions
                 configureOptions?.Invoke(options);
             });
 
-        builder.Services.AddAuthorization();
+        builder.Services.AddPermissionAuthorization();
 
         return builder;
     }

@@ -47,15 +47,14 @@ public static class IAMExtensions
     /// </summary>
     public static IServiceCollection AddPermissionAuthorization(this IServiceCollection services)
     {
+        services.AddAuthorizationBuilder();
         services.AddHttpContextAccessor();
 #pragma warning disable ASPDEPR006
         services.AddSingleton<Microsoft.AspNetCore.Mvc.Infrastructure.IActionContextAccessor, Microsoft.AspNetCore.Mvc.Infrastructure.ActionContextAccessor>();
 #pragma warning restore ASPDEPR006
         services.AddSingleton<IAuthorizationPolicyProvider, PermissionAuthorizationPolicyProvider>();
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
-        
-        services.AddAuthorizationBuilder();
-        
+
         return services;
     }
 }

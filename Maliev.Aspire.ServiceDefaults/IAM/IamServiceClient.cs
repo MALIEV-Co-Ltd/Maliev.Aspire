@@ -93,8 +93,9 @@ public partial class IamServiceClient : IIamServiceClient
         {
             var requestList = requests.ToList();
 
-            // For now, check permissions sequentially (can be optimized with batch endpoint later)
-            foreach (var req in requestList)
+            // Performance optimization: Parallelize permission checks using Task.WhenAll
+            // Each permission check is an independent HTTP call that can run concurrently
+            var tasks = requestList.Select(async req =>
             {
                 var allowed = await CheckPermissionAsync(
                     principalId,
@@ -102,7 +103,14 @@ public partial class IamServiceClient : IIamServiceClient
                     req.ResourcePath,
                     cancellationToken);
 
-                result[req.PermissionId] = allowed;
+                return new { req.PermissionId, Allowed = allowed };
+            }).ToList();
+
+            var results = await Task.WhenAll(tasks);
+
+            foreach (var r in results)
+            {
+                result[r.PermissionId] = r.Allowed;
             }
 
             return result;
