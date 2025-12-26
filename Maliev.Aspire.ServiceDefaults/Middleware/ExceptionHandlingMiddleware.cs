@@ -28,9 +28,16 @@ public class ExceptionHandlingMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Request was cancelled");
+            await HandleExceptionAsync(context, new OperationCanceledException("Request was cancelled"));
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "An unhandled exception occurred: {Message}", ex.Message);
+            Console.WriteLine($"DEBUG EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+            Console.WriteLine(ex.StackTrace);
             await HandleExceptionAsync(context, ex);
         }
     }
@@ -69,6 +76,14 @@ public class ExceptionHandlingMiddleware
             InvalidOperationException => (HttpStatusCode.BadRequest, exception.Message),
             NotImplementedException => (HttpStatusCode.NotImplemented, "Feature not implemented"),
             TimeoutException => (HttpStatusCode.RequestTimeout, "Request timeout"),
+            OperationCanceledException => (HttpStatusCode.RequestTimeout, "Request was cancelled"),
+            
+            // Support for common domain exceptions via name matching if they aren't in this project
+            _ when exception.GetType().Name.Contains("NotFoundException") => (HttpStatusCode.NotFound, exception.Message),
+            _ when exception.GetType().Name.Contains("ConflictException") || exception.GetType().Name.Contains("DuplicateInquiryException") => (HttpStatusCode.Conflict, exception.Message),
+            _ when exception.GetType().Name.Contains("ServiceUnavailableException") || exception.GetType().Name.Contains("CountryServiceException") => (HttpStatusCode.ServiceUnavailable, exception.Message),
+            _ when exception.GetType().Name.Contains("ValidationException") => (HttpStatusCode.BadRequest, exception.Message),
+            
             _ => (HttpStatusCode.InternalServerError, "An internal server error occurred")
         };
     }

@@ -28,7 +28,9 @@ public class SecurityHeadersMiddleware
             "style-src 'self' 'unsafe-inline'; " +
             "img-src 'self' data: https:; " +
             "font-src 'self' data:; " +
-            "connect-src 'self' https:;");
+            "connect-src 'self' http: https:; " + // Allow http connections for local dev
+            "frame-ancestors 'self'; " + // Allow framing by self (Aspire dashboard)
+            "base-uri 'self'");
 
         // Remove server identification headers
         context.Response.Headers.Remove("Server");
