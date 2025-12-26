@@ -1,13 +1,13 @@
 using System.Net.Http.Json;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Maliev.Aspire.ServiceDefaults.IAM;
 
 /// <summary>
-/// Base class for services to register permissions and roles with IAM on startup.
+/// Base class for services to register permissions and roles with IAM.
+/// Registration is called by BackgroundIAMRegistrationService after service startup.
 /// </summary>
-public abstract class IAMRegistrationService : IHostedService
+public abstract class IAMRegistrationService
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger _logger;
@@ -29,39 +29,33 @@ public abstract class IAMRegistrationService : IHostedService
     protected abstract IEnumerable<PermissionRegistration> GetPermissions();
     protected abstract IEnumerable<RoleRegistration> GetPredefinedRoles();
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Registers permissions and roles with the IAM service.
+    /// Called by BackgroundIAMRegistrationService with retry logic.
+    /// </summary>
+    public async Task RegisterAsync(CancellationToken cancellationToken)
     {
-        try
+        _logger.LogInformation("Starting IAM registration for {ServiceName}...", _serviceName);
+
+        var permissions = GetPermissions().ToList();
+        ValidatePermissions(permissions);
+
+        var roles = GetPredefinedRoles().ToList();
+
+        var client = _httpClientFactory.CreateClient("IAMService");
+
+        if (permissions.Any())
         {
-            _logger.LogInformation("Starting IAM registration for {ServiceName}...", _serviceName);
-
-            var permissions = GetPermissions().ToList();
-            ValidatePermissions(permissions);
-
-            var roles = GetPredefinedRoles().ToList();
-
-            var client = _httpClientFactory.CreateClient("IAMService");
-
-            if (permissions.Any())
-            {
-                await RegisterPermissionsAsync(client, permissions, cancellationToken);
-            }
-
-            if (roles.Any())
-            {
-                await RegisterRolesAsync(client, roles, cancellationToken);
-            }
-
-            _logger.LogInformation("Successfully registered permissions and roles for {ServiceName} with IAM.", _serviceName);
+            await RegisterPermissionsAsync(client, permissions, cancellationToken);
         }
-        catch (Exception ex)
+
+        if (roles.Any())
         {
-            _logger.LogError(ex, "Failed to register with IAM service for {ServiceName}. Continuing startup.", _serviceName);
-            // Fail-open: do not rethrow
+            await RegisterRolesAsync(client, roles, cancellationToken);
         }
+
+        _logger.LogInformation("Successfully registered permissions and roles for {ServiceName} with IAM.", _serviceName);
     }
-
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     private async Task RegisterPermissionsAsync(HttpClient client, IEnumerable<PermissionRegistration> permissions, CancellationToken cancellationToken)
     {
