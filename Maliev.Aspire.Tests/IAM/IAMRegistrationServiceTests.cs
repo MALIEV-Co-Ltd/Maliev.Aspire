@@ -50,7 +50,7 @@ public class TestIAMRegistrationService : IAMRegistrationService
 public class IAMRegistrationServiceTests
 {
     [Fact]
-    public async Task StartAsync_ValidPermissions_CallsRegistrationEndpoints()
+    public async Task RegisterAsync_ValidPermissions_CallsRegistrationEndpoints()
     {
         // Arrange
         var handlerMock = new Mock<HttpMessageHandler>();
@@ -75,20 +75,20 @@ public class IAMRegistrationServiceTests
         var service = new TestIAMRegistrationService(httpClientFactoryMock.Object, loggerMock.Object);
 
         // Act
-        await service.StartAsync(CancellationToken.None);
+        await service.RegisterAsync(CancellationToken.None);
 
         // Assert
         handlerMock.Protected().Verify(
             "SendAsync",
             Times.AtLeastOnce(),
-            ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.AbsolutePath.Contains("/permissions/register")),
+            ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.AbsolutePath.Contains("/iam/v1/permissions/register")),
             ItExpr.IsAny<CancellationToken>()
         );
 
         handlerMock.Protected().Verify(
             "SendAsync",
             Times.AtLeastOnce(),
-            ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.AbsolutePath.Contains("/roles/register")),
+            ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.AbsolutePath.Contains("/iam/v1/roles/register")),
             ItExpr.IsAny<CancellationToken>()
         );
     }
@@ -99,56 +99,45 @@ public class IAMRegistrationServiceTests
         // Arrange
         using var server = WireMockServer.Start();
         server
-            .Given(Request.Create().WithPath("/api/v1/permissions/register").UsingPost())
+            .Given(Request.Create().WithPath("/iam/v1/permissions/register").UsingPost())
             .RespondWith(Response.Create().WithStatusCode(200));
         server
-            .Given(Request.Create().WithPath("/api/v1/roles/register").UsingPost())
+            .Given(Request.Create().WithPath("/iam/v1/roles/register").UsingPost())
             .RespondWith(Response.Create().WithStatusCode(200));
-
-        var services = new ServiceCollection();
-        services.AddHttpClient("IAMService", client =>
+    
+            var services = new ServiceCollection();
+            services.AddHttpClient("IAMService", client =>
+            {
+                client.BaseAddress = new Uri(server.Urls[0]);
+            });
+            services.AddLogging();
+            var serviceProvider = services.BuildServiceProvider();
+    
+            var logger = serviceProvider.GetRequiredService<ILogger<TestIAMRegistrationService>>();
+            var clientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
+    
+            var registrationService = new TestIAMRegistrationService(clientFactory, logger);
+    
+            // Act
+            await registrationService.RegisterAsync(CancellationToken.None);
+    
+            // Assert
+            var permissionLog = server.LogEntries.FirstOrDefault(e => e.RequestMessage.AbsolutePath.Contains("permissions/register"));      
+            var roleLog = server.LogEntries.FirstOrDefault(e => e.RequestMessage.AbsolutePath.Contains("roles/register"));
+    
+            Assert.NotNull(permissionLog);
+            Assert.NotNull(roleLog);
+        }
+    
+        [Fact]
+        public async Task RegisterAsync_InvalidPermissionFormat_ThrowsInvalidOperationException()
         {
-            client.BaseAddress = new Uri(server.Urls[0]);
-        });
-        services.AddLogging();
-        var serviceProvider = services.BuildServiceProvider();
-
-        var logger = serviceProvider.GetRequiredService<ILogger<TestIAMRegistrationService>>();
-        var clientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
-
-        var registrationService = new TestIAMRegistrationService(clientFactory, logger);
-
-        // Act
-        await registrationService.StartAsync(CancellationToken.None);
-
-        // Assert
-        var permissionLog = server.LogEntries.FirstOrDefault(e => e.RequestMessage.AbsolutePath.Contains("permissions/register"));
-        var roleLog = server.LogEntries.FirstOrDefault(e => e.RequestMessage.AbsolutePath.Contains("roles/register"));
-
-        Assert.NotNull(permissionLog);
-        Assert.NotNull(roleLog);
-    }
-
-    [Fact]
-    public async Task StartAsync_InvalidPermissionFormat_LogsErrorAndContinues()
-    {
-        // Arrange
-        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
-        var loggerMock = new Mock<ILogger<TestIAMRegistrationService>>();
-
-        var service = new TestIAMRegistrationService(httpClientFactoryMock.Object, loggerMock.Object, includeInvalid: true);
-
-        // Act
-        await service.StartAsync(CancellationToken.None);
-
-        // Assert
-        loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Failed to register")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
-    }
-}
+            // Arrange
+            var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+            var loggerMock = new Mock<ILogger<TestIAMRegistrationService>>();
+    
+            var service = new TestIAMRegistrationService(httpClientFactoryMock.Object, loggerMock.Object, includeInvalid: true);
+    
+            // Act & Assert
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.RegisterAsync(CancellationToken.None));
+        }}

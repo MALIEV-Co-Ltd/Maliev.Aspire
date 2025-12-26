@@ -11,7 +11,7 @@ public class IAMTestHelpersTests
     {
         // Arrange
         var permissions = new[] { "invoice.read", "invoice.create" };
-        var principalId = Guid.NewGuid();
+        var principalId = Guid.NewGuid().ToString();
 
         // Act
         var tokenString = IAMTestHelpers.CreateTestJWT(principalId, permissions);
@@ -22,7 +22,7 @@ public class IAMTestHelpersTests
         var permissionClaims = token.Claims.Where(c => c.Type == "permissions").Select(c => c.Value).ToList();
         Assert.Contains("invoice.read", permissionClaims);
         Assert.Contains("invoice.create", permissionClaims);
-        Assert.Equal(principalId.ToString(), token.Subject);
+        Assert.Equal(principalId, token.Subject);
     }
 
     [Fact]
@@ -33,7 +33,7 @@ public class IAMTestHelpersTests
         var permissions = new[] { "test.perm" };
 
         // Act
-        client.WithTestAuth(permissions);
+        client.WithTestAuth("test-user", permissions);
 
         // Assert
         Assert.NotNull(client.DefaultRequestHeaders.Authorization);
