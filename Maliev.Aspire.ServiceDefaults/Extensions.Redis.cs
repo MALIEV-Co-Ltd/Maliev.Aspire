@@ -43,9 +43,15 @@ public static class RedisExtensions
 
         // Configure Redis options with resilient settings
         var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
-        redisOptions.ConnectTimeout = 15000; // 15 second timeout to accommodate container startup
-        redisOptions.SyncTimeout = 15000;
-        redisOptions.AsyncTimeout = 15000;
+        
+        // Read timeouts from config or use resilient defaults (standardized across MALIEV)
+        int connectTimeout = builder.Configuration.GetValue<int>("Redis:ConnectTimeout", 60000);
+        int syncTimeout = builder.Configuration.GetValue<int>("Redis:SyncTimeout", 60000);
+        int asyncTimeout = builder.Configuration.GetValue<int>("Redis:AsyncTimeout", 60000);
+
+        redisOptions.ConnectTimeout = connectTimeout;
+        redisOptions.SyncTimeout = syncTimeout;
+        redisOptions.AsyncTimeout = asyncTimeout;
         redisOptions.AbortOnConnectFail = false; // Allow connection retries
         redisOptions.ConnectRetry = 10;
         redisOptions.ReconnectRetryPolicy = new ExponentialRetry(1000, 10000); // 1s to 10s exponential backoff
@@ -64,7 +70,11 @@ public static class RedisExtensions
         if (!builder.Environment.IsEnvironment("Testing"))
         {
             builder.Services.AddHealthChecks()
-                .AddRedis(redisConnectionString, name: "redis", tags: ["ready"]);
+                .AddRedis(
+                    redisConnectionString, 
+                    name: "redis", 
+                    tags: ["ready"], 
+                    timeout: TimeSpan.FromSeconds(20));
         }
 
 

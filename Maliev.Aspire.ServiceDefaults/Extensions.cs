@@ -73,6 +73,13 @@ public static class Extensions
             // Add a default liveness check to ensure app is responsive
             .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
 
+        // Configure HealthCheck publisher options for background checks if needed
+        builder.Services.Configure<HealthCheckPublisherOptions>(options =>
+        {
+            options.Delay = TimeSpan.FromSeconds(5);
+            options.Period = TimeSpan.FromSeconds(30);
+        });
+
         // --- Service Discovery and Resilience ---
         builder.Services.AddServiceDiscovery();
         builder.Services.ConfigureHttpClientDefaults(http =>
@@ -83,6 +90,15 @@ public static class Extensions
             // Turn on service discovery by default
             http.AddServiceDiscovery();
         });
+
+        // Specifically relax timeouts for IAM Service registration which can be heavy during startup
+        builder.Services.AddHttpClient("IAMService")
+            .AddStandardResilienceHandler(options =>
+            {
+                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+                options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(90);
+                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(120); // Must be >= 2 * AttemptTimeout
+            });
 
         return builder;
     }
@@ -108,40 +124,10 @@ public static class Extensions
     }
 
     /// <summary>
-    /// Registers the IAM service client for permission checking and resolution.
-    /// This enables services to perform live permission checks and resolve permissions from the central IAM service.
-    /// Call this AFTER AddServiceDefaults() if your service needs to make live IAM permission checks (resource-scoped authorization).
-    /// </summary>
-    /// <param name="builder">The <see cref="IHostApplicationBuilder"/> to configure.</param>
-    /// <param name="iamServiceUrl">Optional IAM service URL. If not provided, uses service discovery with "IAMService" name.</param>
-    /// <returns>The configured <see cref="IHostApplicationBuilder"/>.</returns>
-    public static IHostApplicationBuilder AddIamServiceClient(this IHostApplicationBuilder builder, string? iamServiceUrl = null)
-    {
-        // Configure the named HttpClient for IAM service
-        builder.Services.AddHttpClient("IAMService", client =>
-        {
-            if (!string.IsNullOrEmpty(iamServiceUrl))
-            {
-                client.BaseAddress = new Uri(iamServiceUrl);
-            }
-            // If no URL provided, service discovery will handle it via "IAMService" name
-        })
-        .AddStandardResilienceHandler(); // Add resilience (retry, circuit breaker, etc.)
-
-        // Register the IAM service client
-        builder.Services.AddSingleton<IIamServiceClient, IamServiceClient>();
-
-        return builder;
-    }
-
-    /// <summary>
-    /// Maps default health and metrics endpoints for the application.
-    /// This includes mapping health checks to "/health" and "/alive" endpoints,
-    /// and adding an OpenTelemetry Prometheus scraping endpoint at /{servicePrefix}/metrics.
-    /// Also maps service-specific health check endpoints at /{servicePrefix}/liveness and /{servicePrefix}/readiness.
+    /// Maps default endpoints for health, metrics, and API documentation.
     /// </summary>
     /// <param name="app">The <see cref="WebApplication"/> to configure.</param>
-    /// <param name="servicePrefix">Required service prefix for health and metrics endpoints (e.g., "auth" will map "/auth/liveness", "/auth/readiness", "/auth/metrics").</param>
+    /// <param name="servicePrefix">Required service prefix for health and metrics endpoints.</param>
     /// <returns>The configured <see cref="WebApplication"/>.</returns>
     public static WebApplication MapDefaultEndpoints(this WebApplication app, string servicePrefix)
     {

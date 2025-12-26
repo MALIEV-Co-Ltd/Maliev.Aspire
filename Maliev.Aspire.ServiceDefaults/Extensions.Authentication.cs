@@ -33,12 +33,17 @@ public static class AuthenticationExtensions
 
         if (string.IsNullOrEmpty(publicKeyBase64))
         {
-            // In Testing environment, the key might be configured later by the test infrastructure
             if (builder.Environment.IsEnvironment("Testing"))
             {
+                // In testing, we don't need the public key here as it will be overridden 
+                // by the test factory's PostConfigureAll<JwtBearerOptions>.
+                // We still need to register authentication and authorization.
                 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                     .AddJwtBearer(options =>
                     {
+                        // Disable claim type mapping to keep original claim names like "sub" instead of URIs
+                        options.MapInboundClaims = false;
+
                         // Minimal configuration for tests - will be overridden by PostConfigureAll in tests
                         options.TokenValidationParameters = new TokenValidationParameters
                         {
@@ -48,8 +53,8 @@ public static class AuthenticationExtensions
                             ValidateIssuerSigningKey = false,
                             SignatureValidator = delegate (string token, TokenValidationParameters parameters)
                             {
-                                var jwt = new Microsoft.IdentityModel.JsonWebTokens.JsonWebToken(token);
-                                return jwt;
+                                var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                                return handler.ReadJwtToken(token);
                             }
                         };
 
@@ -71,6 +76,9 @@ public static class AuthenticationExtensions
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
+                // Disable claim type mapping to keep original claim names like "sub" instead of URIs
+                options.MapInboundClaims = false;
+
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = !string.IsNullOrEmpty(issuer),
@@ -80,7 +88,9 @@ public static class AuthenticationExtensions
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = new RsaSecurityKey(rsa),
-                    ClockSkew = TimeSpan.FromMinutes(5) // Allow 5 minutes clock skew
+                    ClockSkew = TimeSpan.FromMinutes(5), // Allow 5 minutes clock skew
+                    NameClaimType = "sub",
+                    RoleClaimType = "role"
                 };
 
                 // Apply custom configuration if provided
@@ -120,6 +130,9 @@ public static class AuthenticationExtensions
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
+                // Disable claim type mapping to keep original claim names like "sub" instead of URIs
+                options.MapInboundClaims = false;
+
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = !string.IsNullOrEmpty(issuer),
@@ -129,7 +142,9 @@ public static class AuthenticationExtensions
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = key,
-                    ClockSkew = TimeSpan.FromMinutes(5)
+                    ClockSkew = TimeSpan.FromMinutes(5),
+                    NameClaimType = "sub",
+                    RoleClaimType = "role"
                 };
 
                 // Apply custom configuration if provided

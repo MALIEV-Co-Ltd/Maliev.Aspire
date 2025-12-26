@@ -13,12 +13,12 @@ public static class DatabaseExtensions
 {
     public static IHostApplicationBuilder AddPostgresDbContext<TContext>(
         this IHostApplicationBuilder builder,
-        string? connectionStringName = null,
+        string? connectionName = null,
         bool enableDynamicJson = false,
         Action<IServiceProvider, DbContextOptionsBuilder>? configureOptions = null)
         where TContext : DbContext
     {
-        var connStringName = connectionStringName ?? typeof(TContext).Name;
+        var connStringName = connectionName ?? typeof(TContext).Name;
         var connectionString = builder.Configuration.GetConnectionString(connStringName)
             ?? throw new InvalidOperationException($"Database connection string '{connStringName}' not configured");
 
@@ -85,21 +85,21 @@ public static class DatabaseExtensions
     /// </summary>
     /// <typeparam name="TContext">The DbContext type to register.</typeparam>
     /// <param name="builder">The host application builder.</param>
-    /// <param name="connectionStringName">The name of the connection string (defaults to TContext name).</param>
-    /// <param name="enableDynamicJson">Whether to enable dynamic JSON support for storing polymorphic types.</param>
     /// <param name="configureOptions">Optional action to configure DbContext options.</param>
+    /// <param name="connectionName">The name of the connection string (defaults to TContext name).</param>
+    /// <param name="enableDynamicJson">Whether to enable dynamic JSON support for storing polymorphic types.</param>
     /// <returns>The configured builder.</returns>
     public static IHostApplicationBuilder AddPostgresDbContext<TContext>(
         this IHostApplicationBuilder builder,
-        Action<DbContextOptionsBuilder> configureOptions,
-        string? connectionStringName = null,
+        Action<DbContextOptionsBuilder>? configureOptions,
+        string? connectionName = null,
         bool enableDynamicJson = false)
         where TContext : DbContext
     {
         return builder.AddPostgresDbContext<TContext>(
-            connectionStringName, 
+            connectionName, 
             enableDynamicJson, 
-            (sp, options) => configureOptions(options));
+            (sp, options) => configureOptions?.Invoke(options));
     }
 
     /// <summary>
