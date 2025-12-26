@@ -1,0 +1,62 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "IAM Registration API",
+    "version": "v1"
+  },
+  "paths": {
+    "/api/v1/iam/registration": {
+      "post": {
+        "summary": "Register service permissions and roles",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Successfully registered" },
+          "400": { "description": "Invalid payload" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RegistrationRequest": {
+        "type": "object",
+        "properties": {
+          "serviceName": { "type": "string" },
+          "permissions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Permission" }
+          },
+          "roles": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Role" }
+          }
+        }
+      },
+      "Permission": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "Role": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "permissions": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Logs;
+using Maliev.Aspire.ServiceDefaults.IAM;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -72,6 +73,13 @@ public static class Extensions
             // Add a default liveness check to ensure app is responsive
             .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
 
+        // Configure HealthCheck publisher options for background checks if needed
+        builder.Services.Configure<HealthCheckPublisherOptions>(options =>
+        {
+            options.Delay = TimeSpan.FromSeconds(5);
+            options.Period = TimeSpan.FromSeconds(30);
+        });
+
         // --- Service Discovery and Resilience ---
         builder.Services.AddServiceDiscovery();
         builder.Services.ConfigureHttpClientDefaults(http =>
@@ -82,6 +90,15 @@ public static class Extensions
             // Turn on service discovery by default
             http.AddServiceDiscovery();
         });
+
+        // Specifically relax timeouts for IAM Service registration which can be heavy during startup
+        builder.Services.AddHttpClient("IAMService")
+            .AddStandardResilienceHandler(options =>
+            {
+                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+                options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(90);
+                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(120); // Must be >= 2 * AttemptTimeout
+            });
 
         return builder;
     }
@@ -107,13 +124,10 @@ public static class Extensions
     }
 
     /// <summary>
-    /// Maps default health and metrics endpoints for the application.
-    /// This includes mapping health checks to "/health" and "/alive" endpoints,
-    /// and adding an OpenTelemetry Prometheus scraping endpoint at /{servicePrefix}/metrics.
-    /// Also maps service-specific health check endpoints at /{servicePrefix}/liveness and /{servicePrefix}/readiness.
+    /// Maps default endpoints for health, metrics, and API documentation.
     /// </summary>
     /// <param name="app">The <see cref="WebApplication"/> to configure.</param>
-    /// <param name="servicePrefix">Required service prefix for health and metrics endpoints (e.g., "auth" will map "/auth/liveness", "/auth/readiness", "/auth/metrics").</param>
+    /// <param name="servicePrefix">Required service prefix for health and metrics endpoints.</param>
     /// <returns>The configured <see cref="WebApplication"/>.</returns>
     public static WebApplication MapDefaultEndpoints(this WebApplication app, string servicePrefix)
     {

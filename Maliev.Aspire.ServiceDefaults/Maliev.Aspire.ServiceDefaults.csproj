@@ -4,6 +4,7 @@
     <TargetFrameworks>net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsAspireSharedProject>true</IsAspireSharedProject>
 
     <!-- NuGet Package Configuration -->
@@ -34,8 +35,8 @@
     <PackageReference Include="AspNetCore.HealthChecks.UI.Client" Version="9.0.0" />
 
     <!-- OpenTelemetry -->
-    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.1.0" />
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.1.0" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.14.0" />
     <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.14.0-beta.1" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.14.0" />
@@ -45,19 +46,21 @@
 
     <!-- Infrastructure -->
     <PackageReference Include="RabbitMQ.Client" Version="7.2.0" />
-    <PackageReference Include="MassTransit.RabbitMQ" Version="8.3.5" />
-    <PackageReference Include="StackExchange.Redis" Version="2.8.16" />
-    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="9.0.0" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.0" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="8.5.7" />
+    <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.1" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
 
     <!-- Authentication -->
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.1" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.15.0" />
 
     <!-- API Documentation -->
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
-    <PackageReference Include="Scalar.AspNetCore" Version="2.11.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.1" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.0.0" />
+    <PackageReference Include="Scalar.AspNetCore" Version="2.11.10" />
 
     <!-- API Versioning -->
     <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.0" />

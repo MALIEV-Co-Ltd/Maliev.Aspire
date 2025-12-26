@@ -11,7 +11,7 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
     private const string DashboardOtlpApiKeyVariableName = "AppHost:OtlpApiKey";
     private const string DashboardOtlpUrlDefaultValue = "http://localhost:18889";
     private const string OTelCollectorImageName = "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib";
-    private const string OTelCollectorImageTag = "0.123.0";
+    private const string OTelCollectorImageTag = "0.114.0";
 
     public static IResourceBuilder<OpenTelemetryCollectorResource> AddOpenTelemetryCollector(this IDistributedApplicationBuilder builder, string name, string configFileLocation)
     {
@@ -67,10 +67,8 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
             return Task.CompletedTask;
         });
 
-        if (isHttpsEnabled && builder.ExecutionContext.IsRunMode && builder.Environment.IsDevelopment())
-        {
-            resourceBuilder.WithArgs(@"--config=/etc/otelcol-contrib/config.yaml");
-        }
+        // Always pass the config file argument for the collector to start properly
+        resourceBuilder.WithArgs(@"--config=/etc/otelcol-contrib/config.yaml");
 
         return resourceBuilder;
     }
