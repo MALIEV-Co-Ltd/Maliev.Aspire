@@ -89,14 +89,6 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             return false;
         }
 
-        var config = _serviceProvider.GetRequiredService<IConfiguration>();
-        var iamEnabled = config.GetValue<bool>("Features:PermissionBasedAuthEnabled", true);
-
-        if (!iamEnabled)
-        {
-            return true;
-        }
-
         var principalId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
             ?? user.FindFirst("sub")?.Value;
 
@@ -124,6 +116,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         else
         {
             // Fallback to IAM if enabled and required
+            var config = _serviceProvider.GetRequiredService<IConfiguration>();
             var resourceScopedEnabled = config.GetValue<bool>("Features:ResourceScopedAuthEnabled", false);
             var needsResourceCheck = !string.IsNullOrEmpty(resourcePathTemplate) && resourceScopedEnabled;
             var shouldCallIam = requireLiveCheck || needsResourceCheck;
