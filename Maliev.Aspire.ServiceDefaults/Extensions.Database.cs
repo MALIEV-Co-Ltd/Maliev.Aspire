@@ -97,8 +97,8 @@ public static class DatabaseExtensions
         where TContext : DbContext
     {
         return builder.AddPostgresDbContext<TContext>(
-            connectionName, 
-            enableDynamicJson, 
+            connectionName,
+            enableDynamicJson,
             (sp, options) => configureOptions?.Invoke(options));
     }
 

@@ -13,50 +13,70 @@ public static class PermissionMatcher
         return userPermissions.Any(p => IsMatch(requiredPermission, p));
     }
 
-        public static bool IsMatch(string required, string claim)
+    public static bool IsMatch(string required, string claim)
+    {
+        if (string.IsNullOrWhiteSpace(required) || string.IsNullOrWhiteSpace(claim)) return false;
+
+        // Use spans to avoid Substring allocations
+        var requiredSpan = required.AsSpan();
+        if (requiredSpan.StartsWith("Permission:", StringComparison.OrdinalIgnoreCase))
         {
-            if (string.IsNullOrWhiteSpace(required) || string.IsNullOrWhiteSpace(claim)) return false;
-    
-            // Use spans to avoid Substring allocations
-            var requiredSpan = required.AsSpan();
-            if (requiredSpan.StartsWith("Permission:", StringComparison.OrdinalIgnoreCase))
+            requiredSpan = requiredSpan.Slice("Permission:".Length);
+        }
+
+        var claimSpan = claim.AsSpan();
+        if (claimSpan.StartsWith("Permission:", StringComparison.OrdinalIgnoreCase))
+        {
+            claimSpan = claimSpan.Slice("Permission:".Length);
+        }
+
+        if (requiredSpan.Equals(claimSpan, StringComparison.OrdinalIgnoreCase)) return true;
+
+        // For splitting and wildcard matching, we still use string parts for now 
+        // as Span-based splitting is more complex in .NET 8/9 without extra helpers
+        var requiredParts = requiredSpan.ToString().Split('.');
+        var claimParts = claimSpan.ToString().Split('.');
+
+        // Special case: claim is just "*"
+        if (claimParts.Length == 1 && claimParts[0] == "*") return true;
+
+        // SECURE WILDCARD MATCHING LOGIC
+        // Security fix: Validate segments BEFORE wildcard, ensure wildcard only at end
+        // Prevents bypasses like "*.delete" matching "invoices.create"
+        for (int i = 0; i < claimParts.Length; i++)
+        {
+            if (claimParts[i] == "*")
             {
-                requiredSpan = requiredSpan.Slice("Permission:".Length);
-            }
-    
-            var claimSpan = claim.AsSpan();
-            if (claimSpan.StartsWith("Permission:", StringComparison.OrdinalIgnoreCase))
-            {
-                claimSpan = claimSpan.Slice("Permission:".Length);
-            }
-    
-            if (requiredSpan.Equals(claimSpan, StringComparison.OrdinalIgnoreCase)) return true;
-    
-            // For splitting and wildcard matching, we still use string parts for now 
-            // as Span-based splitting is more complex in .NET 8/9 without extra helpers
-            var requiredParts = requiredSpan.ToString().Split('.');
-            var claimParts = claimSpan.ToString().Split('.');
-    
-            // Special case: claim is just "*"
-            if (claimParts.Length == 1 && claimParts[0] == "*") return true;
-    
-            // FLEXIBLE MATCHING LOGIC
-            // Match segment by segment
-            bool match = true;
-            for (int i = 0; i < claimParts.Length; i++)
-            {
-                if (claimParts[i] == "*")
+                // Wildcard found - enforce security rules:
+                // 1. Wildcard must be the LAST segment (no "invoices.*.read" or "*.delete")
+                // 2. All preceding segments must have matched to reach this point
+                if (i != claimParts.Length - 1)
                 {
-                    // Wildcard matches everything from this point on
-                    return true;
+                    // Security: Reject wildcard in the middle (e.g., "invoices.*.read")
+                    // Wildcards only allowed as suffix (e.g., "invoices.*")
+                    return false;
                 }
-    
-                if (i >= requiredParts.Length || !string.Equals(requiredParts[i], claimParts[i], StringComparison.OrdinalIgnoreCase))       
-                {
-                    match = false;
-                    break;
-                }
+
+                // Wildcard is at the end and all previous segments matched
+                // This allows "invoices.*" to match "invoices.create", "invoices.read", etc.
+                return true;
             }
-    
-            return match && claimParts.Length == requiredParts.Length;
-        }}
+
+            // Not a wildcard - validate this segment matches
+            if (i >= requiredParts.Length)
+            {
+                // Claim has more non-wildcard segments than required permission
+                return false;
+            }
+
+            if (!string.Equals(requiredParts[i], claimParts[i], StringComparison.OrdinalIgnoreCase))
+            {
+                // Segment mismatch - permission denied
+                return false;
+            }
+        }
+
+        // All claim segments processed and matched - lengths must be equal
+        return claimParts.Length == requiredParts.Length;
+    }
+}

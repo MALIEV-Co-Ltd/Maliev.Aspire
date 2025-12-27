@@ -29,7 +29,7 @@ public static class HttpClientExtensions
     public static IHostApplicationBuilder AddUploadServiceClient(
         this IHostApplicationBuilder builder)
     {
-        builder.AddServiceClient("UploadService", configureClient: client => 
+        builder.AddServiceClient("UploadService", configureClient: client =>
         {
             client.Timeout = TimeSpan.FromMinutes(10);
         })
@@ -51,7 +51,7 @@ public static class HttpClientExtensions
     public static IHostApplicationBuilder AddPdfServiceClient(
         this IHostApplicationBuilder builder)
     {
-        builder.AddServiceClient("PdfService", configureClient: client => 
+        builder.AddServiceClient("PdfService", configureClient: client =>
         {
             client.Timeout = TimeSpan.FromMinutes(2);
         });

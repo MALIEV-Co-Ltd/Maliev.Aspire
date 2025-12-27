@@ -43,7 +43,7 @@ public static class RedisExtensions
 
         // Configure Redis options with resilient settings
         var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
-        
+
         // Read timeouts from config or use resilient defaults (standardized across MALIEV)
         int connectTimeout = builder.Configuration.GetValue<int>("Redis:ConnectTimeout", 60000);
         int syncTimeout = builder.Configuration.GetValue<int>("Redis:SyncTimeout", 60000);
@@ -71,9 +71,9 @@ public static class RedisExtensions
         {
             builder.Services.AddHealthChecks()
                 .AddRedis(
-                    redisConnectionString, 
-                    name: "redis", 
-                    tags: ["ready"], 
+                    redisConnectionString,
+                    name: "redis",
+                    tags: ["ready"],
                     timeout: TimeSpan.FromSeconds(20));
         }
 
