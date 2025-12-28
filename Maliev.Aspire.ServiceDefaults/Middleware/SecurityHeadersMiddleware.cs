@@ -29,7 +29,7 @@ public class SecurityHeadersMiddleware
             "img-src 'self' data: https:; " +
             "font-src 'self' data:; " +
             "connect-src 'self' http: https:; " + // Allow http connections for local dev
-            "frame-ancestors 'self'; " + // Allow framing by self (Aspire dashboard)
+            "frame-ancestors 'none'; " + // Prevent framing attacks (aligns with X-Frame-Options: DENY)
             "base-uri 'self'");
 
         // Remove server identification headers
