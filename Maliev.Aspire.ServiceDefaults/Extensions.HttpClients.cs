@@ -8,6 +8,7 @@ using System.Net.Http.Json;
 
 namespace Microsoft.Extensions.Hosting;
 
+// Standardized HTTP client extensions for Maliev microservices.
 public static class HttpClientExtensions
 {
     /// <summary>
