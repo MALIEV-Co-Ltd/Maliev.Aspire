@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.AspNetCore.Authorization;
 using Maliev.Aspire.ServiceDefaults.Authorization;
+using System.Diagnostics.CodeAnalysis;
 using Polly;
 
 namespace Maliev.Aspire.ServiceDefaults;
@@ -49,10 +50,7 @@ public static class IAMExtensions
     public static IServiceCollection AddPermissionAuthorization(this IServiceCollection services)
     {
         services.AddHttpContextAccessor();
-#pragma warning disable ASPDEPR006
-        services.AddSingleton<Microsoft.AspNetCore.Mvc.Infrastructure.IActionContextAccessor, Microsoft.AspNetCore.Mvc.Infrastructure.ActionContextAccessor>();
-#pragma warning restore ASPDEPR006
-
+        
         // Register authorization services first
         services.AddAuthorization();
 

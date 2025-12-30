@@ -22,6 +22,8 @@
 
     <ProjectReference Include="..\..\Maliev.AuthService\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CareerService\Maliev.CareerService.Api\Maliev.CareerService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.CompensationService\Maliev.CompensationService.Api\Maliev.CompensationService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.ComplianceService\Maliev.ComplianceService.Api\Maliev.ComplianceService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ContactService\Maliev.ContactService.Api\Maliev.ContactService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CountryService\Maliev.CountryService.Api\Maliev.CountryService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CurrencyService\Maliev.CurrencyService.Api\Maliev.CurrencyService.Api.csproj" />
@@ -29,10 +31,13 @@
     <ProjectReference Include="..\..\Maliev.EmployeeService\Maliev.EmployeeService.Api\Maliev.EmployeeService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.InvoiceService\Maliev.InvoiceService.Api\Maliev.InvoiceService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.LeaveService\Maliev.LeaveService.Api\Maliev.LeaveService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.LifecycleService\Maliev.LifecycleService.Api\Maliev.LifecycleService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.MaterialService\Maliev.MaterialService.Api\Maliev.MaterialService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.OrderService\Maliev.OrderService.Api\Maliev.OrderService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PaymentService\Maliev.PaymentService.Api\Maliev.PaymentService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PdfService\Maliev.PdfService.Api\Maliev.PdfService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.PerformanceService\Maliev.PerformanceService.Api\Maliev.PerformanceService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PurchaseOrderService\Maliev.PurchaseOrderService.Api\Maliev.PurchaseOrderService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.QuotationService\Maliev.QuotationService.Api\Maliev.QuotationService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.SupplierService\Maliev.SupplierService.Api\Maliev.SupplierService.Api.csproj" />
