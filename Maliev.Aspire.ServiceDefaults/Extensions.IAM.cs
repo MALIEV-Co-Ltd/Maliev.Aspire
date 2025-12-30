@@ -50,7 +50,7 @@ public static class IAMExtensions
     public static IServiceCollection AddPermissionAuthorization(this IServiceCollection services)
     {
         services.AddHttpContextAccessor();
-        
+
         // Register authorization services first
         services.AddAuthorization();
 
