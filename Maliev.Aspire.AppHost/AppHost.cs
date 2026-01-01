@@ -63,20 +63,25 @@ static partial class Program
         var erlangCookie = builder.AddParameterFromConfig("ErlangCookie", "RabbitMQ:ErlangCookie", secret: true);
 
         var rabbitmq = builder.AddRabbitMQ("rabbitmq")
-                                .WithImageTag("4.2-alpine")
+                                .WithImageTag("4.2-management-alpine")
                                 .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie);
 
         var redis = builder.AddRedis("redis")
                             .WithImageTag("8.4-alpine")
                             .WithRedisInsight(insight =>
                             {
-                                insight.WithBindMount("redisinsight-data", "/data");
+                                insight.WithBindMount("redisinsight-data", "/data")
+                                       .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard");
                             });
 
         // --- PostgreSQL Database Server ---
         var postgres = builder.AddPostgres("postgres-server")
-                              .WithImageTag("18.1-alpine")
-                              .WithPgAdmin(option => option.WithImageTag("8.14"));
+                              .WithImageTag("18-alpine")
+                              .WithPgAdmin(option => 
+                              {
+                                  option.WithImageTag("8.14")
+                                        .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
+                              });
 
         return new Infrastructure(rabbitmq, redis, postgres);
     }
@@ -101,6 +106,7 @@ static partial class Program
             Accounting: postgres.AddDatabase("accounting-app-db"),
             Auth: postgres.AddDatabase("auth-app-db"),
             Career: postgres.AddDatabase("career-app-db"),
+            Chatbot: postgres.AddDatabase("chatbot-app-db"),
             Compensation: postgres.AddDatabase("compensation-app-db"),
             Compliance: postgres.AddDatabase("compliance-app-db"),
             Contact: postgres.AddDatabase("contact-app-db"),
@@ -140,7 +146,7 @@ static partial class Program
         // --- Core Services (dependencies for Auth) ---
         var iamService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_IAMService_Api>("maliev-iamservice-api")
-                .WithReference(databases.IAM, "IAMDatabase")
+                .WithReference(databases.IAM, "IamDbContext")
                 .WaitFor(databases.IAM)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
@@ -207,6 +213,17 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/accounting/readiness"),
+            config);
+
+        var chatbotService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_ChatbotService_Api>("maliev-chatbotservice-api")
+                .WithReference(databases.Chatbot, "ChatbotDbContext")
+                .WaitFor(databases.Chatbot)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/chatbot/readiness"),
             config);
 
         var notificationService = WithSharedSecrets(
@@ -485,6 +502,7 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Accounting,
     IResourceBuilder<PostgresDatabaseResource> Auth,
     IResourceBuilder<PostgresDatabaseResource> Career,
+    IResourceBuilder<PostgresDatabaseResource> Chatbot,
     IResourceBuilder<PostgresDatabaseResource> Compensation,
     IResourceBuilder<PostgresDatabaseResource> Compliance,
     IResourceBuilder<PostgresDatabaseResource> Contact,

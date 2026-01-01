@@ -112,9 +112,15 @@ public static class DatabaseExtensions
     /// <returns>A task representing the asynchronous operation.</returns>
     public static async Task MigrateDatabaseAsync<TContext>(
         this IHost app,
-        int maxRetries = 20)
+        int? maxRetries = null)
         where TContext : DbContext
     {
+        // Use fewer retries in test environment for faster feedback
+        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        var isTest = environment == "Test" || environment == "Testing";
+        var defaultRetries = isTest ? 20 : 20; // 20 retries for everyone to be safe, but especially for tests.
+        var retries = maxRetries ?? defaultRetries;
+
         using var scope = app.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<TContext>();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<TContext>>();
@@ -129,15 +135,15 @@ public static class DatabaseExtensions
                 int retryCount = 0;
                 while (!await dbContext.Database.CanConnectAsync())
                 {
-                    if (retryCount >= maxRetries)
+                    if (retryCount >= retries)
                     {
                         throw new InvalidOperationException(
-                            $"Database connectivity check failed after {maxRetries} attempts");
+                            $"Database connectivity check failed after {retries} attempts");
                     }
 
                     retryCount++;
                     logger.LogInformation("Waiting for database connectivity (attempt {Attempt}/{Max})",
-                        retryCount, maxRetries);
+                        retryCount, retries);
                     await Task.Delay(TimeSpan.FromSeconds(1));
                 }
 
