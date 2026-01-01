@@ -67,10 +67,11 @@ public static class MassTransitExtensions
             });
         });
 
-        // Configure MassTransit to not block startup
+        // Configure MassTransit to wait until fully started before accepting requests
+        // This prevents race conditions in tests and ensures reliability in production
         builder.Services.Configure<MassTransitHostOptions>(options =>
         {
-            options.WaitUntilStarted = false; // Non-blocking startup
+            options.WaitUntilStarted = true; // Wait for bus to be ready
             options.StartTimeout = TimeSpan.FromSeconds(60);
             options.StopTimeout = TimeSpan.FromSeconds(30);
         });
