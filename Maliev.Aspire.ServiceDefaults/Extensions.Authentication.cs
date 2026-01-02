@@ -29,11 +29,18 @@ public static class AuthenticationExtensions
         Action<JwtBearerOptions>? configureOptions = null)
     {
         var publicKeyBase64 = builder.Configuration["Jwt:PublicKey"];
+        var securityKey = builder.Configuration["Jwt:SecurityKey"];
         var issuer = builder.Configuration["Jwt:Issuer"];
         var audience = builder.Configuration["Jwt:Audience"];
 
         if (string.IsNullOrEmpty(publicKeyBase64))
         {
+            // Fallback to symmetric if provided (standard for integration tests)
+            if (!string.IsNullOrEmpty(securityKey))
+            {
+                return builder.AddJwtAuthenticationSymmetric(configureOptions);
+            }
+
             if (builder.Environment.IsEnvironment("Testing"))
             {
                 // In testing, we don't need the public key here as it will be overridden 
@@ -74,25 +81,40 @@ public static class AuthenticationExtensions
         var rsa = RSA.Create();
         rsa.ImportFromPem(publicKeyPem);
 
+        var tokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = !string.IsNullOrEmpty(issuer),
+            ValidIssuer = issuer,
+            ValidateAudience = !string.IsNullOrEmpty(audience),
+            ValidAudience = audience,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ClockSkew = TimeSpan.FromMinutes(5), // Allow 5 minutes clock skew
+            NameClaimType = "sub",
+            RoleClaimType = "role"
+        };
+
+        // Check if we have a symmetric fallback key (e.g. for tests)
+        if (!string.IsNullOrEmpty(securityKey))
+        {
+            var symmetricKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey));
+            tokenValidationParameters.IssuerSigningKeys = new SecurityKey[]
+            {
+                new RsaSecurityKey(rsa),
+                symmetricKey
+            };
+        }
+        else
+        {
+            tokenValidationParameters.IssuerSigningKey = new RsaSecurityKey(rsa);
+        }
+
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
                 // Disable claim type mapping to keep original claim names like "sub" instead of URIs
                 options.MapInboundClaims = false;
-
-                options.TokenValidationParameters = new TokenValidationParameters
-                {
-                    ValidateIssuer = !string.IsNullOrEmpty(issuer),
-                    ValidIssuer = issuer,
-                    ValidateAudience = !string.IsNullOrEmpty(audience),
-                    ValidAudience = audience,
-                    ValidateLifetime = true,
-                    ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new RsaSecurityKey(rsa),
-                    ClockSkew = TimeSpan.FromMinutes(5), // Allow 5 minutes clock skew
-                    NameClaimType = "sub",
-                    RoleClaimType = "role"
-                };
+                options.TokenValidationParameters = tokenValidationParameters;
 
                 // Apply custom configuration if provided
                 configureOptions?.Invoke(options);

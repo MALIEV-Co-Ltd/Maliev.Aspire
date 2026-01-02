@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.IdentityModel.Tokens;
 
@@ -8,10 +9,18 @@ namespace Maliev.Aspire.ServiceDefaults.Testing;
 
 public static class IAMTestHelpers
 {
+    private static RSA? _testRsa;
+
+    /// <summary>
+    /// Sets the RSA key used for signing test tokens.
+    /// If not set, symmetric signing will be used.
+    /// </summary>
+    public static void SetTestRSA(RSA rsa) => _testRsa = rsa;
+
     /// <summary>
     /// Creates a test JWT with specified permissions
     /// </summary>
-    public static string CreateTestJWT(string principalId, params string[] permissions)
+    public static string CreateTestJWT(string principalId, string issuer = "test", string audience = "test", params string[] permissions)
     {
         var claims = new List<Claim>
         {
@@ -25,12 +34,21 @@ public static class IAMTestHelpers
             claims.Add(new Claim("permissions", permission));
         }
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-key-at-least-32-characters-long"));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        SigningCredentials creds;
+        if (_testRsa != null)
+        {
+            var key = new RsaSecurityKey(_testRsa);
+            creds = new SigningCredentials(key, SecurityAlgorithms.RsaSha256);
+        }
+        else
+        {
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-key-at-least-32-characters-long-for-integration-tests"));
+            creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        }
 
         var token = new JwtSecurityToken(
-            issuer: "test",
-            audience: "test",
+            issuer: issuer,
+            audience: audience,
             claims: claims,
             expires: DateTime.UtcNow.AddHours(1),
             signingCredentials: creds);
@@ -41,9 +59,9 @@ public static class IAMTestHelpers
     /// <summary>
     /// Adds authentication with test JWT to HttpClient
     /// </summary>
-    public static HttpClient WithTestAuth(this HttpClient client, string userId = "test-user", params string[] permissions)
+    public static HttpClient WithTestAuth(this HttpClient client, string userId = "test-user", string issuer = "test", string audience = "test", params string[] permissions)
     {
-        var token = CreateTestJWT(userId, permissions);
+        var token = CreateTestJWT(userId, issuer, audience, permissions);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;
     }

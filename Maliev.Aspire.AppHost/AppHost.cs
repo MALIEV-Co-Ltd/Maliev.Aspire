@@ -1,3 +1,4 @@
+using Aspire.Hosting.Python;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
 using Microsoft.Extensions.Configuration;
 
@@ -76,9 +77,18 @@ static partial class Program
         // --- PostgreSQL Database Server ---
         var postgres = builder.AddPostgres("postgres-server")
                               .WithImageTag("18.1-alpine")
+                              .WithArgs("-c", "max_connections=500") // Increase for many microservices
                               .WithPgAdmin(option => option.WithImageTag("8.14"));
 
-        return new Infrastructure(rabbitmq, redis, postgres);
+        // --- Storage ---
+        var storage = builder.AddContainer("storage", "minio/minio", "latest")
+                             .WithArgs("server", "/data")
+                             .WithHttpEndpoint(targetPort: 9000, name: "api")
+                             .WithHttpEndpoint(targetPort: 9001, name: "console")
+                             .WithEnvironment("MINIO_ROOT_USER", "minioadmin")
+                             .WithEnvironment("MINIO_ROOT_PASSWORD", "minioadmin");
+
+        return new Infrastructure(rabbitmq, redis, postgres, storage);
     }
 
     private static IResourceBuilder<ParameterResource> AddParameterFromConfig(
@@ -135,7 +145,7 @@ static partial class Program
         // --- Core Services (dependencies for Auth) ---
         var iamService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_IAMService_Api>("maliev-iamservice-api")
-                .WithReference(databases.IAM, "IAMDatabase")
+                .WithReference(databases.IAM, "IamDbContext")
                 .WaitFor(databases.IAM)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
@@ -376,6 +386,17 @@ static partial class Program
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/supplier/readiness"),
             config);
+
+        // --- Python Services ---
+        var geometryService = builder.AddPythonApp("geometry-service", "../../Maliev.GeometryService", "src/main.py")
+            .WithReference(infrastructure.RabbitMQ)
+            .WithReference(infrastructure.Storage)
+            .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ.GetConnectionString())
+            .WithEnvironment("STORAGE_ENDPOINT", infrastructure.Storage.GetEndpoint("api"))
+            .WithEnvironment("STORAGE_ACCESS_KEY", "minioadmin")
+            .WithEnvironment("STORAGE_SECRET_KEY", "minioadmin")
+            .WithHttpHealthCheck("/geometry/readiness")
+            .WithHttpEndpoint(targetPort: 8080);
     }
 
     /// <summary>
@@ -388,6 +409,7 @@ static partial class Program
         return project
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
+            .WithEnvironment("Jwt__SecurityKey", "test-key-at-least-32-characters-long-for-integration-tests") // Symmetric fallback
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins);
@@ -409,7 +431,8 @@ record SharedConfiguration(
 record Infrastructure(
     IResourceBuilder<RabbitMQServerResource> RabbitMQ,
     IResourceBuilder<RedisResource> Redis,
-    IResourceBuilder<PostgresServerResource> Postgres);
+    IResourceBuilder<PostgresServerResource> Postgres,
+    IResourceBuilder<ContainerResource> Storage);
 
 /// <summary>
 /// Database references for all microservices.

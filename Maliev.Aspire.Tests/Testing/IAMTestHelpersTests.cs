@@ -14,7 +14,7 @@ public class IAMTestHelpersTests
         var principalId = Guid.NewGuid().ToString();
 
         // Act
-        var tokenString = IAMTestHelpers.CreateTestJWT(principalId, permissions);
+        var tokenString = IAMTestHelpers.CreateTestJWT(principalId, "test", "test", permissions);
         var handler = new JwtSecurityTokenHandler();
         var token = handler.ReadJwtToken(tokenString);
 
@@ -33,7 +33,7 @@ public class IAMTestHelpersTests
         var permissions = new[] { "test.perm" };
 
         // Act
-        client.WithTestAuth("test-user", permissions);
+        client.WithTestAuth("test-user", "test", "test", permissions);
 
         // Assert
         Assert.NotNull(client.DefaultRequestHeaders.Authorization);
