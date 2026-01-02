@@ -64,21 +64,26 @@ static partial class Program
         var erlangCookie = builder.AddParameterFromConfig("ErlangCookie", "RabbitMQ:ErlangCookie", secret: true);
 
         var rabbitmq = builder.AddRabbitMQ("rabbitmq")
-                                .WithImageTag("4.2-alpine")
+                                .WithImageTag("4.2-management-alpine")
                                 .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie);
 
         var redis = builder.AddRedis("redis")
                             .WithImageTag("8.4-alpine")
                             .WithRedisInsight(insight =>
                             {
-                                insight.WithBindMount("redisinsight-data", "/data");
+                                insight.WithBindMount("redisinsight-data", "/data")
+                                       .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard");
                             });
 
         // --- PostgreSQL Database Server ---
         var postgres = builder.AddPostgres("postgres-server")
-                              .WithImageTag("18.1-alpine")
+                              .WithImageTag("18-alpine")
                               .WithArgs("-c", "max_connections=500") // Increase for many microservices
-                              .WithPgAdmin(option => option.WithImageTag("8.14"));
+                              .WithPgAdmin(option => 
+                              {
+                                  option.WithImageTag("8.14")
+                                        .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
+                              });
 
         return new Infrastructure(rabbitmq, redis, postgres);
     }
@@ -103,6 +108,9 @@ static partial class Program
             Accounting: postgres.AddDatabase("accounting-app-db"),
             Auth: postgres.AddDatabase("auth-app-db"),
             Career: postgres.AddDatabase("career-app-db"),
+            Chatbot: postgres.AddDatabase("chatbot-app-db"),
+            Compensation: postgres.AddDatabase("compensation-app-db"),
+            Compliance: postgres.AddDatabase("compliance-app-db"),
             Contact: postgres.AddDatabase("contact-app-db"),
             Country: postgres.AddDatabase("country-app-db"),
             Currency: postgres.AddDatabase("currency-app-db"),
@@ -110,11 +118,14 @@ static partial class Program
             Employee: postgres.AddDatabase("employee-app-db"),
             IAM: postgres.AddDatabase("iam-app-db"),
             Invoice: postgres.AddDatabase("invoice-app-db"),
+            Leave: postgres.AddDatabase("leave-app-db"),
+            Lifecycle: postgres.AddDatabase("lifecycle-app-db"),
             Material: postgres.AddDatabase("material-app-db"),
             Notification: postgres.AddDatabase("notification-app-db"),
             Order: postgres.AddDatabase("order-app-db"),
             Payment: postgres.AddDatabase("payment-app-db"),
             Pdf: postgres.AddDatabase("pdf-app-db"),
+            Performance: postgres.AddDatabase("performance-app-db"),
             PurchaseOrder: postgres.AddDatabase("purchaseorder-app-db"),
             Quotation: postgres.AddDatabase("quotation-app-db"),
             Receipt: postgres.AddDatabase("receipt-app-db"),
@@ -206,6 +217,17 @@ static partial class Program
                 .WithHttpHealthCheck("/accounting/readiness"),
             config);
 
+        var chatbotService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_ChatbotService_Api>("maliev-chatbotservice-api")
+                .WithReference(databases.Chatbot, "ChatbotDbContext")
+                .WaitFor(databases.Chatbot)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/chatbot/readiness"),
+            config);
+
         var notificationService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_NotificationService_Api>("maliev-notificationservice-api")
                 .WithReference(databases.Notification, "NotificationDbContext")
@@ -242,6 +264,68 @@ static partial class Program
                 .WithReference(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/career/readiness"),
+            config);
+
+        var compensationService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_CompensationService_Api>("maliev-compensationservice-api")
+                .WithReference(databases.Compensation, "CompensationDbContext")
+                .WaitFor(databases.Compensation)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(employeeService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/compensation/readiness"),
+            config);
+
+        var complianceService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_ComplianceService_Api>("maliev-complianceservice-api")
+                .WithReference(databases.Compliance, "ComplianceDbContext")
+                .WaitFor(databases.Compliance)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(employeeService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/compliance/readiness"),
+            config);
+
+        var leaveService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_LeaveService_Api>("maliev-leaveservice-api")
+                .WithReference(databases.Leave, "LeaveDbContext")
+                .WaitFor(databases.Leave)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(employeeService)
+                .WithReference(notificationService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/leave/readiness"),
+            config);
+
+        var lifecycleService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_LifecycleService_Api>("maliev-lifecycleservice-api")
+                .WithReference(databases.Lifecycle, "LifecycleDbContext")
+                .WaitFor(databases.Lifecycle)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(employeeService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/lifecycle/readiness"),
+            config);
+
+        var performanceService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_PerformanceService_Api>("maliev-performanceservice-api")
+                .WithReference(databases.Performance, "PerformanceDbContext")
+                .WaitFor(databases.Performance)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(employeeService)
+                .WithReference(notificationService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/performance/readiness"),
             config);
 
         var contactService = WithSharedSecrets(
@@ -430,6 +514,9 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Accounting,
     IResourceBuilder<PostgresDatabaseResource> Auth,
     IResourceBuilder<PostgresDatabaseResource> Career,
+    IResourceBuilder<PostgresDatabaseResource> Chatbot,
+    IResourceBuilder<PostgresDatabaseResource> Compensation,
+    IResourceBuilder<PostgresDatabaseResource> Compliance,
     IResourceBuilder<PostgresDatabaseResource> Contact,
     IResourceBuilder<PostgresDatabaseResource> Country,
     IResourceBuilder<PostgresDatabaseResource> Currency,
@@ -437,11 +524,14 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Employee,
     IResourceBuilder<PostgresDatabaseResource> IAM,
     IResourceBuilder<PostgresDatabaseResource> Invoice,
+    IResourceBuilder<PostgresDatabaseResource> Leave,
+    IResourceBuilder<PostgresDatabaseResource> Lifecycle,
     IResourceBuilder<PostgresDatabaseResource> Material,
     IResourceBuilder<PostgresDatabaseResource> Notification,
     IResourceBuilder<PostgresDatabaseResource> Order,
     IResourceBuilder<PostgresDatabaseResource> Payment,
     IResourceBuilder<PostgresDatabaseResource> Pdf,
+    IResourceBuilder<PostgresDatabaseResource> Performance,
     IResourceBuilder<PostgresDatabaseResource> PurchaseOrder,
     IResourceBuilder<PostgresDatabaseResource> Quotation,
     IResourceBuilder<PostgresDatabaseResource> Receipt,
