@@ -80,15 +80,7 @@ static partial class Program
                               .WithArgs("-c", "max_connections=500") // Increase for many microservices
                               .WithPgAdmin(option => option.WithImageTag("8.14"));
 
-        // --- Storage ---
-        var storage = builder.AddContainer("storage", "minio/minio", "latest")
-                             .WithArgs("server", "/data")
-                             .WithHttpEndpoint(targetPort: 9000, name: "api")
-                             .WithHttpEndpoint(targetPort: 9001, name: "console")
-                             .WithEnvironment("MINIO_ROOT_USER", "minioadmin")
-                             .WithEnvironment("MINIO_ROOT_PASSWORD", "minioadmin");
-
-        return new Infrastructure(rabbitmq, redis, postgres, storage);
+        return new Infrastructure(rabbitmq, redis, postgres);
     }
 
     private static IResourceBuilder<ParameterResource> AddParameterFromConfig(
@@ -233,6 +225,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WithEnvironment("ASPNETCORE_HTTPS_PORT", "0") // Disable HTTPS redirection in development/testing
                 .WithHttpHealthCheck("/upload/readiness"),
             config);
 
@@ -390,13 +383,10 @@ static partial class Program
         // --- Python Services ---
         var geometryService = builder.AddPythonApp("geometry-service", "../../Maliev.GeometryService", "src/main.py")
             .WithReference(infrastructure.RabbitMQ)
-            .WithReference(infrastructure.Storage)
-            .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ.GetConnectionString())
-            .WithEnvironment("STORAGE_ENDPOINT", infrastructure.Storage.GetEndpoint("api"))
-            .WithEnvironment("STORAGE_ACCESS_KEY", "minioadmin")
-            .WithEnvironment("STORAGE_SECRET_KEY", "minioadmin")
+            .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ)
+            .WithHttpEndpoint(targetPort: 8080, name: "http")
             .WithHttpHealthCheck("/geometry/readiness")
-            .WithHttpEndpoint(targetPort: 8080);
+            .WithVirtualEnvironment(".venv");
     }
 
     /// <summary>
@@ -431,8 +421,7 @@ record SharedConfiguration(
 record Infrastructure(
     IResourceBuilder<RabbitMQServerResource> RabbitMQ,
     IResourceBuilder<RedisResource> Redis,
-    IResourceBuilder<PostgresServerResource> Postgres,
-    IResourceBuilder<ContainerResource> Storage);
+    IResourceBuilder<PostgresServerResource> Postgres);
 
 /// <summary>
 /// Database references for all microservices.
