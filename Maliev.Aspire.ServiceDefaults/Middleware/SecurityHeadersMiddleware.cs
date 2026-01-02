@@ -21,7 +21,7 @@ public class SecurityHeadersMiddleware
         context.Response.Headers.Append("Permissions-Policy",
             "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()");
 
-        // Content Security Policy (allows Swagger/Scalar in dev)
+        // Content Security Policy (allows Scalar in dev)
         context.Response.Headers.Append("Content-Security-Policy",
             "default-src 'self'; " +
             "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +

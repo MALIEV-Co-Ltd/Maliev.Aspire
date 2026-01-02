@@ -1,3 +1,4 @@
+using Aspire.Hosting.Python;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
 using Microsoft.Extensions.Configuration;
 
@@ -77,6 +78,7 @@ static partial class Program
         // --- PostgreSQL Database Server ---
         var postgres = builder.AddPostgres("postgres-server")
                               .WithImageTag("18-alpine")
+                              .WithArgs("-c", "max_connections=500") // Increase for many microservices
                               .WithPgAdmin(option => 
                               {
                                   option.WithImageTag("8.14")
@@ -245,6 +247,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WithEnvironment("ASPNETCORE_HTTPS_PORT", "0") // Disable HTTPS redirection in development/testing
                 .WithHttpHealthCheck("/upload/readiness"),
             config);
 
@@ -460,6 +463,14 @@ static partial class Program
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/supplier/readiness"),
             config);
+
+        // --- Python Services ---
+        var geometryService = builder.AddPythonApp("geometry-service", "../../Maliev.GeometryService", "src/main.py")
+            .WithReference(infrastructure.RabbitMQ)
+            .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ)
+            .WithHttpEndpoint(targetPort: 8080, name: "http")
+            .WithHttpHealthCheck("/geometry/readiness")
+            .WithVirtualEnvironment(".venv");
     }
 
     /// <summary>
@@ -472,6 +483,7 @@ static partial class Program
         return project
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
+            .WithEnvironment("Jwt__SecurityKey", "test-key-at-least-32-characters-long-for-integration-tests") // Symmetric fallback
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins);
