@@ -1,4 +1,3 @@
-using Aspire.Hosting.Python;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
 using Microsoft.Extensions.Configuration;
 
@@ -79,7 +78,7 @@ static partial class Program
         var postgres = builder.AddPostgres("postgres-server")
                               .WithImageTag("18-alpine")
                               .WithArgs("-c", "max_connections=500") // Increase for many microservices
-                              .WithPgAdmin(option => 
+                              .WithPgAdmin(option =>
                               {
                                   option.WithImageTag("8.14")
                                         .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
@@ -89,9 +88,9 @@ static partial class Program
     }
 
     private static IResourceBuilder<ParameterResource> AddParameterFromConfig(
-        this IDistributedApplicationBuilder builder, 
-        string parameterName, 
-        string configKey, 
+        this IDistributedApplicationBuilder builder,
+        string parameterName,
+        string configKey,
         bool secret = false)
     {
         var parameter = builder.AddParameter(parameterName, secret: secret);
@@ -469,6 +468,7 @@ static partial class Program
             .WithReference(infrastructure.RabbitMQ)
             .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ)
             .WithHttpEndpoint(targetPort: 8080, name: "http")
+            .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
             .WithHttpHealthCheck("/geometry/readiness")
             .WithVirtualEnvironment(".venv");
     }
