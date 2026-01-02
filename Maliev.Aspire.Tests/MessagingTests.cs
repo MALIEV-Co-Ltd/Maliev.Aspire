@@ -8,6 +8,9 @@ using System.Linq;
 using System.Net.Http.Json;
 using Aspire.Hosting;
 using Aspire.Hosting.Testing;
+using System.Security.Cryptography;
+using System.Text;
+using Maliev.Aspire.ServiceDefaults.Testing;
 
 namespace Maliev.Aspire.Tests;
 
@@ -48,6 +51,7 @@ public class MessagingTests : IAsyncLifetime
         _output.WriteLine($"Payment ID: {paymentId}");
 
         var paymentApiClient = _appFactory!.CreateHttpClient("maliev-paymentservice-api");
+        paymentApiClient.WithTestAuth(issuer: "https://localhost:7001", audience: "https://localhost:7001");
 
         // Step 1: Call PaymentService test endpoint to publish PaymentCompletedEvent to RabbitMQ
         var publishRequest = new
@@ -75,6 +79,7 @@ public class MessagingTests : IAsyncLifetime
         // Step 3: Verify NotificationService received and processed the event
         _output.WriteLine("\n[Step 3] Verifying NotificationService received the event by querying delivery logs...");
         var notificationApiClient = _appFactory.CreateHttpClient("maliev-notificationservice-api");
+        notificationApiClient.WithTestAuth(issuer: "https://localhost:7001", audience: "https://localhost:7001", permissions: ["notification.logs.read"]);
 
         var deliveryLogsResponse = await notificationApiClient.GetAsync($"/notification/v1/delivery-logs?userId={orderId}&channelType=rabbitmq-event");
 

@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
+using Maliev.Aspire.ServiceDefaults.Caching;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -59,12 +61,19 @@ public static class RedisExtensions
         // Apply custom configuration if provided
         configureOptions?.Invoke(redisOptions);
 
+        // Register IConnectionMultiplexer as a singleton (needed for ICacheService pattern removal)
+        builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+            ConnectionMultiplexer.Connect(redisOptions));
+
         builder.Services.AddStackExchangeRedisCache(options =>
         {
             options.Configuration = redisConnectionString;
             options.InstanceName = instanceName ?? $"{builder.Environment.ApplicationName}:";
             options.ConfigurationOptions = redisOptions;
         });
+
+        // Register the standardized ICacheService
+        builder.Services.AddSingleton<ICacheService, RedisCacheService>();
 
         // Add Redis health check (skip in Testing as connection may not be valid yet)
         if (!builder.Environment.IsEnvironment("Testing"))

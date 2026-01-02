@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
+using Maliev.Aspire.ServiceDefaults.Testing;
 
 namespace Maliev.Aspire.ServiceDefaults.IAM;
 
@@ -43,6 +44,7 @@ public abstract class IAMRegistrationService
         var roles = GetPredefinedRoles().ToList();
 
         var client = _httpClientFactory.CreateClient("IAMService");
+        client.WithTestAuth("system-iam-registrator");
 
         if (permissions.Any())
         {
