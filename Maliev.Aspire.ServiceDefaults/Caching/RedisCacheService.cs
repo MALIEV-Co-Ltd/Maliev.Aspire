@@ -43,7 +43,7 @@ public class RedisCacheService : ICacheService
             var database = _redis.GetDatabase();
             var prefixedKey = _instanceName + key;
             var value = await database.StringGetAsync(prefixedKey);
-            
+
             if (value.IsNull)
             {
                 return null;
@@ -70,7 +70,7 @@ public class RedisCacheService : ICacheService
         {
             var database = _redis.GetDatabase();
             var prefixedKey = _instanceName + key;
-            
+
             string json;
             if (value is string s)
             {
