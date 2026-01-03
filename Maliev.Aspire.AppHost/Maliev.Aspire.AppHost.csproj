@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <UserSecretsId>82472bbe-c658-4916-bc6c-9b67ba086ee2</UserSecretsId>
+    <UserSecretsId>maliev-aspire</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,7 +20,9 @@
     <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.1.0" />
     <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.1.0" />
     <PackageReference Include="Aspire.Hosting.Redis" Version="13.1.0" />
+  </ItemGroup>
 
+  <ItemGroup>
     <ProjectReference Include="..\..\Maliev.AuthService\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CareerService\Maliev.CareerService.Api\Maliev.CareerService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ChatbotService\Maliev.ChatbotService.Api\Maliev.ChatbotService.Api.csproj" />
