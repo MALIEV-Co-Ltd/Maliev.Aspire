@@ -26,6 +26,18 @@ public static class RedisExtensions
         string? instanceName = null,
         Action<ConfigurationOptions>? configureOptions = null)
     {
+        // Check if Redis is enabled via configuration
+        bool redisEnabled = builder.Configuration.GetValue<bool>("Redis:Enabled", true) &&
+                          builder.Configuration.GetValue<bool>("Cache:RedisEnabled", true);
+
+        // If Redis is explicitly disabled, skip setup entirely
+        if (!redisEnabled)
+        {
+            builder.Services.AddDistributedMemoryCache();
+            builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
+            return builder;
+        }
+
         var redisConnectionString = builder.Configuration.GetConnectionString("redis");
 
         if (string.IsNullOrEmpty(redisConnectionString))
@@ -39,7 +51,7 @@ public static class RedisExtensions
             {
                 throw new InvalidOperationException(
                     "Redis connection string 'redis' not configured. " +
-                    "Redis is required in all environments.");
+                    "Redis is required in all environments unless explicitly disabled via Redis:Enabled=false or Cache:RedisEnabled=false.");
             }
         }
 
@@ -76,14 +88,14 @@ public static class RedisExtensions
         builder.Services.AddSingleton<ICacheService, RedisCacheService>();
 
         // Add Redis health check (skip in Testing as connection may not be valid yet)
-        if (!builder.Environment.IsEnvironment("Testing"))
+        if (!builder.Environment.IsEnvironment("Testing") && redisEnabled)
         {
             builder.Services.AddHealthChecks()
                 .AddRedis(
                     redisConnectionString,
                     name: "redis",
                     tags: ["ready"],
-                    timeout: TimeSpan.FromSeconds(20));
+                    timeout: TimeSpan.FromMinutes(2)); // Increased timeout to allow Redis container to start
         }
 
 

@@ -1,4 +1,5 @@
 using Maliev.Aspire.ServiceDefaults.IAM;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Microsoft.Extensions.Hosting;
@@ -20,6 +21,17 @@ public static class IAMRegistrationExtensions
         this IServiceCollection services)
         where TService : IAMRegistrationService
     {
+        // Extract service name from type name (e.g., "AccountingIAMRegistrationService" -> "AccountingService")
+        var typeName = typeof(TService).Name;
+        var serviceName = typeName.Replace("IAMRegistrationService", "");
+
+        // Register service account token provider
+        services.AddSingleton<IServiceAccountTokenProvider>(sp =>
+        {
+            var configuration = sp.GetRequiredService<IConfiguration>();
+            return new ServiceAccountTokenProvider(configuration, serviceName);
+        });
+
         // Register the service-specific registration implementation
         services.AddSingleton<TService>();
         services.AddSingleton<IAMRegistrationService>(sp => sp.GetRequiredService<TService>());

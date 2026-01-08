@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 using Microsoft.AspNetCore.Authorization;
 using Maliev.Aspire.ServiceDefaults.Authorization;
+using Maliev.Aspire.ServiceDefaults.IAM;
+using Microsoft.Extensions.Logging;
 using System.Diagnostics.CodeAnalysis;
 using Polly;
 
@@ -15,31 +17,61 @@ namespace Maliev.Aspire.ServiceDefaults;
 public static class IAMExtensions
 {
     /// <summary>
-    /// Adds and configures a resilient IAM client.
+    /// Adds and configures a resilient IAM client with service account authentication.
     /// </summary>
     public static IServiceCollection AddIAMClient(
         this IServiceCollection services,
         IConfiguration configuration,
         string serviceName)
     {
-        services.AddHttpClient("IAMService", client =>
+        var httpClientBuilder = services.AddHttpClient("IAMService", client =>
         {
             var iamConfig = configuration.GetSection("IAM");
-            var baseUrl = iamConfig["BaseUrl"] ?? "http://maliev-iamservice-api";
+
+            // ENFORCED PATTERN: Services:IAMService:BaseUrl (no fallbacks)
+            var baseUrl = configuration["Services:IAMService:BaseUrl"]
+                ?? throw new InvalidOperationException(
+                    "Required configuration 'Services:IAMService:BaseUrl' is missing. Check appsettings.json or environment variables.");
 
             client.BaseAddress = new Uri(baseUrl);
             client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);
 
-            var timeout = iamConfig.GetValue<int?>("Timeout") ?? 30000;
+            // Timeout must be >= TotalRequestTimeout (5m) to let resilience handler control retries
+            // Default resilience handler is configured with 5m total timeout in AddServiceDefaults
+            var timeout = iamConfig.GetValue<int?>("Timeout") ?? 300000; // 5 minutes default (allows for retries)
             client.Timeout = TimeSpan.FromMilliseconds(timeout);
+        });
 
-            var token = iamConfig["ServiceAccountToken"];
-            if (!string.IsNullOrEmpty(token))
+        httpClientBuilder.AddHttpMessageHandler(sp =>
+        {
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            var startupLogger = loggerFactory.CreateLogger("IAM.Handler.Factory");
+
+            try
             {
-                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                startupLogger.LogDebug("ServiceAccountAuthenticationHandler factory invoked for {ServiceName}", serviceName);
+
+                // Resolve dependencies at request time (after AddIAMRegistration has registered the token provider)
+                var tokenProvider = sp.GetRequiredService<IServiceAccountTokenProvider>();
+                startupLogger.LogDebug("Token provider resolved successfully for {ServiceName}", serviceName);
+
+                var logger = sp.GetRequiredService<ILogger<ServiceAccountAuthenticationHandler>>();
+                var handler = new ServiceAccountAuthenticationHandler(tokenProvider, logger);
+
+                startupLogger.LogDebug("ServiceAccountAuthenticationHandler created successfully for {ServiceName}", serviceName);
+                return handler;
             }
-        })
-        .AddStandardResilienceHandler();
+            catch (Exception ex)
+            {
+                startupLogger.LogError(ex, "FAILED to create ServiceAccountAuthenticationHandler for {ServiceName}", serviceName);
+                throw;
+            }
+        });
+
+        httpClientBuilder.AddServiceDiscovery(); // Enable service discovery for IAM client
+
+        // Note: Standard resilience handler is already applied by ConfigureHttpClientDefaults in AddServiceDefaults()
+        // No need to add a duplicate handler here
 
         return services;
     }

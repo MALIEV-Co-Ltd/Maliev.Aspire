@@ -93,7 +93,8 @@ public static class HttpClientExtensions
     }
 
     /// <summary>
-    /// Adds a typed service HTTP client with standardized Triple Fallback discovery and resilience.
+    /// Adds a typed service HTTP client with ENFORCED configuration pattern.
+    /// REQUIRED: Services:{ServiceName}:BaseUrl must be configured (no fallbacks).
     /// </summary>
     public static IHttpClientBuilder AddServiceClient<TInterface, TImplementation>(
         this IServiceCollection services,
@@ -104,19 +105,17 @@ public static class HttpClientExtensions
     {
         var httpClientBuilder = services.AddHttpClient<TInterface, TImplementation>((sp, client) =>
         {
-            var normalizedName = serviceName.ToLowerInvariant().Replace("service", "");
-            var dnsName = $"maliev-{normalizedName}service-api";
-
-            // Triple Fallback URI logic
-            var url = configuration[$"{serviceName}:BaseUrl"]
-                ?? configuration.GetConnectionString(serviceName)
-                ?? $"http://{dnsName}";
+            // ENFORCED PATTERN: Services:{ServiceName}:BaseUrl (no fallbacks)
+            var url = configuration[$"Services:{serviceName}:BaseUrl"]
+                ?? throw new InvalidOperationException(
+                    $"Required configuration 'Services:{serviceName}:BaseUrl' is missing. Check appsettings.json or environment variables.");
 
             client.BaseAddress = new Uri(url);
             client.Timeout = TimeSpan.FromSeconds(60);
         });
 
-        httpClientBuilder.AddStandardResilienceHandler();
+        // Note: Standard resilience handler is already applied by ConfigureHttpClientDefaults in AddServiceDefaults()
+        // No need to add a duplicate handler here
 
         return httpClientBuilder;
     }
@@ -134,7 +133,8 @@ public static class HttpClientExtensions
     }
 
     /// <summary>
-    /// Adds generic service HTTP client with configurable name and URL.
+    /// Adds generic service HTTP client with ENFORCED configuration pattern.
+    /// REQUIRED: Services:{ServiceName}:BaseUrl must be configured (no fallbacks).
     /// </summary>
     public static IHttpClientBuilder AddServiceClient(
         this IServiceCollection services,
@@ -145,13 +145,12 @@ public static class HttpClientExtensions
     {
         var httpClientBuilder = services.AddHttpClient(serviceName, (sp, client) =>
         {
-            var normalizedName = serviceName.ToLowerInvariant().Replace("service", "");
-            var dnsName = $"maliev-{normalizedName}service-api";
-
+            // ENFORCED PATTERN: Services:{ServiceName}:BaseUrl (no fallbacks)
+            // Only allow explicit baseUrl parameter for test overrides
             var url = baseUrl
-                ?? configuration[$"{serviceName}:BaseUrl"]
-                ?? configuration.GetConnectionString(serviceName)
-                ?? $"http://{dnsName}";
+                ?? configuration[$"Services:{serviceName}:BaseUrl"]
+                ?? throw new InvalidOperationException(
+                    $"Required configuration 'Services:{serviceName}:BaseUrl' is missing. Check appsettings.json or environment variables.");
 
             client.BaseAddress = new Uri(url);
             client.Timeout = TimeSpan.FromSeconds(60);
@@ -159,7 +158,8 @@ public static class HttpClientExtensions
             configureClient?.Invoke(client);
         });
 
-        httpClientBuilder.AddStandardResilienceHandler();
+        // Note: Standard resilience handler is already applied by ConfigureHttpClientDefaults in AddServiceDefaults()
+        // No need to add a duplicate handler here
 
         return httpClientBuilder;
     }

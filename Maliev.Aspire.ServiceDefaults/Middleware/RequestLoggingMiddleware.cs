@@ -19,6 +19,12 @@ public class RequestLoggingMiddleware
     {
         var stopwatch = Stopwatch.StartNew();
 
+        if (IsHealthCheck(context.Request.Path))
+        {
+            await _next(context);
+            return;
+        }
+
         _logger.LogInformation(
             "HTTP {Method} {Path} started",
             context.Request.Method,
@@ -39,5 +45,15 @@ public class RequestLoggingMiddleware
                 context.Response.StatusCode,
                 stopwatch.ElapsedMilliseconds);
         }
+    }
+
+    private static bool IsHealthCheck(PathString path)
+    {
+        return path.HasValue && (
+            path.Value.EndsWith("/readiness", StringComparison.OrdinalIgnoreCase) ||
+            path.Value.EndsWith("/liveness", StringComparison.OrdinalIgnoreCase) ||
+            path.Value.EndsWith("/aspire-liveness", StringComparison.OrdinalIgnoreCase) ||
+            path.Value.EndsWith("/health", StringComparison.OrdinalIgnoreCase) ||
+            path.Value.EndsWith("/metrics", StringComparison.OrdinalIgnoreCase));
     }
 }

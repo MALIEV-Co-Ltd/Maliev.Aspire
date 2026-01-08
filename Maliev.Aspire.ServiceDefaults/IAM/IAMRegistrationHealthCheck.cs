@@ -30,7 +30,7 @@ public class IAMRegistrationHealthCheck : IHealthCheck
                 Task.FromResult(HealthCheckResult.Healthy("IAM registration successful", data)),
 
             RegistrationStatus.Pending or RegistrationStatus.Attempting =>
-                Task.FromResult(HealthCheckResult.Degraded("IAM registration in progress", null, data)),
+                Task.FromResult(HealthCheckResult.Healthy("IAM registration in progress", data)),
 
             RegistrationStatus.PartiallyRegistered =>
                 Task.FromResult(HealthCheckResult.Degraded(

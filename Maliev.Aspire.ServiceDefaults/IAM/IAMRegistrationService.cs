@@ -1,6 +1,5 @@
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
-using Maliev.Aspire.ServiceDefaults.Testing;
 
 namespace Maliev.Aspire.ServiceDefaults.IAM;
 
@@ -11,18 +10,25 @@ namespace Maliev.Aspire.ServiceDefaults.IAM;
 public abstract class IAMRegistrationService
 {
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IServiceAccountTokenProvider _tokenProvider;
     private readonly ILogger _logger;
     private readonly string _serviceName;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IAMRegistrationService"/> class.
     /// </summary>
+    /// <param name="httpClientFactory">The HTTP client factory</param>
+    /// <param name="tokenProvider">The token provider</param>
+    /// <param name="logger">The logger</param>
+    /// <param name="serviceName">The service name</param>
     protected IAMRegistrationService(
         IHttpClientFactory httpClientFactory,
+        IServiceAccountTokenProvider tokenProvider,
         ILogger logger,
         string serviceName)
     {
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        _tokenProvider = tokenProvider ?? throw new ArgumentNullException(nameof(tokenProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _serviceName = serviceName ?? throw new ArgumentNullException(nameof(serviceName));
     }
@@ -36,50 +42,68 @@ public abstract class IAMRegistrationService
     /// </summary>
     public async Task RegisterAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Starting IAM registration for {ServiceName}...", _serviceName);
+        // Staggered startup: Random delay 0-5 seconds to avoid overwhelming IAM database
+        var delayMs = Random.Shared.Next(0, 5000);
+        _logger.LogInformation("Starting IAM registration for {ServiceName} (staggered delay: {DelayMs}ms)...", _serviceName, delayMs);
+        await Task.Delay(delayMs, cancellationToken);
 
         var permissions = GetPermissions().ToList();
         ValidatePermissions(permissions);
 
         var roles = GetPredefinedRoles().ToList();
 
-        var client = _httpClientFactory.CreateClient("IAMService");
-        client.WithTestAuth("system-iam-registrator");
-
         if (permissions.Any())
         {
-            await RegisterPermissionsAsync(client, permissions, cancellationToken);
+            await RegisterPermissionsAsync(permissions, cancellationToken);
         }
 
         if (roles.Any())
         {
-            await RegisterRolesAsync(client, roles, cancellationToken);
+            await RegisterRolesAsync(roles, cancellationToken);
         }
 
         _logger.LogInformation("Successfully registered permissions and roles for {ServiceName} with IAM.", _serviceName);
     }
 
-    private async Task RegisterPermissionsAsync(HttpClient client, IEnumerable<PermissionRegistration> permissions, CancellationToken cancellationToken)
+    private async Task RegisterPermissionsAsync(IEnumerable<PermissionRegistration> permissions, CancellationToken cancellationToken)
     {
+        var client = _httpClientFactory.CreateClient("IAMService");
+        var token = _tokenProvider.GetToken();
+
         var payload = new
         {
             ServiceName = _serviceName,
             Permissions = permissions
         };
 
-        var response = await client.PostAsJsonAsync("/iam/v1/permissions/register", payload, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/iam/v1/permissions/register")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("ServiceAccount", token);
+
+        var response = await client.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
     }
 
-    private async Task RegisterRolesAsync(HttpClient client, IEnumerable<RoleRegistration> roles, CancellationToken cancellationToken)
+    private async Task RegisterRolesAsync(IEnumerable<RoleRegistration> roles, CancellationToken cancellationToken)
     {
+        var client = _httpClientFactory.CreateClient("IAMService");
+        var token = _tokenProvider.GetToken();
+
         var payload = new
         {
             ServiceName = _serviceName,
             Roles = roles
         };
 
-        var response = await client.PostAsJsonAsync("/iam/v1/roles/register", payload, cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/iam/v1/roles/register")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("ServiceAccount", token);
+
+        var response = await client.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
     }
 

@@ -1,14 +1,9 @@
-using System.Net;
-using System.Text;
-using System.Text.Json;
-using DotNet.Testcontainers.Builders;
-using DotNet.Testcontainers.Containers;
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
-using Xunit;
+using System.Net;
 using WireMock.RequestBuilders;
 using WireMock.ResponseBuilders;
 using WireMock.Server;
@@ -19,8 +14,8 @@ public class TestIAMRegistrationService : IAMRegistrationService
 {
     private readonly bool _includeInvalid;
 
-    public TestIAMRegistrationService(IHttpClientFactory httpClientFactory, ILogger logger, bool includeInvalid = false)
-        : base(httpClientFactory, logger, "TestService")
+    public TestIAMRegistrationService(IHttpClientFactory httpClientFactory, IServiceAccountTokenProvider tokenProvider, ILogger logger, bool includeInvalid = false)
+        : base(httpClientFactory, tokenProvider, logger, "TestService")
     {
         _includeInvalid = includeInvalid;
     }
@@ -72,7 +67,8 @@ public class IAMRegistrationServiceTests
         httpClientFactoryMock.Setup(x => x.CreateClient("IAMService")).Returns(httpClient);
 
         var loggerMock = new Mock<ILogger<TestIAMRegistrationService>>();
-        var service = new TestIAMRegistrationService(httpClientFactoryMock.Object, loggerMock.Object);
+        var tokenProviderMock = new Mock<IServiceAccountTokenProvider>();
+        var service = new TestIAMRegistrationService(httpClientFactoryMock.Object, tokenProviderMock.Object, loggerMock.Object);
 
         // Act
         await service.RegisterAsync(CancellationToken.None);
@@ -104,40 +100,43 @@ public class IAMRegistrationServiceTests
         server
             .Given(Request.Create().WithPath("/iam/v1/roles/register").UsingPost())
             .RespondWith(Response.Create().WithStatusCode(200));
-    
-            var services = new ServiceCollection();
-            services.AddHttpClient("IAMService", client =>
-            {
-                client.BaseAddress = new Uri(server.Urls[0]);
-            });
-            services.AddLogging();
-            var serviceProvider = services.BuildServiceProvider();
-    
-            var logger = serviceProvider.GetRequiredService<ILogger<TestIAMRegistrationService>>();
-            var clientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
-    
-            var registrationService = new TestIAMRegistrationService(clientFactory, logger);
-    
-            // Act
-            await registrationService.RegisterAsync(CancellationToken.None);
-    
-            // Assert
-            var permissionLog = server.LogEntries.FirstOrDefault(e => e.RequestMessage.AbsolutePath.Contains("permissions/register"));      
-            var roleLog = server.LogEntries.FirstOrDefault(e => e.RequestMessage.AbsolutePath.Contains("roles/register"));
-    
-            Assert.NotNull(permissionLog);
-            Assert.NotNull(roleLog);
-        }
-    
-        [Fact]
-        public async Task RegisterAsync_InvalidPermissionFormat_ThrowsInvalidOperationException()
+
+        var services = new ServiceCollection();
+        services.AddHttpClient("IAMService", client =>
         {
-            // Arrange
-            var httpClientFactoryMock = new Mock<IHttpClientFactory>();
-            var loggerMock = new Mock<ILogger<TestIAMRegistrationService>>();
-    
-            var service = new TestIAMRegistrationService(httpClientFactoryMock.Object, loggerMock.Object, includeInvalid: true);
-    
-            // Act & Assert
-            await Assert.ThrowsAsync<InvalidOperationException>(() => service.RegisterAsync(CancellationToken.None));
-        }}
+            client.BaseAddress = new Uri(server.Urls[0]);
+        });
+        services.AddLogging();
+        var serviceProvider = services.BuildServiceProvider();
+
+        var logger = serviceProvider.GetRequiredService<ILogger<TestIAMRegistrationService>>();
+        var clientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
+        var tokenProviderMock = new Mock<IServiceAccountTokenProvider>();
+
+        var registrationService = new TestIAMRegistrationService(clientFactory, tokenProviderMock.Object, logger);
+
+        // Act
+        await registrationService.RegisterAsync(CancellationToken.None);
+
+        // Assert
+        var permissionLog = server.LogEntries.FirstOrDefault(e => e.RequestMessage.AbsolutePath.Contains("permissions/register"));
+        var roleLog = server.LogEntries.FirstOrDefault(e => e.RequestMessage.AbsolutePath.Contains("roles/register"));
+
+        Assert.NotNull(permissionLog);
+        Assert.NotNull(roleLog);
+    }
+
+    [Fact]
+    public async Task RegisterAsync_InvalidPermissionFormat_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        var loggerMock = new Mock<ILogger<TestIAMRegistrationService>>();
+        var tokenProviderMock = new Mock<IServiceAccountTokenProvider>();
+
+        var service = new TestIAMRegistrationService(httpClientFactoryMock.Object, tokenProviderMock.Object, loggerMock.Object, includeInvalid: true);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RegisterAsync(CancellationToken.None));
+    }
+}
