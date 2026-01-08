@@ -36,8 +36,12 @@ public class BackgroundIAMRegistrationService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Wait a bit for service to fully start
-        await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+        // Wait for service to fully start + random stagger to prevent thundering herd
+        var baseDelay = TimeSpan.FromSeconds(2);
+        var stagger = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 3000)); // 0-3 seconds random delay
+        await Task.Delay(baseDelay + stagger, stoppingToken);
+
+        _logger.LogInformation("Starting IAM registration after {Delay}ms delay", (baseDelay + stagger).TotalMilliseconds);
 
         const int maxAttempts = 10;
         int attempt = 0;

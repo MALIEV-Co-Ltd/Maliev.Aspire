@@ -29,6 +29,32 @@ public static class Extensions
     /// <returns>The configured <see cref="IHostApplicationBuilder"/>.</returns>
     public static IHostApplicationBuilder AddServiceDefaults(this IHostApplicationBuilder builder)
     {
+        // Reduce log verbosity for noisy categories
+        // ASP.NET Core infrastructure (keep errors only)
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Error);
+        builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Warning); // Reduce startup/shutdown noise
+
+        // Health checks (only log errors during checks)
+        builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService", LogLevel.Error);
+
+        // Service discovery and resilience (only errors)
+        builder.Logging.AddFilter("Microsoft.Extensions.ServiceDiscovery", LogLevel.Error);
+        builder.Logging.AddFilter("Polly", LogLevel.Error);
+
+        // Infrastructure components
+        builder.Logging.AddFilter("StackExchange.Redis", LogLevel.Warning); // Redis connection noise
+        builder.Logging.AddFilter("Npgsql", LogLevel.Warning); // PostgreSQL connection noise
+
+        // MassTransit/RabbitMQ (very verbose, only log warnings and errors)
+        builder.Logging.AddFilter("MassTransit", LogLevel.Warning);
+        builder.Logging.AddFilter("MassTransit.Messages", LogLevel.None); // Disable message content logging for security
+
+        // IAM and Authorization
+        builder.Logging.AddFilter("IAM.Handler.Factory", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Authorization", LogLevel.Warning);
+
         // --- OpenTelemetry ---
         builder.Logging.AddOpenTelemetry(logging =>
         {
@@ -73,32 +99,31 @@ public static class Extensions
             // Add a default liveness check to ensure app is responsive
             .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
 
-        // Configure HealthCheck publisher options for background checks if needed
+        // Configure HealthCheck publisher options for background checks
         builder.Services.Configure<HealthCheckPublisherOptions>(options =>
         {
-            options.Delay = TimeSpan.FromSeconds(5);
+            options.Delay = TimeSpan.FromSeconds(10); // Delay first check to allow infrastructure to start
             options.Period = TimeSpan.FromSeconds(30);
+            options.Timeout = TimeSpan.FromMinutes(2); // Individual check timeout
         });
 
         // --- Service Discovery and Resilience ---
         builder.Services.AddServiceDiscovery();
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            // Turn on resilience by default
-            http.AddStandardResilienceHandler();
+            // Turn on resilience by default with relaxed timeouts for IAM registration
+            http.AddStandardResilienceHandler(options =>
+            {
+                // Increased timeouts to accommodate IAM registration during startup (20+ services registering)
+                // and other potentially slow service-to-service operations
+                options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(1); // 1m per attempt (up from 30s)
+                options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5); // 5m total (up from 90s)
+                options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(2); // Must be >= 2 * AttemptTimeout
+            });
 
             // Turn on service discovery by default
             http.AddServiceDiscovery();
         });
-
-        // Specifically relax timeouts for IAM Service registration which can be heavy during startup
-        builder.Services.AddHttpClient("IAMService")
-            .AddStandardResilienceHandler(options =>
-            {
-                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
-                options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(90);
-                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(120); // Must be >= 2 * AttemptTimeout
-            });
 
         return builder;
     }
@@ -136,10 +161,21 @@ public static class Extensions
             throw new ArgumentException("Service prefix is required for MapDefaultEndpoints", nameof(servicePrefix));
         }
 
-        // Liveness endpoint - simple check that always returns healthy (for ingress)
-        app.MapGet($"/{servicePrefix}/liveness", () => "Healthy").AllowAnonymous();
+        // Aspire-specific liveness check (minimal, fast)
+        // Only checks if service process is running - optimized for Aspire orchestration
+        // This endpoint responds in < 10ms to avoid Aspire's hardcoded 3-second timeout
+        app.MapGet($"/{servicePrefix}/aspire-liveness", () => "Healthy")
+            .WithTags("aspire")
+            .AllowAnonymous();
 
-        // Readiness endpoint - checks all dependencies (for ingress)
+        // Liveness endpoint - simple check that always returns healthy (for Kubernetes ingress)
+        app.MapGet($"/{servicePrefix}/liveness", () => "Healthy")
+            .WithTags("kubernetes")
+            .AllowAnonymous();
+
+        // Readiness endpoint - comprehensive checks for all dependencies (for Kubernetes ingress)
+        // Performs thorough validation: Database, Redis, RabbitMQ, IAM registration
+        // May take 900-2600ms depending on infrastructure load
         app.MapHealthChecks($"/{servicePrefix}/readiness", new HealthCheckOptions
         {
             Predicate = _ => true, // All health checks must pass
@@ -164,7 +200,8 @@ public static class Extensions
                 });
                 await context.Response.WriteAsync(result);
             }
-        });
+        })
+        .WithTags("kubernetes");
 
         // OpenTelemetry Prometheus metrics endpoint at /{servicePrefix}/metrics
         app.MapPrometheusScrapingEndpoint($"/{servicePrefix}/metrics");

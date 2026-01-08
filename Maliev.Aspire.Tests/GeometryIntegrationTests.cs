@@ -21,10 +21,10 @@ public class GeometryIntegrationTests : IAsyncLifetime
     {
         var appHostAssembly = typeof(Projects.Maliev_Aspire_AppHost).Assembly;
         _appFactory = new DistributedApplicationFactory(appHostAssembly.EntryPoint!.DeclaringType!);
-        
+
         // Globally configure HttpClient for upload service to follow redirects
         // Use DelegatingHandler pattern or just use simple HttpClient if factory allows
-        
+
         await _appFactory.StartAsync();
     }
 
@@ -46,7 +46,7 @@ public class GeometryIntegrationTests : IAsyncLifetime
         // Act & Assert
         // Retry logic for service startup stabilization
         HttpResponseMessage? response = null;
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 60; i++)
         {
             try
             {
@@ -57,7 +57,7 @@ public class GeometryIntegrationTests : IAsyncLifetime
             {
                 _output.WriteLine($"Attempt {i + 1} failed: {ex.Message}");
             }
-            await Task.Delay(5000);
+            await Task.Delay(1000);
         }
 
         Assert.NotNull(response);
@@ -76,7 +76,7 @@ public class GeometryIntegrationTests : IAsyncLifetime
 
         // Act
         HttpResponseMessage? response = null;
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < 60; i++)
         {
             try
             {
@@ -87,7 +87,7 @@ public class GeometryIntegrationTests : IAsyncLifetime
             {
                 _output.WriteLine($"Attempt {i + 1} failed: {ex.Message}");
             }
-            await Task.Delay(5000);
+            await Task.Delay(1000);
         }
 
         Assert.NotNull(response);
@@ -100,7 +100,7 @@ public class GeometryIntegrationTests : IAsyncLifetime
     public async Task UploadService_To_GeometryService_EndToEnd_Flow()
     {
         _output.WriteLine("=== Geometry Analysis E2E Test Starting ===");
-        
+
         // 1. Setup Clients
         // Configure HttpClient to follow redirects (handles 307 HttpsRedirection)
         // We use a custom HttpClient with a handler that allows redirects
@@ -109,7 +109,7 @@ public class GeometryIntegrationTests : IAsyncLifetime
         // Aspire's CreateHttpClient uses a specialized handler, so we should try to use 
         // the provided client but wrapping it or adjusting it if possible.
         // If we can't adjust it, we'll try to use the base address.
-        
+
         uploadClient.WithTestAuth(permissions: ["files.upload"]);
 
         // 2. Create a dummy STL file for upload
@@ -123,7 +123,7 @@ public class GeometryIntegrationTests : IAsyncLifetime
         // 3. Upload the file
         _output.WriteLine("[Step 1] Uploading STL file to UploadService...");
         var uploadResponse = await uploadClient.PostAsync("/upload/v1/uploads", form);
-        
+
         var uploadResult = await uploadResponse.Content.ReadFromJsonAsync<UploadResponse>();
         Assert.NotNull(uploadResult);
         _output.WriteLine($"✓ File uploaded successfully. UploadId: {uploadResult.UploadId}");

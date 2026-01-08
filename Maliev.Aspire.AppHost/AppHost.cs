@@ -24,7 +24,7 @@ var grafana = builder.AddContainer("grafana", "grafana/grafana")
 builder.AddOpenTelemetryCollector("otelcollector", "../otelcollector/config.yaml")
     .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp");
 
-Program.ConfigureServices(builder, infrastructure, databases, config, grafana);
+Program.ConfigureServices(builder, infrastructure, databases, config);
 
 builder.Build().Run();
 
@@ -42,6 +42,7 @@ static partial class Program
         builder.Configuration.AddJsonFile("sharedsecrets.json", optional: true);
 
         // Define these as formal Aspire Parameters to show up in the Dashboard
+        var jwtSecurityKey = builder.AddParameterFromConfig("JwtSecurityKey", "Jwt:SecurityKey", secret: true);
         var jwtPublicKey = builder.AddParameterFromConfig("JwtPublicKey", "Jwt:PublicKey", secret: true);
         var jwtIssuer = builder.AddParameterFromConfig("JwtIssuer", "Jwt:Issuer");
         var jwtAudience = builder.AddParameterFromConfig("JwtAudience", "Jwt:Audience");
@@ -51,7 +52,13 @@ static partial class Program
         var origins = builder.Configuration.GetSection("CORS:AllowedOrigins").Get<string[]>();
         builder.Configuration["Parameters:CorsAllowedOrigins"] = origins != null ? string.Join(",", origins) : string.Empty;
 
-        return new SharedConfiguration(jwtPublicKey, jwtIssuer, jwtAudience, corsAllowedOrigins);
+        return new SharedConfiguration(
+            JwtSecurityKey: jwtSecurityKey,
+            JwtPublicKey: jwtPublicKey,
+            JwtIssuer: jwtIssuer,
+            JwtAudience: jwtAudience,
+            CorsAllowedOrigins: corsAllowedOrigins
+            );
     }
 
     /// <summary>
@@ -80,7 +87,7 @@ static partial class Program
                               .WithArgs("-c", "max_connections=500") // Increase for many microservices
                               .WithPgAdmin(option =>
                               {
-                                  option.WithImageTag("8.14")
+                                  option.WithImageTag("9.11")
                                         .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
                               });
 
@@ -141,8 +148,7 @@ static partial class Program
         IDistributedApplicationBuilder builder,
         Infrastructure infrastructure,
         ServiceDatabases databases,
-        SharedConfiguration config,
-        IResourceBuilder<ContainerResource> grafana)
+        SharedConfiguration config)
     {
         // --- Core Services (dependencies for Auth) ---
         var iamService = WithSharedSecrets(
@@ -152,7 +158,7 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
-                .WithHttpHealthCheck("/iam/readiness"),
+                .WithHttpHealthCheck("/iam/aspire-liveness"),
             config);
 
         // Note: CountryService must be declared before CustomerService to be referenced
@@ -164,7 +170,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/country/readiness"),
+                .WithHttpHealthCheck("/country/aspire-liveness"),
             config);
 
         var customerService = WithSharedSecrets(
@@ -176,8 +182,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(countryService)  // Enable service discovery
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/customer/readiness")
-                .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http")),  // Reference grafana to trigger monitoring stack
+                .WithHttpHealthCheck("/customer/aspire-liveness"),
             config);
 
         var employeeService = WithSharedSecrets(
@@ -188,7 +193,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/employee/readiness"),
+                .WithHttpHealthCheck("/employee/aspire-liveness"),
             config);
 
         var authService = WithSharedSecrets(
@@ -201,7 +206,7 @@ static partial class Program
                 .WithReference(customerService)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/auth/readiness"),
+                .WithHttpHealthCheck("/auth/aspire-liveness"),
             config);
 
         // --- Business Services ---
@@ -213,7 +218,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/accounting/readiness"),
+                .WithHttpHealthCheck("/accounting/aspire-liveness"),
             config);
 
         var chatbotService = WithSharedSecrets(
@@ -224,7 +229,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/chatbot/readiness"),
+                .WithHttpHealthCheck("/chatbot/aspire-liveness"),
             config);
 
         var notificationService = WithSharedSecrets(
@@ -235,7 +240,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/notification/readiness"),
+                .WithHttpHealthCheck("/notification/aspire-liveness"),
             config);
 
         var uploadService = WithSharedSecrets(
@@ -246,8 +251,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithEnvironment("ASPNETCORE_HTTPS_PORT", "0") // Disable HTTPS redirection in development/testing
-                .WithHttpHealthCheck("/upload/readiness"),
+                .WithHttpHealthCheck("/upload/aspire-liveness"),
             config);
 
         var careerService = WithSharedSecrets(
@@ -262,7 +266,7 @@ static partial class Program
                 .WithReference(countryService)
                 .WithReference(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/career/readiness"),
+                .WithHttpHealthCheck("/career/aspire-liveness"),
             config);
 
         var compensationService = WithSharedSecrets(
@@ -274,7 +278,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/compensation/readiness"),
+                .WithHttpHealthCheck("/compensation/aspire-liveness"),
             config);
 
         var complianceService = WithSharedSecrets(
@@ -286,7 +290,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/compliance/readiness"),
+                .WithHttpHealthCheck("/compliance/aspire-liveness"),
             config);
 
         var leaveService = WithSharedSecrets(
@@ -299,7 +303,7 @@ static partial class Program
                 .WithReference(employeeService)
                 .WithReference(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/leave/readiness"),
+                .WithHttpHealthCheck("/leave/aspire-liveness"),
             config);
 
         var lifecycleService = WithSharedSecrets(
@@ -311,7 +315,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/lifecycle/readiness"),
+                .WithHttpHealthCheck("/lifecycle/aspire-liveness"),
             config);
 
         var performanceService = WithSharedSecrets(
@@ -324,7 +328,7 @@ static partial class Program
                 .WithReference(employeeService)
                 .WithReference(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/performance/readiness"),
+                .WithHttpHealthCheck("/performance/aspire-liveness"),
             config);
 
         var contactService = WithSharedSecrets(
@@ -337,7 +341,7 @@ static partial class Program
                 .WithReference(uploadService)
                 .WithReference(countryService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/contact/readiness"),
+                .WithHttpHealthCheck("/contact/aspire-liveness"),
             config);
 
         var currencyService = WithSharedSecrets(
@@ -348,7 +352,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/currency/readiness"),
+                .WithHttpHealthCheck("/currency/aspire-liveness"),
             config);
 
         var quotationService = WithSharedSecrets(
@@ -359,7 +363,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/quotation/readiness"),
+                .WithHttpHealthCheck("/quotation/aspire-liveness"),
             config);
 
         var invoiceService = WithSharedSecrets(
@@ -372,7 +376,7 @@ static partial class Program
                 .WithReference(currencyService)
                 .WithReference(quotationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/invoice/readiness"),
+                .WithHttpHealthCheck("/invoice/aspire-liveness"),
             config);
 
         var materialService = WithSharedSecrets(
@@ -383,7 +387,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/material/readiness"),
+                .WithHttpHealthCheck("/material/aspire-liveness"),
             config);
 
         var orderService = WithSharedSecrets(
@@ -400,7 +404,7 @@ static partial class Program
                 .WithReference(employeeService)
                 .WithReference(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/order/readiness"),
+                .WithHttpHealthCheck("/order/aspire-liveness"),
             config);
 
         var paymentService = WithSharedSecrets(
@@ -411,7 +415,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/payment/readiness"),
+                .WithHttpHealthCheck("/payment/aspire-liveness"),
             config);
 
         var pdfService = WithSharedSecrets(
@@ -423,7 +427,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(uploadService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/pdf/readiness"),
+                .WithHttpHealthCheck("/pdf/aspire-liveness"),
             config);
 
         var purchaseOrderService = WithSharedSecrets(
@@ -434,7 +438,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/purchase-order/readiness"),
+                .WithHttpHealthCheck("/purchase-order/aspire-liveness"),
             config);
 
         var receiptService = WithSharedSecrets(
@@ -446,7 +450,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(invoiceService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/receipt/readiness"),
+                .WithHttpHealthCheck("/receipt/aspire-liveness"),
             config);
 
         var supplierService = WithSharedSecrets(
@@ -460,7 +464,15 @@ static partial class Program
                 .WithReference(invoiceService)
                 .WithReference(materialService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/supplier/readiness"),
+                .WithHttpHealthCheck("/supplier/aspire-liveness"),
+            config);
+
+        var intranetBff = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_Intranet_Bff>("maliev-intranet-bff")
+                .WithReference(iamService)
+                .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
+                .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
+                .WithHttpHealthCheck("/intranet/aspire-liveness"),
             config);
 
         // --- Python Services ---
@@ -469,7 +481,7 @@ static partial class Program
             .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ)
             .WithHttpEndpoint(targetPort: 8080, name: "http")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
-            .WithHttpHealthCheck("/geometry/readiness")
+            .WithHttpHealthCheck("/geometry/aspire-liveness")
             .WithVirtualEnvironment(".venv");
     }
 
@@ -483,7 +495,7 @@ static partial class Program
         return project
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
-            .WithEnvironment("Jwt__SecurityKey", "test-key-at-least-32-characters-long-for-integration-tests") // Symmetric fallback
+            .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins);
@@ -494,6 +506,7 @@ static partial class Program
 /// Shared configuration values loaded from configuration sources.
 /// </summary>
 record SharedConfiguration(
+    IResourceBuilder<ParameterResource> JwtSecurityKey,
     IResourceBuilder<ParameterResource> JwtPublicKey,
     IResourceBuilder<ParameterResource> JwtIssuer,
     IResourceBuilder<ParameterResource> JwtAudience,

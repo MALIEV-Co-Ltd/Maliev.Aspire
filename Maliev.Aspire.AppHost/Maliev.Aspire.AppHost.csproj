@@ -22,7 +22,17 @@
     <PackageReference Include="Aspire.Hosting.Redis" Version="13.1.0" />
   </ItemGroup>
 
+  <!-- Force rebuild ServiceDefaults before building AppHost to ensure all services get latest DLL -->
+  <Target Name="EnsureServiceDefaultsBuilt" BeforeTargets="BeforeBuild">
+    <MSBuild Projects="..\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)" />
+  </Target>
+
   <ItemGroup>
+    <!-- Explicitly reference ServiceDefaults to ensure Visual Studio tracks it for rebuild -->
+    <ProjectReference Include="..\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" IsAspireProjectResource="false" />
+
     <ProjectReference Include="..\..\Maliev.AuthService\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CareerService\Maliev.CareerService.Api\Maliev.CareerService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ChatbotService\Maliev.ChatbotService.Api\Maliev.ChatbotService.Api.csproj" />
@@ -49,6 +59,7 @@
     <ProjectReference Include="..\..\Maliev.ReceiptService\Maliev.ReceiptService.Api\Maliev.ReceiptService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.UploadService\Maliev.UploadService.Api\Maliev.UploadService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.NotificationService\Maliev.NotificationService.Api\Maliev.NotificationService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.Intranet\Maliev.Intranet.Bff\Maliev.Intranet.Bff.csproj" />
   </ItemGroup>
 
 </Project>

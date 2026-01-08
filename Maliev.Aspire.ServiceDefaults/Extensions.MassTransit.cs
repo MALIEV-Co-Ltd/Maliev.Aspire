@@ -76,18 +76,51 @@ public static class MassTransitExtensions
             options.StopTimeout = TimeSpan.FromSeconds(30);
         });
 
-        // RabbitMQ health check
+        // RabbitMQ health check with improved resilience and connection timeout
         builder.Services.AddHealthChecks()
             .AddRabbitMQ(async sp =>
             {
-                var factory = new RabbitMQ.Client.ConnectionFactory
+                try
                 {
-                    Uri = new Uri(rabbitmqConnectionString)
-                };
-                return await factory.CreateConnectionAsync();
+                    var factory = new RabbitMQ.Client.ConnectionFactory();
+
+                    // Handle both URI and host-based connection strings
+                    if (rabbitmqConnectionString.StartsWith("amqp://", StringComparison.OrdinalIgnoreCase) ||
+                        rabbitmqConnectionString.StartsWith("amqps://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        factory.Uri = new Uri(rabbitmqConnectionString);
+                    }
+                    else
+                    {
+                        // Assume it's a host or connection string - ConnectionFactory.HostName handles simple hostnames
+                        if (rabbitmqConnectionString.Contains("host="))
+                        {
+                            var parts = rabbitmqConnectionString.Split(';');
+                            var hostPart = parts.FirstOrDefault(s => s.Trim().StartsWith("host=", StringComparison.OrdinalIgnoreCase));
+                            var hostValue = hostPart?.Split('=')[1];
+                            factory.HostName = hostValue ?? "localhost";
+                        }
+                        else
+                        {
+                            factory.HostName = rabbitmqConnectionString;
+                        }
+                    }
+
+                    // Set connection timeout for health check
+                    factory.RequestedConnectionTimeout = TimeSpan.FromSeconds(30);
+                    factory.ContinuationTimeout = TimeSpan.FromSeconds(30);
+
+                    return await factory.CreateConnectionAsync();
+                }
+                catch (Exception)
+                {
+                    // Fallback or rethrow to be caught by health check infra
+                    throw;
+                }
             },
             name: "rabbitmq",
-            tags: new[] { "ready" });
+            tags: new[] { "ready" },
+            timeout: TimeSpan.FromMinutes(2)); // Increased timeout to allow RabbitMQ container to start
 
         return builder;
     }
