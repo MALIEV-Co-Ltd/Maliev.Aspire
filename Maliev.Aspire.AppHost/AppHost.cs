@@ -84,12 +84,14 @@ static partial class Program
         // --- PostgreSQL Database Server ---
         var postgres = builder.AddPostgres("postgres-server")
                               .WithImageTag("18-alpine")
-                              .WithArgs("-c", "max_connections=500") // Increase for many microservices
-                              .WithPgAdmin(option =>
-                              {
-                                  option.WithImageTag("9.11")
-                                        .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
-                              });
+                              .WithArgs("-c", "max_connections=500"); // Increase for many microservices
+
+        // pgAdmin is an optional tool; configure it separately so it doesn't block the main postgres resource chain
+        postgres.WithPgAdmin(option =>
+        {
+            option.WithImageTag("9.11")
+                  .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
+        });
 
         return new Infrastructure(rabbitmq, redis, postgres);
     }
