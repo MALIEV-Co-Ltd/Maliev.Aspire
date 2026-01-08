@@ -74,12 +74,13 @@ static partial class Program
                                 .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie);
 
         var redis = builder.AddRedis("redis")
-                            .WithImageTag("8.4-alpine")
-                            .WithRedisInsight(insight =>
-                            {
-                                insight.WithBindMount("redisinsight-data", "/data")
-                                       .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard");
-                            });
+                            .WithImageTag("8.4-alpine");
+
+        redis.WithRedisInsight(insight =>
+        {
+            insight.WithBindMount("redisinsight-data", "/data")
+                   .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard");
+        });
 
         // --- PostgreSQL Database Server ---
         var postgres = builder.AddPostgres("postgres-server")
