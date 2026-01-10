@@ -19,6 +19,11 @@ exporters:
     tls:
         insecure: ${env:ASPIRE_INSECURE}
         insecure_skip_verify: true # Required in local development because cert is localhost and the endpoint is host.docker.internal
+    retry_on_failure:
+      enabled: true
+      initial_interval: 10s
+      max_interval: 60s
+      max_elapsed_time: 10m
   otlphttp/prometheus:
     endpoint: ${env:PROMETHEUS_ENDPOINT}
     tls:

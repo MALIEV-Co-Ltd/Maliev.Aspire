@@ -1,126 +1,117 @@
-using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
+using Maliev.MessagingContracts.Generated;
 
 namespace Maliev.Aspire.ServiceDefaults.IAM;
 
 /// <summary>
-/// Base class for services to register permissions and roles with IAM.
-/// Registration is called by BackgroundIAMRegistrationService after service startup.
+/// Base class for services to define their permissions and roles for IAM registration.
+/// Registration is performed by BackgroundIAMRegistrationService via RabbitMQ publishing.
 /// </summary>
 public abstract class IAMRegistrationService
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IServiceAccountTokenProvider _tokenProvider;
     private readonly ILogger _logger;
     private readonly string _serviceName;
 
     /// <summary>
+    /// Gets the service name used for IAM registration.
+    /// </summary>
+    public string ServiceName => _serviceName;
+
+    /// <summary>
+    /// Gets the application configuration.
+    /// </summary>
+    public Microsoft.Extensions.Configuration.IConfiguration Configuration { get; }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="IAMRegistrationService"/> class.
     /// </summary>
-    /// <param name="httpClientFactory">The HTTP client factory</param>
-    /// <param name="tokenProvider">The token provider</param>
-    /// <param name="logger">The logger</param>
-    /// <param name="serviceName">The service name</param>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="serviceName">The service name.</param>
     protected IAMRegistrationService(
-        IHttpClientFactory httpClientFactory,
-        IServiceAccountTokenProvider tokenProvider,
+        Microsoft.Extensions.Configuration.IConfiguration configuration,
         ILogger logger,
         string serviceName)
     {
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _tokenProvider = tokenProvider ?? throw new ArgumentNullException(nameof(tokenProvider));
+        Configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _serviceName = serviceName ?? throw new ArgumentNullException(nameof(serviceName));
     }
 
+    /// <summary>
+    /// Gets the permissions to register. Override in derived classes to define service-specific permissions.
+    /// </summary>
+    /// <returns>Collection of permission registrations.</returns>
     protected abstract IEnumerable<PermissionRegistration> GetPermissions();
+
+    /// <summary>
+    /// Gets the predefined roles to register. Override in derived classes to define service-specific roles.
+    /// </summary>
+    /// <returns>Collection of role registrations.</returns>
     protected abstract IEnumerable<RoleRegistration> GetPredefinedRoles();
 
     /// <summary>
-    /// Registers permissions and roles with the IAM service.
-    /// Called by BackgroundIAMRegistrationService with retry logic.
+    /// Gets permissions converted to DTOs for RabbitMQ publishing.
     /// </summary>
-    public async Task RegisterAsync(CancellationToken cancellationToken)
+    /// <returns>Collection of permission DTOs.</returns>
+    public IEnumerable<PermissionRegistrationRequestPermissionsItem> GetPermissionsForPublish()
     {
-        // Staggered startup: Random delay 0-5 seconds to avoid overwhelming IAM database
-        var delayMs = Random.Shared.Next(0, 5000);
-        _logger.LogInformation("Starting IAM registration for {ServiceName} (staggered delay: {DelayMs}ms)...", _serviceName, delayMs);
-        await Task.Delay(delayMs, cancellationToken);
-
-        var permissions = GetPermissions().ToList();
-        ValidatePermissions(permissions);
-
-        var roles = GetPredefinedRoles().ToList();
-
-        if (permissions.Any())
-        {
-            await RegisterPermissionsAsync(permissions, cancellationToken);
-        }
-
-        if (roles.Any())
-        {
-            await RegisterRolesAsync(roles, cancellationToken);
-        }
-
-        _logger.LogInformation("Successfully registered permissions and roles for {ServiceName} with IAM.", _serviceName);
+        return GetPermissions().Select(p => new PermissionRegistrationRequestPermissionsItem(
+            p.PermissionId,
+            p.Description ?? string.Empty));
     }
 
-    private async Task RegisterPermissionsAsync(IEnumerable<PermissionRegistration> permissions, CancellationToken cancellationToken)
+    /// <summary>
+    /// Gets roles converted to DTOs for RabbitMQ publishing.
+    /// </summary>
+    /// <returns>Collection of role DTOs.</returns>
+    public IEnumerable<PermissionRegistrationRequestRolesItem> GetRolesForPublish()
     {
-        var client = _httpClientFactory.CreateClient("IAMService");
-        var token = _tokenProvider.GetToken();
-
-        var payload = new
-        {
-            ServiceName = _serviceName,
-            Permissions = permissions
-        };
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/iam/v1/permissions/register")
-        {
-            Content = JsonContent.Create(payload)
-        };
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("ServiceAccount", token);
-
-        var response = await client.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        return GetPredefinedRoles().Select(r => new PermissionRegistrationRequestRolesItem(
+            r.RoleId,
+            r.Description ?? string.Empty,
+            r.PermissionIds?.ToList() ?? new List<string>()));
     }
+}
 
-    private async Task RegisterRolesAsync(IEnumerable<RoleRegistration> roles, CancellationToken cancellationToken)
-    {
-        var client = _httpClientFactory.CreateClient("IAMService");
-        var token = _tokenProvider.GetToken();
+/// <summary>
+/// Represents a permission to be registered with IAM.
+/// </summary>
+public class PermissionRegistration
+{
+    /// <summary>
+    /// The permission ID in service.resource.action format.
+    /// </summary>
+    public required string PermissionId { get; set; }
 
-        var payload = new
-        {
-            ServiceName = _serviceName,
-            Roles = roles
-        };
+    /// <summary>
+    /// Human-readable description of the permission.
+    /// </summary>
+    public string? Description { get; set; }
+}
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/iam/v1/roles/register")
-        {
-            Content = JsonContent.Create(payload)
-        };
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("ServiceAccount", token);
+/// <summary>
+/// Represents a role to be registered with IAM.
+/// </summary>
+public class RoleRegistration
+{
+    /// <summary>
+    /// The unique role identifier.
+    /// </summary>
+    public required string RoleId { get; set; }
 
-        var response = await client.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-    }
+    /// <summary>
+    /// Human-readable description of the role.
+    /// </summary>
+    public string? Description { get; set; }
 
-    private void ValidatePermissions(IEnumerable<PermissionRegistration> permissions)
-    {
-        foreach (var p in permissions)
-        {
-            if (!IsValidPermissionFormat(p.PermissionId))
-            {
-                throw new InvalidOperationException($"Invalid permission format: {p.PermissionId}. Expected service.resource.action");
-            }
-        }
-    }
+    /// <summary>
+    /// List of permission IDs assigned to this role.
+    /// </summary>
+    public IList<string>? PermissionIds { get; set; }
 
-    private bool IsValidPermissionFormat(string permission)
-    {
-        var parts = permission.Split('.');
-        return parts.Length == 3 && parts.All(seg => !string.IsNullOrWhiteSpace(seg));
-    }
+    /// <summary>
+    /// Indicates whether this is a custom role (vs predefined).
+    /// </summary>
+    public bool IsCustom { get; set; } = false;
 }

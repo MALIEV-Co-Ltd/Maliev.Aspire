@@ -1,10 +1,7 @@
+using Maliev.Aspire.ServiceDefaults;
+using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Maliev.Aspire.ServiceDefaults.IAM;
-using Polly;
-using Microsoft.AspNetCore.Http;
-using System.Net.Http.Json;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -12,14 +9,27 @@ namespace Microsoft.Extensions.Hosting;
 public static class HttpClientExtensions
 {
     /// <summary>
-    /// Adds IAM service HTTP client with standard resilience.
+    /// Adds IAM service HTTP client with standard resilience and service account authentication.
     /// </summary>
+    /// <param name="builder">The application builder.</param>
+    /// <param name="serviceName">Optional explicit service name. If null, reads from "ServiceName" config.</param>
     public static IHostApplicationBuilder AddIAMServiceClient(
-        this IHostApplicationBuilder builder)
+        this IHostApplicationBuilder builder,
+        string? serviceName = null)
     {
-        // Register both typed and named client
-        builder.AddServiceClient<IIamServiceClient, IamServiceClient>("IAM");
-        builder.AddServiceClient("IAMService");
+        // Require explicit name via parameter or configuration
+        // REMOVED multiple fallbacks to ensure standardized configuration
+        var finalServiceName = serviceName
+            ?? builder.Configuration["ServiceName"]
+            ?? throw new InvalidOperationException("Service name must be provided to AddIAMServiceClient via the 'serviceName' parameter or configuration key 'ServiceName'.");
+
+        // Register the named client "IAMService" with full configuration (resilience + service account auth)
+        // This uses the AddIAMClient extension which configures auth handler and resilience
+        builder.Services.AddIAMClient(builder.Configuration, finalServiceName);
+
+        // Register the typed client using the same named configuration.
+        // It will automatically inherit the auth handler and resilience configured in AddIAMClient.
+        builder.Services.AddHttpClient<IIamServiceClient, IamServiceClient>("IAMService");
 
         return builder;
     }
@@ -111,7 +121,7 @@ public static class HttpClientExtensions
                     $"Required configuration 'Services:{serviceName}:BaseUrl' is missing. Check appsettings.json or environment variables.");
 
             client.BaseAddress = new Uri(url);
-            client.Timeout = TimeSpan.FromSeconds(60);
+            client.Timeout = TimeSpan.FromMinutes(6);
         });
 
         // Note: Standard resilience handler is already applied by ConfigureHttpClientDefaults in AddServiceDefaults()
@@ -153,7 +163,7 @@ public static class HttpClientExtensions
                     $"Required configuration 'Services:{serviceName}:BaseUrl' is missing. Check appsettings.json or environment variables.");
 
             client.BaseAddress = new Uri(url);
-            client.Timeout = TimeSpan.FromSeconds(60);
+            client.Timeout = TimeSpan.FromMinutes(6);
 
             configureClient?.Invoke(client);
         });

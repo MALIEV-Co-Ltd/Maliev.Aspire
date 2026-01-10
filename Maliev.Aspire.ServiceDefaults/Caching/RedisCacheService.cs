@@ -117,7 +117,8 @@ public class RedisCacheService : ICacheService
             var database = _redis.GetDatabase();
             var prefixedPattern = _instanceName + pattern;
 
-            // Note: Keys() can be expensive on large databases
+            // Note: Keys() can be expensive on large databases as it is a blocking operation.
+            // StackExchange.Redis uses SCAN when possible, but ToArray() still materializes all matching keys.
             foreach (var endpoint in endpoints)
             {
                 var server = _redis.GetServer(endpoint);
@@ -157,15 +158,21 @@ public class RedisCacheService : ICacheService
             var database = _redis.GetDatabase();
             var prefixedKey = _instanceName + key;
 
-            // Atomically increment and set TTL if it's a new key
-            var newValue = await database.StringIncrementAsync(prefixedKey);
+            // Use Lua script to ensure atomicity of INCR and EXPIRE
+            // Only set EXPIRE if the result of INCR is 1 (new key)
+            var script = @"
+                local newValue = redis.call('INCR', KEYS[1])
+                if newValue == 1 then
+                    redis.call('EXPIRE', KEYS[1], ARGV[1])
+                end
+                return newValue";
 
-            if (newValue == 1)
-            {
-                await database.KeyExpireAsync(prefixedKey, ttl);
-            }
+            var result = await database.ScriptEvaluateAsync(
+                script,
+                [prefixedKey],
+                [(int)ttl.TotalSeconds]);
 
-            return newValue;
+            return (long)result;
         }
         catch (Exception ex)
         {

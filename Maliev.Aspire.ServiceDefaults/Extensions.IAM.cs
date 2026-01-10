@@ -19,11 +19,21 @@ public static class IAMExtensions
     /// <summary>
     /// Adds and configures a resilient IAM client with service account authentication.
     /// </summary>
-    public static IServiceCollection AddIAMClient(
+    public static IHttpClientBuilder AddIAMClient(
         this IServiceCollection services,
         IConfiguration configuration,
         string serviceName)
     {
+        // Register the token provider so the handler can resolve it
+        services.TryAddSingleton<IServiceAccountTokenProvider>(sp =>
+        {
+            var config = sp.GetRequiredService<IConfiguration>();
+            return new ServiceAccountTokenProvider(config, serviceName);
+        });
+
+        // Register the handler in DI so it can be resolved by the HttpClient builder
+        services.TryAddTransient<ServiceAccountAuthenticationHandler>();
+
         var httpClientBuilder = services.AddHttpClient("IAMService", client =>
         {
             var iamConfig = configuration.GetSection("IAM");
@@ -37,43 +47,16 @@ public static class IAMExtensions
             client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);
 
             // Timeout must be >= TotalRequestTimeout (5m) to let resilience handler control retries
-            // Default resilience handler is configured with 5m total timeout in AddServiceDefaults
-            var timeout = iamConfig.GetValue<int?>("Timeout") ?? 300000; // 5 minutes default (allows for retries)
+            var timeout = iamConfig.GetValue<int?>("Timeout") ?? 300000; // 5 minutes default
             client.Timeout = TimeSpan.FromMilliseconds(timeout);
         });
 
-        httpClientBuilder.AddHttpMessageHandler(sp =>
-        {
-            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-            var startupLogger = loggerFactory.CreateLogger("IAM.Handler.Factory");
-
-            try
-            {
-                startupLogger.LogDebug("ServiceAccountAuthenticationHandler factory invoked for {ServiceName}", serviceName);
-
-                // Resolve dependencies at request time (after AddIAMRegistration has registered the token provider)
-                var tokenProvider = sp.GetRequiredService<IServiceAccountTokenProvider>();
-                startupLogger.LogDebug("Token provider resolved successfully for {ServiceName}", serviceName);
-
-                var logger = sp.GetRequiredService<ILogger<ServiceAccountAuthenticationHandler>>();
-                var handler = new ServiceAccountAuthenticationHandler(tokenProvider, logger);
-
-                startupLogger.LogDebug("ServiceAccountAuthenticationHandler created successfully for {ServiceName}", serviceName);
-                return handler;
-            }
-            catch (Exception ex)
-            {
-                startupLogger.LogError(ex, "FAILED to create ServiceAccountAuthenticationHandler for {ServiceName}", serviceName);
-                throw;
-            }
-        });
+        // Add the authentication handler from DI
+        httpClientBuilder.AddHttpMessageHandler<ServiceAccountAuthenticationHandler>();
 
         httpClientBuilder.AddServiceDiscovery(); // Enable service discovery for IAM client
 
-        // Note: Standard resilience handler is already applied by ConfigureHttpClientDefaults in AddServiceDefaults()
-        // No need to add a duplicate handler here
-
-        return services;
+        return httpClientBuilder;
     }
 
     /// <summary>

@@ -46,7 +46,7 @@
 
     <!-- Infrastructure -->
     <PackageReference Include="RabbitMQ.Client" Version="7.2.0" />
-    <PackageReference Include="MassTransit.RabbitMQ" Version="8.5.7" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="9.0.0" />
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.1" />
@@ -59,11 +59,14 @@
 
     <!-- API Documentation -->
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.1" />
-    <PackageReference Include="Microsoft.OpenApi" Version="2.0.0" />
-    <PackageReference Include="Scalar.AspNetCore" Version="2.11.10" />
+    <PackageReference Include="Scalar.AspNetCore" Version="2.12.4" />
 
     <!-- API Versioning -->
-    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.0" />
+    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Maliev.MessagingContracts\generated\csharp\Maliev.MessagingContracts.csproj" />
   </ItemGroup>
 
 </Project>

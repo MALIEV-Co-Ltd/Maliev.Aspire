@@ -7,27 +7,45 @@ var config = Program.LoadSharedConfiguration(builder);
 var infrastructure = Program.ConfigureInfrastructure(builder);
 var databases = Program.ConfigureDatabases(infrastructure.Postgres);
 
-// --- Monitoring (simple relative paths exactly like the sample) ---
-var prometheus = builder.AddContainer("prometheus", "prom/prometheus", "v3.0.1")
-    .WithBindMount("../prometheus", "/etc/prometheus", isReadOnly: true)
-    .WithArgs("--web.enable-otlp-receiver", "--config.file=/etc/prometheus/prometheus.yml")
-    .WithHttpEndpoint(targetPort: 9090)
-    .WithUrlForEndpoint("http", u => u.DisplayText = "Prometheus Dashboard");
+// --- Monitoring (Prometheus, Grafana, OpenTelemetry) ---
+var prometheus = ConfigurePrometheus(builder);
+var grafana = ConfigureGrafana(builder, prometheus);
+var otelCollector = ConfigureOpenTelemetry(builder, prometheus);
 
-var grafana = builder.AddContainer("grafana", "grafana/grafana")
-    .WithBindMount("../grafana/config", "/etc/grafana", isReadOnly: true)
-    .WithBindMount("../grafana/dashboards", "/var/lib/grafana/dashboards", isReadOnly: true)
-    .WithEnvironment("PROMETHEUS_ENDPOINT", prometheus.GetEndpoint("http"))
-    .WithHttpEndpoint(targetPort: 3000)
-    .WithUrlForEndpoint("http", u => u.DisplayText = "Grafana Dashboard");
-
-builder.AddOpenTelemetryCollector("otelcollector", "../otelcollector/config.yaml")
-    .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp");
-
-Program.ConfigureServices(builder, infrastructure, databases, config);
+Program.ConfigureServices(builder, infrastructure, databases, config, grafana, otelCollector);
 
 builder.Build().Run();
 
+// --- Local Infrastructure Configuration Functions ---
+
+static IResourceBuilder<ContainerResource> ConfigurePrometheus(IDistributedApplicationBuilder builder)
+{
+    return builder.AddContainer("prometheus", "prom/prometheus", "v3.0.1")
+        .WithBindMount("../prometheus", "/etc/prometheus", isReadOnly: true)
+        .WithArgs("--web.enable-otlp-receiver", "--config.file=/etc/prometheus/prometheus.yml")
+        .WithHttpEndpoint(targetPort: 9090)
+        .WithUrlForEndpoint("http", u => u.DisplayText = "Prometheus Dashboard");
+}
+
+static IResourceBuilder<ContainerResource> ConfigureGrafana(
+    IDistributedApplicationBuilder builder,
+    IResourceBuilder<ContainerResource> prometheus)
+{
+    return builder.AddContainer("grafana", "grafana/grafana")
+        .WithBindMount("../grafana/config", "/etc/grafana", isReadOnly: true)
+        .WithBindMount("../grafana/dashboards", "/var/lib/grafana/dashboards", isReadOnly: true)
+        .WithEnvironment("PROMETHEUS_ENDPOINT", prometheus.GetEndpoint("http"))
+        .WithHttpEndpoint(targetPort: 3000)
+        .WithUrlForEndpoint("http", u => u.DisplayText = "Grafana Dashboard");
+}
+
+static IResourceBuilder<ContainerResource> ConfigureOpenTelemetry(
+    IDistributedApplicationBuilder builder,
+    IResourceBuilder<ContainerResource> prometheus)
+{
+    return builder.AddOpenTelemetryCollector("otelcollector", "../otelcollector/config.yaml")
+        .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp");
+}
 /// <summary>
 /// Main program class containing configuration methods for the Aspire AppHost.
 /// </summary>
@@ -40,6 +58,7 @@ static partial class Program
     {
         // Load shared secrets from sharedsecrets.json and user secrets
         builder.Configuration.AddJsonFile("sharedsecrets.json", optional: true);
+        builder.Configuration.AddEnvironmentVariables();
 
         // Define these as formal Aspire Parameters to show up in the Dashboard
         var jwtSecurityKey = builder.AddParameterFromConfig("JwtSecurityKey", "Jwt:SecurityKey", secret: true);
@@ -66,35 +85,56 @@ static partial class Program
     /// </summary>
     public static Infrastructure ConfigureInfrastructure(IDistributedApplicationBuilder builder)
     {
-        // --- Messaging and Caching ---
-        var erlangCookie = builder.AddParameterFromConfig("ErlangCookie", "RabbitMQ:ErlangCookie", secret: true);
-
-        var rabbitmq = builder.AddRabbitMQ("rabbitmq")
-                                .WithImageTag("4.2-management-alpine")
-                                .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie);
-
-        var redis = builder.AddRedis("redis")
-                            .WithImageTag("8.4-alpine");
-
-        redis.WithRedisInsight(insight =>
-        {
-            insight.WithBindMount("redisinsight-data", "/data")
-                   .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard");
-        });
-
-        // --- PostgreSQL Database Server ---
-        var postgres = builder.AddPostgres("postgres-server")
-                              .WithImageTag("18-alpine")
-                              .WithArgs("-c", "max_connections=500"); // Increase for many microservices
-
-        // pgAdmin is an optional tool; configure it separately so it doesn't block the main postgres resource chain
-        postgres.WithPgAdmin(option =>
-        {
-            option.WithImageTag("9.11")
-                  .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
-        });
+        var rabbitmq = ConfigureRabbitMQ(builder);
+        var redis = ConfigureRedis(builder);
+        var postgres = ConfigurePostgres(builder);
 
         return new Infrastructure(rabbitmq, redis, postgres);
+
+        // --- Local Infrastructure Component Functions ---
+
+        static IResourceBuilder<RabbitMQServerResource> ConfigureRabbitMQ(IDistributedApplicationBuilder builder)
+        {
+            var erlangCookie = builder.AddParameterFromConfig("ErlangCookie", "RabbitMQ:ErlangCookie", secret: true);
+            var rabbitUser = builder.AddParameterFromConfig("RabbitMQUser", "RabbitMQ:Username");
+            var rabbitPass = builder.AddParameterFromConfig("RabbitMQPass", "RabbitMQ:Password", secret: true);
+
+            return builder.AddRabbitMQ("rabbitmq", userName: rabbitUser, password: rabbitPass)
+                .WithImageTag("4.2-management-alpine")
+                .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie)
+                .WithHttpEndpoint(targetPort: 15672, name: "management")
+                .WithUrlForEndpoint("management", u => u.DisplayText = "RabbitMQ Management");
+        }
+
+        static IResourceBuilder<RedisResource> ConfigureRedis(IDistributedApplicationBuilder builder)
+        {
+            var redis = builder.AddRedis("redis")
+                .WithImageTag("8.4-alpine");
+
+            redis.WithRedisInsight(insight =>
+            {
+                insight.WithBindMount("redisinsight-data", "/data")
+                    .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard");
+            });
+
+            return redis;
+        }
+
+        static IResourceBuilder<PostgresServerResource> ConfigurePostgres(IDistributedApplicationBuilder builder)
+        {
+            var postgres = builder.AddPostgres("postgres-server")
+                .WithImageTag("18-alpine")
+                .WithArgs("-c", "max_connections=5000"); // Increased to handle 20+ services with large pools
+
+            // pgAdmin is an optional tool; configure it separately so it doesn't block the main postgres resource chain
+            postgres.WithPgAdmin(option =>
+            {
+                option.WithImageTag("9.11")
+                    .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
+            });
+
+            return postgres;
+        }
     }
 
     private static IResourceBuilder<ParameterResource> AddParameterFromConfig(
@@ -151,7 +191,9 @@ static partial class Program
         IDistributedApplicationBuilder builder,
         Infrastructure infrastructure,
         ServiceDatabases databases,
-        SharedConfiguration config)
+        SharedConfiguration config,
+        IResourceBuilder<ContainerResource> grafana,
+        IResourceBuilder<IResource> otelCollector)
     {
         // --- Core Services (dependencies for Auth) ---
         var iamService = WithSharedSecrets(
@@ -162,7 +204,9 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithHttpHealthCheck("/iam/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         // Note: CountryService must be declared before CustomerService to be referenced
         var countryService = WithSharedSecrets(
@@ -174,7 +218,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/country/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var customerService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CustomerService_Api>("maliev-customerservice-api")
@@ -183,10 +229,12 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
-                .WithReference(countryService)  // Enable service discovery
+                .WithReference(countryService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/customer/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var employeeService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_EmployeeService_Api>("maliev-employeeservice-api")
@@ -197,7 +245,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/employee/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var authService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_AuthService_Api>("maliev-authservice-api")
@@ -210,7 +260,9 @@ static partial class Program
                 .WithReference(employeeService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/auth/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         // --- Business Services ---
         var accountingService = WithSharedSecrets(
@@ -222,7 +274,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/accounting/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var chatbotService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ChatbotService_Api>("maliev-chatbotservice-api")
@@ -233,7 +287,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/chatbot/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var notificationService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_NotificationService_Api>("maliev-notificationservice-api")
@@ -244,7 +300,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/notification/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var uploadService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_UploadService_Api>("maliev-uploadservice-api")
@@ -255,7 +313,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/upload/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var careerService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CareerService_Api>("maliev-careerservice-api")
@@ -270,7 +330,9 @@ static partial class Program
                 .WithReference(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/career/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var compensationService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CompensationService_Api>("maliev-compensationservice-api")
@@ -282,7 +344,9 @@ static partial class Program
                 .WithReference(employeeService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/compensation/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var complianceService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ComplianceService_Api>("maliev-complianceservice-api")
@@ -294,7 +358,9 @@ static partial class Program
                 .WithReference(employeeService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/compliance/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var leaveService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_LeaveService_Api>("maliev-leaveservice-api")
@@ -307,7 +373,9 @@ static partial class Program
                 .WithReference(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/leave/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var lifecycleService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_LifecycleService_Api>("maliev-lifecycleservice-api")
@@ -319,7 +387,9 @@ static partial class Program
                 .WithReference(employeeService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/lifecycle/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var performanceService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PerformanceService_Api>("maliev-performanceservice-api")
@@ -332,7 +402,9 @@ static partial class Program
                 .WithReference(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/performance/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var contactService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ContactService_Api>("maliev-contactservice-api")
@@ -345,7 +417,9 @@ static partial class Program
                 .WithReference(countryService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/contact/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var currencyService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CurrencyService_Api>("maliev-currencyservice-api")
@@ -356,7 +430,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/currency/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var quotationService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_QuotationService_Api>("maliev-quotationservice-api")
@@ -367,7 +443,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/quotation/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var invoiceService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_InvoiceService_Api>("maliev-invoiceservice-api")
@@ -380,7 +458,9 @@ static partial class Program
                 .WithReference(quotationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/invoice/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var materialService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_MaterialService_Api>("maliev-materialservice-api")
@@ -391,7 +471,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/material/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var orderService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_OrderService_Api>("maliev-orderservice-api")
@@ -408,7 +490,9 @@ static partial class Program
                 .WithReference(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/order/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var paymentService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PaymentService_Api>("maliev-paymentservice-api")
@@ -419,7 +503,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/payment/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var pdfService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PdfService_Api>("maliev-pdfservice-api")
@@ -431,7 +517,9 @@ static partial class Program
                 .WithReference(uploadService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/pdf/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var purchaseOrderService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PurchaseOrderService_Api>("maliev-purchaseorderservice-api")
@@ -442,7 +530,9 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/purchase-order/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var receiptService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ReceiptService_Api>("maliev-receiptservice-api")
@@ -454,7 +544,9 @@ static partial class Program
                 .WithReference(invoiceService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/receipt/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var supplierService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_SupplierService_Api>("maliev-supplierservice-api")
@@ -468,15 +560,22 @@ static partial class Program
                 .WithReference(materialService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/supplier/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         var intranetBff = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_Intranet_Bff>("maliev-intranet-bff")
+                .WithReference(authService)
+                .WithReference(customerService)
+                .WithReference(orderService)
                 .WithReference(iamService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
                 .WithHttpHealthCheck("/intranet/aspire-liveness"),
-            config);
+            config,
+            grafana,
+            otelCollector);
 
         // --- Python Services ---
         var geometryService = builder.AddPythonApp("geometry-service", "../../Maliev.GeometryService", "src/main.py")
@@ -485,7 +584,8 @@ static partial class Program
             .WithHttpEndpoint(targetPort: 8080, name: "http")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
             .WithHttpHealthCheck("/geometry/aspire-liveness")
-            .WithVirtualEnvironment(".venv");
+            .WithVirtualEnvironment(".venv")
+            .WaitFor(otelCollector);
     }
 
     /// <summary>
@@ -493,7 +593,9 @@ static partial class Program
     /// </summary>
     private static IResourceBuilder<ProjectResource> WithSharedSecrets(
         IResourceBuilder<ProjectResource> project,
-        SharedConfiguration config)
+        SharedConfiguration config,
+        IResourceBuilder<ContainerResource> grafana,
+        IResourceBuilder<IResource> otelCollector)
     {
         return project
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
@@ -501,7 +603,9 @@ static partial class Program
             .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
-            .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins);
+            .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins)
+            .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http"))
+            .WaitFor(otelCollector);
     }
 }
 

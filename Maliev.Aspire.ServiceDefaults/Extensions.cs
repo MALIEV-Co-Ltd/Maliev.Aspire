@@ -36,8 +36,8 @@ public static class Extensions
         builder.Logging.AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Error);
         builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Warning); // Reduce startup/shutdown noise
 
-        // Health checks (only log errors during checks)
-        builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService", LogLevel.Error);
+        // Health checks - Enabled for debugging
+        builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService", LogLevel.Information);
 
         // Service discovery and resilience (only errors)
         builder.Logging.AddFilter("Microsoft.Extensions.ServiceDiscovery", LogLevel.Error);
@@ -47,9 +47,9 @@ public static class Extensions
         builder.Logging.AddFilter("StackExchange.Redis", LogLevel.Warning); // Redis connection noise
         builder.Logging.AddFilter("Npgsql", LogLevel.Warning); // PostgreSQL connection noise
 
-        // MassTransit/RabbitMQ (very verbose, only log warnings and errors)
-        builder.Logging.AddFilter("MassTransit", LogLevel.Warning);
-        builder.Logging.AddFilter("MassTransit.Messages", LogLevel.None); // Disable message content logging for security
+        // MassTransit/RabbitMQ - Relaxed for debugging IAM registration
+        builder.Logging.AddFilter("MassTransit", LogLevel.Information);
+        builder.Logging.AddFilter("MassTransit.Messages", LogLevel.Debug);
 
         // IAM and Authorization
         builder.Logging.AddFilter("IAM.Handler.Factory", LogLevel.Warning);
@@ -115,10 +115,10 @@ public static class Extensions
             http.AddStandardResilienceHandler(options =>
             {
                 // Increased timeouts to accommodate IAM registration during startup (20+ services registering)
-                // and other potentially slow service-to-service operations
-                options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(1); // 1m per attempt (up from 30s)
-                options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5); // 5m total (up from 90s)
-                options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(2); // Must be >= 2 * AttemptTimeout
+                // and other potentially slow service-to-service operations.
+                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+                options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5); // 5m total budget
+                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(125); // Must be >= 2 * AttemptTimeout
             });
 
             // Turn on service discovery by default

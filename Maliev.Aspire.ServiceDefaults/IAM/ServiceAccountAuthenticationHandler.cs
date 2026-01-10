@@ -37,16 +37,26 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
         {
             // Get fresh token for each request
             var token = _tokenProvider.GetToken();
-            _logger.LogInformation("Generated token (first 50 chars): {Token}", token.Substring(0, Math.Min(50, token.Length)));
+            _logger.LogDebug("Generated fresh service account token for request to {Uri}", request.RequestUri);
 
-            request.Headers.Authorization = new AuthenticationHeaderValue("ServiceAccount", token);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             _logger.LogInformation("Authorization header set on request");
 
             return await base.SendAsync(request, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("Request to {Uri} was canceled during shutdown.", request.RequestUri);
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogInformation("Connection to IAM service failed: {Message}. This is expected if the service is not yet available or in integration tests.", ex.Message);
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in ServiceAccountAuthenticationHandler.SendAsync");
+            _logger.LogError(ex, "Unexpected error in ServiceAccountAuthenticationHandler.SendAsync for {Uri}", request.RequestUri);
             throw;
         }
     }
