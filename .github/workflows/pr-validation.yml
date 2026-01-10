@@ -58,30 +58,30 @@ jobs:
       - name: Build for Release
         run: dotnet build Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj --configuration Release --no-restore /p:TreatWarningsAsErrors=true
 
-      - name: Pack (Dry Run)
-        run: |
-          dotnet pack Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj \
-            --configuration Release \
-            --no-build \
-            -p:PackageVersion=0.0.0-validation \
-            --output ./nupkg
-
-      - name: Verify Package Created
-        run: |
-          if [ ! -f ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg ]; then
-            echo "ERROR: NuGet package was not created!"
-            exit 1
-          fi
-          echo "✅ NuGet package created successfully"
-          ls -la ./nupkg/
-
-      - name: Validate Package Contents
-        run: |
-          # Install nuget package explorer
-          dotnet tool install --global dotnet-validate --version 0.0.1-preview.304
-          
-          # Validate the package
-          dotnet validate package local ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg || true
-          
-          # List package contents
-          unzip -l ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg
+            - name: Pack (Dry Run)
+              run: |
+                dotnet pack Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj \
+                  --configuration Release \
+                  --no-build \
+                  -p:PackageVersion=0.0.0-validation \
+                  --output ./nupkg
+      
+            - name: Verify Package Created
+              run: |
+                if [ ! -f ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg ]; then
+                  echo "ERROR: NuGet package was not created!"
+                  exit 1
+                fi
+                echo "NuGet package created successfully"
+                ls -la ./nupkg/
+      
+            - name: Validate Package Contents
+              run: |
+                # Install nuget package explorer
+                dotnet tool install --global dotnet-validate --version 0.0.1-preview.304
+       
+                # Validate the package
+                dotnet validate package local ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg
+      
+                # List package contents
+                unzip -l ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg                
