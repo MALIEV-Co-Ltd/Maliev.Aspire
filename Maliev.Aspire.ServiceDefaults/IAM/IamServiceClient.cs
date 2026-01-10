@@ -15,11 +15,11 @@ public partial class IamServiceClient : IIamServiceClient
     /// <summary>
     /// Initializes a new instance of the <see cref="IamServiceClient"/> class.
     /// </summary>
-    /// <param name="httpClientFactory">The HTTP client factory configured with "IAMService" named client.</param>
+    /// <param name="httpClient">The HTTP client configured for the IAM service.</param>
     /// <param name="logger">The logger instance.</param>
-    public IamServiceClient(IHttpClientFactory httpClientFactory, ILogger<IamServiceClient> logger)
+    public IamServiceClient(HttpClient httpClient, ILogger<IamServiceClient> logger)
     {
-        _httpClient = httpClientFactory.CreateClient("IAMService");
+        _httpClient = httpClient;
         _logger = logger;
     }
 

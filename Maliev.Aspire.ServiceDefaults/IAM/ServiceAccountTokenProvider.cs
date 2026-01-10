@@ -75,10 +75,18 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
             new Claim("role", "service-account"),
             new Claim("purpose", "iam-registration"),
             new Claim("iss", issuer),
-            new Claim("aud", audience)
+            new Claim("aud", audience),
+            new Claim("permissions", "iam.auth.check-permission"),
+            new Claim("permissions", "iam.auth.resolve-permissions")
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey));
+
+        if (key.KeySize < 256)
+        {
+            throw new InvalidOperationException("Jwt:SecurityKey must be at least 256 bits (32 characters) for HMAC-SHA256.");
+        }
+
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(

@@ -1,89 +1,193 @@
+using MassTransit;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Maliev.MessagingContracts.Generated;
 
 namespace Maliev.Aspire.ServiceDefaults.IAM;
 
 /// <summary>
-/// Background service that handles IAM registration with automatic retry.
-/// Runs AFTER service startup completes, preventing blocking.
+/// Background service that handles IAM registration via RabbitMQ.
+/// Publishes a PermissionRegistrationRequest message to RabbitMQ queue, which is consumed by the IAM service.
+/// This is non-blocking, allowing services to start immediately without waiting for IAM response.
 /// </summary>
 public class BackgroundIAMRegistrationService : BackgroundService
 {
-    private readonly IAMRegistrationService _registrationService;
+    private readonly IEnumerable<IAMRegistrationService> _registrationServices;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<BackgroundIAMRegistrationService> _logger;
     private readonly IAMRegistrationStatusTracker _statusTracker;
+    private readonly IHostApplicationLifetime _applicationLifetime;
 
-    private static readonly TimeSpan[] RetryDelays =
-    {
-        TimeSpan.FromSeconds(1),
-        TimeSpan.FromSeconds(2),
-        TimeSpan.FromSeconds(5),
-        TimeSpan.FromSeconds(10),
-        TimeSpan.FromSeconds(30),
-        TimeSpan.FromMinutes(1),
-        TimeSpan.FromMinutes(2)
-    };
-
+    /// <summary>
+    /// Initializes a new instance of the BackgroundIAMRegistrationService.
+    /// </summary>
+    /// <param name="registrationServices">The collection of service-specific IAM registration implementations.</param>
+    /// <param name="serviceProvider">Service provider to create scopes for scoped services.</param>
+    /// <param name="logger">Logger instance.</param>
+    /// <param name="statusTracker">Tracks registration status for health checks.</param>
+    /// <param name="applicationLifetime">Host application lifetime for waiting until app is started.</param>
     public BackgroundIAMRegistrationService(
-        IAMRegistrationService registrationService,
+        IEnumerable<IAMRegistrationService> registrationServices,
+        IServiceProvider serviceProvider,
         ILogger<BackgroundIAMRegistrationService> logger,
-        IAMRegistrationStatusTracker statusTracker)
+        IAMRegistrationStatusTracker statusTracker,
+        IHostApplicationLifetime applicationLifetime)
     {
-        _registrationService = registrationService ?? throw new ArgumentNullException(nameof(registrationService));
+        _registrationServices = registrationServices ?? throw new ArgumentNullException(nameof(registrationServices));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _statusTracker = statusTracker ?? throw new ArgumentNullException(nameof(statusTracker));
+        _applicationLifetime = applicationLifetime ?? throw new ArgumentNullException(nameof(applicationLifetime));
     }
 
+    /// <summary>
+    /// Executes the IAM registration process by publishing a message to RabbitMQ.
+    /// Waits for the application to be fully started before attempting to publish.
+    /// </summary>
+    /// <param name="stoppingToken">Cancellation token for graceful shutdown.</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Wait for service to fully start + random stagger to prevent thundering herd
-        var baseDelay = TimeSpan.FromSeconds(2);
-        var stagger = TimeSpan.FromMilliseconds(Random.Shared.Next(0, 3000)); // 0-3 seconds random delay
-        await Task.Delay(baseDelay + stagger, stoppingToken);
+        _logger.LogInformation("IAM registration background service started, waiting for application to be ready...");
 
-        _logger.LogInformation("Starting IAM registration after {Delay}ms delay", (baseDelay + stagger).TotalMilliseconds);
+        // Wait for the application to be fully started (MassTransit bus will be ready at this point)
+        await WaitForApplicationStartAsync(stoppingToken);
 
-        const int maxAttempts = 10;
+        if (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("IAM registration cancelled before application startup completed");
+            return;
+        }
+
+        if (!_registrationServices.Any())
+        {
+            _logger.LogInformation("No IAM registration services configured.");
+            _statusTracker.MarkRegistered();
+            return;
+        }
+
+        _logger.LogInformation("Application started, beginning IAM registration via RabbitMQ for {ServiceCount} domains", _registrationServices.Count());
+        _statusTracker.MarkAttempting();
+
+        try
+        {
+            foreach (var registrationService in _registrationServices)
+            {
+                await RegisterServiceAsync(registrationService, stoppingToken);
+            }
+
+            _statusTracker.MarkRegistered();
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("IAM registration cancelled during shutdown");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to complete IAM registration request");
+            _statusTracker.MarkPartiallyRegistered(ex);
+        }
+    }
+
+    private async Task RegisterServiceAsync(IAMRegistrationService registrationService, CancellationToken stoppingToken)
+    {
+        var serviceName = registrationService.ServiceName;
+        var permissions = registrationService.GetPermissionsForPublish().ToList();
+        var roles = registrationService.GetRolesForPublish().ToList();
+
+        if (!permissions.Any() && !roles.Any())
+        {
+            _logger.LogInformation("No permissions or roles to register for {ServiceName}", serviceName);
+            return;
+        }
+
+        // Validate permissions format early
+        foreach (var perm in permissions)
+        {
+            if (!IsValidPermissionFormat(perm.PermissionId))
+            {
+                throw new InvalidOperationException($"Invalid permission format for {serviceName}: {perm.PermissionId}. Expected service.resource.action");
+            }
+        }
+
+        // Create the registration request message using shared contracts
+        var request = new PermissionRegistrationRequest(
+            MessageId: Guid.NewGuid(),
+            MessageName: nameof(PermissionRegistrationRequest),
+            MessageType: MessageType.Command,
+            MessageVersion: "1.0.0",
+            PublishedBy: serviceName,
+            ConsumedBy: new[] { "iam-service" },
+            CorrelationId: Guid.NewGuid(),
+            CausationId: null,
+            OccurredAtUtc: DateTimeOffset.UtcNow,
+            IsPublic: false,
+            ServiceName: serviceName,
+            Permissions: permissions,
+            Roles: roles
+        );
+
+        // Simple retry logic for publishing
         int attempt = 0;
+        const int maxAttempts = 5;
 
-        while (!stoppingToken.IsCancellationRequested && !_statusTracker.IsRegistered)
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                _logger.LogInformation("Attempting IAM registration (attempt {Attempt}/{Max})", attempt + 1, maxAttempts);
-                _statusTracker.MarkAttempting();
-
-                await _registrationService.RegisterAsync(stoppingToken);
-
-                _statusTracker.MarkRegistered();
-                _logger.LogInformation("IAM registration successful");
-                return; // Success, exit loop
-            }
-            catch (Exception ex)
-            {
-                attempt++;
-
-                if (attempt >= maxAttempts)
+                await using (var scope = _serviceProvider.CreateAsyncScope())
                 {
-                    _logger.LogError(ex, "IAM registration FAILED after {Max} attempts. Service will continue with potential authorization limitations.", maxAttempts);
-                    _statusTracker.MarkPartiallyRegistered(ex);
-                    return; // Give up after max attempts
+                    var publishEndpoint = scope.ServiceProvider.GetRequiredService<IPublishEndpoint>();
+                    await publishEndpoint.Publish(request, stoppingToken);
                 }
 
-                _statusTracker.MarkAttempting(); // Still attempting
-                _logger.LogWarning(ex, "IAM registration attempt {Attempt} failed", attempt);
+                _logger.LogInformation(
+                    "Published IAM registration request for {ServiceName}: {PermissionCount} permissions, {RoleCount} roles",
+                    serviceName, permissions.Count, roles.Count);
 
-                // Calculate retry delay with exponential backoff
-                var delay = (attempt - 1) < RetryDelays.Length
-                    ? RetryDelays[attempt - 1]
-                    : RetryDelays[^1];
-
-                _logger.LogInformation("Retrying IAM registration in {Delay}", delay);
+                return;
+            }
+            catch (Exception ex) when (attempt < maxAttempts - 1 && !stoppingToken.IsCancellationRequested)
+            {
+                attempt++;
+                var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
+                _logger.LogWarning(ex, "Failed to publish IAM registration for {ServiceName}. Retrying in {Delay} (Attempt {Attempt}/{Max})",
+                    serviceName, delay, attempt + 1, maxAttempts);
                 await Task.Delay(delay, stoppingToken);
             }
         }
     }
+
+    /// <summary>
+    /// Waits for the application to be fully started before proceeding.
+    /// This ensures MassTransit and all other services are ready.
+    /// </summary>
+    private async Task WaitForApplicationStartAsync(CancellationToken stoppingToken)
+    {
+        var tcs = new TaskCompletionSource<bool>();
+
+        using var registration = _applicationLifetime.ApplicationStarted.Register(() =>
+        {
+            tcs.TrySetResult(true);
+        });
+
+        if (_applicationLifetime.ApplicationStarted.IsCancellationRequested)
+        {
+            // Already started
+            return;
+        }
+
+        await tcs.Task.WaitAsync(stoppingToken);
+    }
+
+    private static bool IsValidPermissionFormat(string permission)
+    {
+        var parts = permission.Split('.');
+        return parts.Length == 3 && parts.All(seg => !string.IsNullOrWhiteSpace(seg));
+    }
 }
+
+// REMOVED local DTOs as they are now replaced by shared contracts from Maliev.MessagingContracts
 
 /// <summary>
 /// Tracks IAM registration status for health check reporting
@@ -93,17 +197,45 @@ public class IAMRegistrationStatusTracker
     private volatile RegistrationStatus _status = RegistrationStatus.Pending;
     private Exception? _lastException;
 
+    /// <summary>
+    /// Gets whether registration has completed (message published to RabbitMQ).
+    /// </summary>
     public bool IsRegistered => _status == RegistrationStatus.Registered;
+
+    /// <summary>
+    /// Gets the current registration status.
+    /// </summary>
     public RegistrationStatus Status => _status;
+
+    /// <summary>
+    /// Gets the last exception if any occurred during registration.
+    /// </summary>
     public Exception? LastException => _lastException;
 
+    /// <summary>
+    /// Marks the registration as currently attempting.
+    /// </summary>
     public void MarkAttempting() => _status = RegistrationStatus.Attempting;
+
+    /// <summary>
+    /// Marks the registration as successfully completed.
+    /// </summary>
     public void MarkRegistered() => _status = RegistrationStatus.Registered;
+
+    /// <summary>
+    /// Marks as partially registered when max retries exceeded.
+    /// </summary>
+    /// <param name="ex">The exception that caused the failure.</param>
     public void MarkPartiallyRegistered(Exception ex)
     {
         _status = RegistrationStatus.PartiallyRegistered;
         _lastException = ex;
     }
+
+    /// <summary>
+    /// Marks the registration as failed unrecoverably.
+    /// </summary>
+    /// <param name="ex">The exception that caused the failure.</param>
     public void MarkFailed(Exception ex)
     {
         _status = RegistrationStatus.Failed;
@@ -116,9 +248,18 @@ public class IAMRegistrationStatusTracker
 /// </summary>
 public enum RegistrationStatus
 {
-    Pending,             // Initial state, not started yet
-    Attempting,          // Currently trying to register
-    Registered,          // Successfully registered
-    PartiallyRegistered, // Failed after max retries, service continued
-    Failed               // Unrecoverable failure
+    /// <summary>Initial state, not started yet.</summary>
+    Pending,
+
+    /// <summary>Currently publishing registration request.</summary>
+    Attempting,
+
+    /// <summary>Successfully published to RabbitMQ.</summary>
+    Registered,
+
+    /// <summary>Failed to publish but service continued.</summary>
+    PartiallyRegistered,
+
+    /// <summary>Unrecoverable failure.</summary>
+    Failed
 }
