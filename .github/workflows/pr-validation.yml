@@ -10,6 +10,7 @@ on:
       - 'Maliev.Aspire.ServiceDefaults/**'
       - 'Maliev.Aspire.AppHost/**'
       - 'Maliev.Aspire.Tests/**'
+      - '.github/workflows/**'
       - '*.sln'
 
 env:

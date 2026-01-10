@@ -8,6 +8,7 @@ on:
       - develop   # Alpha releases (1.0.X-alpha)
     paths:
       - 'Maliev.Aspire.ServiceDefaults/**'
+      - '.github/workflows/**'
   release:
     types: [published]
   workflow_dispatch:
