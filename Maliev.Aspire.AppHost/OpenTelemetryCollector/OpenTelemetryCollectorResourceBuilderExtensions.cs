@@ -9,7 +9,7 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
     private const string OtelExporterOtlpEndpoint = "OTEL_EXPORTER_OTLP_ENDPOINT";
     private const string DashboardOtlpUrlVariableName = "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL";
     private const string DashboardOtlpApiKeyVariableName = "AppHost:OtlpApiKey";
-    private const string DashboardOtlpUrlDefaultValue = "http://localhost:18889";
+    private const string DashboardOtlpUrlDefaultValue = "http://host.docker.internal:18889";
     private const string OTelCollectorImageName = "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib";
     private const string OTelCollectorImageTag = "0.114.0";
 
