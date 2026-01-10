@@ -21,6 +21,8 @@ on:
 env:
   DOTNET_VERSION: '10.0.x'
   PROJECT_PATH: 'Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj'
+  NUGET_USERNAME: ${{ github.actor }}
+  NUGET_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   publish:
@@ -48,7 +50,7 @@ jobs:
           else
             VERSION_PATTERN="1.0.*-*"
           fi
-          sed -i "s|<ProjectReference Include=\"..\\..\\Maliev.MessagingContracts\\generated\\csharp\\Maliev.MessagingContracts.csproj\" />|<PackageReference Include=\"Maliev.MessagingContracts\" Version=\"$VERSION_PATTERN\" />|g" ${{ env.PROJECT_PATH }}
+          sed -i "s|<ProjectReference Include=\"..\\\\..\\\\Maliev.MessagingContracts\\generated\\csharp\\Maliev.MessagingContracts.csproj\" />|<PackageReference Include=\"Maliev.MessagingContracts\" Version=\"$VERSION_PATTERN\" />|g" ${{ env.PROJECT_PATH }}
 
       - name: Restore dependencies
         run: dotnet restore ${{ env.PROJECT_PATH }}
