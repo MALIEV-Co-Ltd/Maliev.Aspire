@@ -30,11 +30,10 @@ public static class RedisExtensions
         bool redisEnabled = builder.Configuration.GetValue<bool>("Redis:Enabled", true) &&
                           builder.Configuration.GetValue<bool>("Cache:RedisEnabled", true);
 
-        // If Redis is explicitly disabled, skip setup entirely
+        // If Redis is explicitly disabled, we do NOT provide a fallback. 
+        // Services requiring ICacheService will fail to resolve it, which is the intended "fail fast" behavior.
         if (!redisEnabled)
         {
-            builder.Services.AddDistributedMemoryCache();
-            builder.Services.AddSingleton<ICacheService, MemoryCacheService>();
             return builder;
         }
 

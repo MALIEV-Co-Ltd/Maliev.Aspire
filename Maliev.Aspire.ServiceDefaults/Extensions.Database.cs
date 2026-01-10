@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Extensions.Hosting;
@@ -68,6 +68,10 @@ public static class DatabaseExtensions
             {
                 options.EnableSensitiveDataLogging();
                 options.EnableDetailedErrors();
+
+                // EF Core 9/10: Suppress pending model changes warning in development
+                // This allows using HasData for seeding without generating migrations immediately
+                options.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
             }
 
             // Apply custom configuration if provided
@@ -110,11 +114,13 @@ public static class DatabaseExtensions
     /// </summary>
     /// <typeparam name="TContext">The DbContext type to migrate.</typeparam>
     /// <param name="app">The web application.</param>
-    /// <param name="maxRetries">Maximum number of connection retry attempts (default: 20).</param>
+    /// <param name="maxRetries">Maximum number of connection retry attempts (default: 50).</param>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     public static async Task MigrateDatabaseAsync<TContext>(
         this IHost app,
-        int? maxRetries = null)
+        int? maxRetries = null,
+        CancellationToken cancellationToken = default)
         where TContext : DbContext
     {
         // Use fewer retries in test environment for faster feedback
@@ -135,7 +141,7 @@ public static class DatabaseExtensions
             {
                 // Wait for database connectivity
                 int retryCount = 0;
-                while (!await dbContext.Database.CanConnectAsync())
+                while (!await dbContext.Database.CanConnectAsync(cancellationToken))
                 {
                     if (retryCount >= retries)
                     {
@@ -144,24 +150,24 @@ public static class DatabaseExtensions
                     }
 
                     retryCount++;
-                    logger.LogInformation("Waiting for database connectivity (attempt {Attempt}/{Max})",
+                    logger.LogWarning("Waiting for database connectivity (attempt {Attempt}/{Max})",
                         retryCount, retries);
-                    await Task.Delay(TimeSpan.FromSeconds(2));
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
                 }
 
-                logger.LogInformation("Applying database migrations");
+                logger.LogInformation("Applying database migrations for {ContextType}", typeof(TContext).Name);
 
                 // Ensure migrations history table exists before EF Core checks for it.
                 // This prevents the 'fail: Microsoft.EntityFrameworkCore.Database.Command' log on the first run.
-                await EnsureMigrationsHistoryTableExistsAsync(dbContext, CancellationToken.None);
+                await EnsureMigrationsHistoryTableExistsAsync(dbContext, cancellationToken);
 
-                await dbContext.Database.MigrateAsync(CancellationToken.None);
-                logger.LogInformation("Database migrations applied successfully");
+                await dbContext.Database.MigrateAsync(cancellationToken);
+                logger.LogInformation("Database migrations applied successfully for {ContextType}", typeof(TContext).Name);
             });
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to apply database migrations");
+            logger.LogError(ex, "Failed to apply database migrations for {ContextType}", typeof(TContext).Name);
             throw;
         }
     }
@@ -172,26 +178,26 @@ public static class DatabaseExtensions
     /// </summary>
     private static async Task EnsureMigrationsHistoryTableExistsAsync(DbContext dbContext, CancellationToken cancellationToken)
     {
-        var connection = dbContext.Database.GetDbConnection();
-        var wasOpen = connection.State == System.Data.ConnectionState.Open;
-        if (!wasOpen) await connection.OpenAsync(cancellationToken);
+        // Try to resolve the history table name from options, defaulting to EF standard
+        var historyTableName = "__EFMigrationsHistory";
+        var relationalOptions = dbContext.Database.GetInfrastructure().GetService<IEnumerable<IDbContextOptionsExtension>>()
+            ?.OfType<Microsoft.EntityFrameworkCore.Infrastructure.RelationalOptionsExtension>()
+            .FirstOrDefault();
 
-        try
+        if (!string.IsNullOrEmpty(relationalOptions?.MigrationsHistoryTableName))
         {
-            using var command = connection.CreateCommand();
-            // This is the standard EF Core history table for PostgreSQL
-            command.CommandText =
-                "CREATE TABLE IF NOT EXISTS \"__EFMigrationsHistory\" (" +
-                "\"MigrationId\" varchar(150) NOT NULL, " +
-                "\"ProductVersion\" varchar(32) NOT NULL, " +
-                "CONSTRAINT \"PK___EFMigrationsHistory\" PRIMARY KEY (\"MigrationId\")" +
-                ");";
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            historyTableName = relationalOptions.MigrationsHistoryTableName;
         }
-        finally
-        {
-            if (!wasOpen) await connection.CloseAsync();
-        }
+
+        // Use EF Core's raw SQL execution to handle connection management safely
+        var sql = $@"
+            CREATE TABLE IF NOT EXISTS ""{historyTableName}"" (
+            ""MigrationId"" varchar(150) NOT NULL,
+            ""ProductVersion"" varchar(32) NOT NULL,
+            CONSTRAINT ""PK_{historyTableName}"" PRIMARY KEY (""MigrationId"")
+        );";
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
     }
 
     /// <summary>
@@ -201,20 +207,21 @@ public static class DatabaseExtensions
     {
         var builder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
 
-        // Set pooling parameters if not already configured
-        if (!connectionString.Contains("Maximum Pool Size", StringComparison.OrdinalIgnoreCase))
+        // Set pooling parameters if they are at their defaults
+        if (builder.MaxPoolSize == 100)
         {
-            builder.MaxPoolSize = 200; // Increase from default ~100 for 20+ services
+            builder.MaxPoolSize = 200; // Increase for 20+ microservices
         }
-        if (!connectionString.Contains("Minimum Pool Size", StringComparison.OrdinalIgnoreCase))
+        if (builder.MinPoolSize == 0)
         {
             builder.MinPoolSize = 10; // Keep warm connections ready
         }
-        if (!connectionString.Contains("Connection Idle Lifetime", StringComparison.OrdinalIgnoreCase))
+        if (builder.ConnectionIdleLifetime == 300)
         {
-            builder.ConnectionIdleLifetime = 300; // Recycle idle connections after 5 minutes
+            // Default is 300, keep it or adjust if needed.
+            // No action needed if we just want to ensure it's set.
         }
-        if (!connectionString.Contains("Connection Pruning Interval", StringComparison.OrdinalIgnoreCase))
+        if (builder.ConnectionPruningInterval == 10)
         {
             builder.ConnectionPruningInterval = 10; // Check for stale connections every 10 seconds
         }

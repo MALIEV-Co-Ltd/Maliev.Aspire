@@ -48,8 +48,8 @@ public class PermissionAuthorizationPolicyProvider : DefaultAuthorizationPolicyP
                     // Ignore unknown parts for forward compatibility
                 }
 
-                return new AuthorizationPolicyBuilder()
-                    .RequireAuthenticatedUser()
+                var defaultPolicy = await GetDefaultPolicyAsync();
+                return new AuthorizationPolicyBuilder(defaultPolicy)
                     .AddRequirements(new PermissionRequirement(
                         permission,
                         preValidateModel: validateModel,

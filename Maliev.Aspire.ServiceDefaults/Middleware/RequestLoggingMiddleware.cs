@@ -49,11 +49,12 @@ public class RequestLoggingMiddleware
 
     private static bool IsHealthCheck(PathString path)
     {
-        return path.HasValue && (
-            path.Value.EndsWith("/readiness", StringComparison.OrdinalIgnoreCase) ||
-            path.Value.EndsWith("/liveness", StringComparison.OrdinalIgnoreCase) ||
-            path.Value.EndsWith("/aspire-liveness", StringComparison.OrdinalIgnoreCase) ||
-            path.Value.EndsWith("/health", StringComparison.OrdinalIgnoreCase) ||
-            path.Value.EndsWith("/metrics", StringComparison.OrdinalIgnoreCase));
+        if (!path.HasValue) return false;
+
+        var segments = path.Value.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0) return false;
+
+        var lastSegment = segments[^1].ToLowerInvariant();
+        return lastSegment is "readiness" or "liveness" or "aspire-liveness" or "health" or "metrics";
     }
 }

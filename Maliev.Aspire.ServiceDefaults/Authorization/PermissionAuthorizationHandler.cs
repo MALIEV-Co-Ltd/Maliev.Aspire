@@ -84,8 +84,16 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         }
 
         var user = context.User;
-        if (user.Identity == null || !user.Identity.IsAuthenticated)
+        _logger.LogDebug("Checking authorization for principal with {Count} identities.", user.Identities.Count());
+        foreach (var identity in user.Identities)
         {
+            _logger.LogDebug("Identity: Scheme={Scheme}, IsAuthenticated={IsAuthenticated}, Name={Name}",
+                identity.AuthenticationType, identity.IsAuthenticated, identity.Name);
+        }
+
+        if (!user.Identities.Any(i => i.IsAuthenticated))
+        {
+            _logger.LogWarning("Authorization failed: No authenticated identities found. Total identities: {Count}", user.Identities.Count());
             return false;
         }
 
