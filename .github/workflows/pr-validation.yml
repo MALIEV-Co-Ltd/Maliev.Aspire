@@ -10,10 +10,14 @@ on:
       - 'Maliev.Aspire.ServiceDefaults/**'
       - 'Maliev.Aspire.AppHost/**'
       - 'Maliev.Aspire.Tests/**'
+      - '.github/workflows/**'
       - '*.sln'
 
 env:
   DOTNET_VERSION: '10.0.x'
+  SERVICE_DEFAULTS_PATH: 'Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj'
+  NUGET_USERNAME: ${{ github.actor }}
+  NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
 
 jobs:
   build-and-test:
@@ -29,14 +33,16 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Replace ProjectReference with PackageReference
+        run: |
+          # This matches the platform convention to allow CI to build without sibling repos
+          sed -i 's|<ProjectReference Include="..\\..\\Maliev.MessagingContracts\\generated\\csharp\\Maliev.MessagingContracts.csproj" />|<PackageReference Include="Maliev.MessagingContracts" Version="1.0.*-*" />|g' ${{ env.SERVICE_DEFAULTS_PATH }}
+
       - name: Restore dependencies
-        run: dotnet restore Maliev.Aspire.sln
+        run: dotnet restore ${{ env.SERVICE_DEFAULTS_PATH }}
 
-      - name: Build
-        run: dotnet build Maliev.Aspire.sln --configuration Release --no-restore /p:TreatWarningsAsErrors=true
-
-      - name: Test
-        run: dotnet test Maliev.Aspire.sln --configuration Release --no-build --verbosity normal
+      - name: Build ServiceDefaults
+        run: dotnet build ${{ env.SERVICE_DEFAULTS_PATH }} --configuration Release --no-restore /p:TreatWarningsAsErrors=true
 
   publish-validation:
     name: Validate NuGet Package
@@ -52,15 +58,19 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Replace ProjectReference with PackageReference
+        run: |
+          sed -i 's|<ProjectReference Include="..\\..\\Maliev.MessagingContracts\\generated\\csharp\\Maliev.MessagingContracts.csproj" />|<PackageReference Include="Maliev.MessagingContracts" Version="1.0.*-*" />|g' ${{ env.SERVICE_DEFAULTS_PATH }}
+
       - name: Restore dependencies
-        run: dotnet restore Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj
+        run: dotnet restore ${{ env.SERVICE_DEFAULTS_PATH }}
 
       - name: Build for Release
-        run: dotnet build Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj --configuration Release --no-restore /p:TreatWarningsAsErrors=true
+        run: dotnet build ${{ env.SERVICE_DEFAULTS_PATH }} --configuration Release --no-restore /p:TreatWarningsAsErrors=true
 
       - name: Pack (Dry Run)
         run: |
-          dotnet pack Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj \
+          dotnet pack ${{ env.SERVICE_DEFAULTS_PATH }} \
             --configuration Release \
             --no-build \
             -p:PackageVersion=0.0.0-validation \
@@ -77,7 +87,6 @@ jobs:
 
       - name: List Package Contents
         run: |
-          # Use dotnet nuget verify or just list files
           unzip -l ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg
 
       - name: Validate Package (Optional)

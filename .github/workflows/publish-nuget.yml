@@ -8,6 +8,7 @@ on:
       - develop   # Alpha releases (1.0.X-alpha)
     paths:
       - 'Maliev.Aspire.ServiceDefaults/**'
+      - '.github/workflows/**'
   release:
     types: [published]
   workflow_dispatch:
@@ -20,6 +21,8 @@ on:
 env:
   DOTNET_VERSION: '10.0.x'
   PROJECT_PATH: 'Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj'
+  NUGET_USERNAME: ${{ github.actor }}
+  NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
 
 jobs:
   publish:
@@ -36,6 +39,18 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.x"
+
+      - name: Replace ProjectReference with PackageReference
+        run: |
+          # This matches the platform convention to allow CI to build without sibling repos
+          # For release builds, we use the semantic version pattern based on the branch
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" == "main" ]; then
+            VERSION_PATTERN="1.0.*"
+          else
+            VERSION_PATTERN="1.0.*-*"
+          fi
+          sed -i "s|<ProjectReference Include=\"..\\\\..\\\\Maliev.MessagingContracts\\\\generated\\\\csharp\\\\Maliev.MessagingContracts.csproj\" />|<PackageReference Include=\"Maliev.MessagingContracts\" Version=\"$VERSION_PATTERN\" />|g" ${{ env.PROJECT_PATH }}
 
       - name: Restore dependencies
         run: dotnet restore ${{ env.PROJECT_PATH }}
@@ -83,7 +98,7 @@ jobs:
         run: >
           dotnet nuget push ./nupkg/*.nupkg
           --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
-          --api-key ${{ secrets.GITHUB_TOKEN }}
+          --api-key ${{ secrets.GITOPS_PAT }}
           --skip-duplicate
 
       - name: Upload artifact
