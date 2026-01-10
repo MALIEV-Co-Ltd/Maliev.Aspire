@@ -31,6 +31,11 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Replace ProjectReference with PackageReference
+        run: |
+          # This matches the platform convention to allow CI to build without sibling repos
+          sed -i 's|<ProjectReference Include="..\\..\\Maliev.MessagingContracts\\generated\\csharp\\Maliev.MessagingContracts.csproj" />|<PackageReference Include="Maliev.MessagingContracts" Version="1.0.*-*" />|g' ${{ env.SERVICE_DEFAULTS_PATH }}
+
       - name: Restore dependencies
         run: dotnet restore ${{ env.SERVICE_DEFAULTS_PATH }}
 
@@ -50,6 +55,10 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Replace ProjectReference with PackageReference
+        run: |
+          sed -i 's|<ProjectReference Include="..\\..\\Maliev.MessagingContracts\\generated\\csharp\\Maliev.MessagingContracts.csproj" />|<PackageReference Include="Maliev.MessagingContracts" Version="1.0.*-*" />|g' ${{ env.SERVICE_DEFAULTS_PATH }}
 
       - name: Restore dependencies
         run: dotnet restore ${{ env.SERVICE_DEFAULTS_PATH }}

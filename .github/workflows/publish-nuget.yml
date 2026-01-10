@@ -38,6 +38,18 @@ jobs:
         with:
           dotnet-version: "10.x"
 
+      - name: Replace ProjectReference with PackageReference
+        run: |
+          # This matches the platform convention to allow CI to build without sibling repos
+          # For release builds, we use the semantic version pattern based on the branch
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" == "main" ]; then
+            VERSION_PATTERN="1.0.*"
+          else
+            VERSION_PATTERN="1.0.*-*"
+          fi
+          sed -i "s|<ProjectReference Include=\"..\\..\\Maliev.MessagingContracts\\generated\\csharp\\Maliev.MessagingContracts.csproj\" />|<PackageReference Include=\"Maliev.MessagingContracts\" Version=\"$VERSION_PATTERN\" />|g" ${{ env.PROJECT_PATH }}
+
       - name: Restore dependencies
         run: dotnet restore ${{ env.PROJECT_PATH }}
 
