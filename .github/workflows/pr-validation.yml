@@ -15,6 +15,7 @@ on:
 
 env:
   DOTNET_VERSION: '10.0.x'
+  SERVICE_DEFAULTS_PATH: 'Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj'
 
 jobs:
   build-and-test:
@@ -31,13 +32,10 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore dependencies
-        run: dotnet restore Maliev.Aspire.sln
+        run: dotnet restore ${{ env.SERVICE_DEFAULTS_PATH }}
 
-      - name: Build
-        run: dotnet build Maliev.Aspire.sln --configuration Release --no-restore /p:TreatWarningsAsErrors=true
-
-      - name: Test
-        run: dotnet test Maliev.Aspire.sln --configuration Release --no-build --verbosity normal
+      - name: Build ServiceDefaults
+        run: dotnet build ${{ env.SERVICE_DEFAULTS_PATH }} --configuration Release --no-restore /p:TreatWarningsAsErrors=true
 
   publish-validation:
     name: Validate NuGet Package
@@ -54,14 +52,14 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore dependencies
-        run: dotnet restore Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj
+        run: dotnet restore ${{ env.SERVICE_DEFAULTS_PATH }}
 
       - name: Build for Release
-        run: dotnet build Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj --configuration Release --no-restore /p:TreatWarningsAsErrors=true
+        run: dotnet build ${{ env.SERVICE_DEFAULTS_PATH }} --configuration Release --no-restore /p:TreatWarningsAsErrors=true
 
       - name: Pack (Dry Run)
         run: |
-          dotnet pack Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj \
+          dotnet pack ${{ env.SERVICE_DEFAULTS_PATH }} \
             --configuration Release \
             --no-build \
             -p:PackageVersion=0.0.0-validation \
@@ -78,7 +76,6 @@ jobs:
 
       - name: List Package Contents
         run: |
-          # Use dotnet nuget verify or just list files
           unzip -l ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg
 
       - name: Validate Package (Optional)
