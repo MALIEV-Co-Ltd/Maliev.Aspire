@@ -68,10 +68,6 @@ public static class DatabaseExtensions
             {
                 options.EnableSensitiveDataLogging();
                 options.EnableDetailedErrors();
-
-                // EF Core 9/10: Suppress pending model changes warning in development
-                // This allows using HasData for seeding without generating migrations immediately
-                options.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
             }
 
             // Apply custom configuration if provided
