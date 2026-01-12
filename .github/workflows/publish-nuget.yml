@@ -9,6 +9,8 @@ on:
     paths:
       - 'Maliev.Aspire.ServiceDefaults/**'
       - '.github/workflows/**'
+      - 'nuget.config'
+      - 'Maliev.Aspire.sln'
   release:
     types: [published]
   workflow_dispatch:
