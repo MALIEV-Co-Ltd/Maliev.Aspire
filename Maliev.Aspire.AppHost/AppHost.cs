@@ -578,7 +578,7 @@ static partial class Program
             otelCollector);
 
         // --- Python Services ---
-        var geometryService = builder.AddPythonApp("geometry-service", "../../Maliev.GeometryService", "src/main.py")
+        var geometryService = builder.AddPythonApp("maliev-geometryservice", "../../Maliev.GeometryService", "src/main.py")
             .WithReference(infrastructure.RabbitMQ)
             .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ)
             .WithHttpEndpoint(targetPort: 8080, name: "http")
