@@ -62,6 +62,7 @@ static partial class Program
 
         // Define these as formal Aspire Parameters to show up in the Dashboard
         var jwtSecurityKey = builder.AddParameterFromConfig("JwtSecurityKey", "Jwt:SecurityKey", secret: true);
+        var jwtPrivateKey = builder.AddParameterFromConfig("JwtPrivateKey", "Jwt:PrivateKey", secret: true);
         var jwtPublicKey = builder.AddParameterFromConfig("JwtPublicKey", "Jwt:PublicKey", secret: true);
         var jwtIssuer = builder.AddParameterFromConfig("JwtIssuer", "Jwt:Issuer");
         var jwtAudience = builder.AddParameterFromConfig("JwtAudience", "Jwt:Audience");
@@ -73,6 +74,7 @@ static partial class Program
 
         return new SharedConfiguration(
             JwtSecurityKey: jwtSecurityKey,
+            JwtPrivateKey: jwtPrivateKey,
             JwtPublicKey: jwtPublicKey,
             JwtIssuer: jwtIssuer,
             JwtAudience: jwtAudience,
@@ -580,6 +582,7 @@ static partial class Program
         // --- Python Services ---
         var geometryService = builder.AddPythonApp("maliev-geometryservice", "../../Maliev.GeometryService", "src/main.py")
             .WithReference(infrastructure.RabbitMQ)
+            .WaitFor(infrastructure.RabbitMQ)
             .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ)
             .WithHttpEndpoint(targetPort: 8080, name: "http")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
@@ -601,6 +604,7 @@ static partial class Program
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
             .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
+            .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)  // RSA private key for JWT signing
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins)
@@ -614,6 +618,7 @@ static partial class Program
 /// </summary>
 record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtSecurityKey,
+    IResourceBuilder<ParameterResource> JwtPrivateKey,
     IResourceBuilder<ParameterResource> JwtPublicKey,
     IResourceBuilder<ParameterResource> JwtIssuer,
     IResourceBuilder<ParameterResource> JwtAudience,
