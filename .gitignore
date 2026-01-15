@@ -87,3 +87,6 @@ implementation-status.md
 appsettings.Development.json
 docker-compose*.yml
 docker-compose.override.yml
+.gemini-clipboard/
+tmpclaude*
+Maliev.Aspire.Tests/MessagingTests.cs
