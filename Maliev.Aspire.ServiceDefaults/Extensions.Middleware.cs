@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Maliev.Aspire.ServiceDefaults.Middleware;
@@ -20,19 +21,31 @@ public static class MiddlewareExtensions
 
         builder.Services.AddSingleton(options);
 
+        // Configure Forwarded Headers for microservices architecture
+        builder.Services.Configure<ForwardedHeadersOptions>(fhOptions =>
+        {
+            fhOptions.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            // Clear known networks and proxies to trust the immediate one (typical for K8s/Docker environments)
+            fhOptions.KnownIPNetworks.Clear();
+            fhOptions.KnownProxies.Clear();
+        });
+
         return builder;
     }
 
     /// <summary>
     /// Uses standard middleware in the application pipeline.
     /// Call this in Program.cs after app.Build() and before other middleware.
-    /// Order: CorrelationId → SecurityHeaders → ExceptionHandling → RequestLogging
+    /// Order: ForwardedHeaders → CorrelationId → SecurityHeaders → ExceptionHandling → RequestLogging
     /// </summary>
     public static IApplicationBuilder UseStandardMiddleware(this IApplicationBuilder app)
     {
         var options = app.ApplicationServices.GetService<MiddlewareOptions>() ?? new MiddlewareOptions();
 
-        // Order matters!
+        // Order matters! 
+        // ForwardedHeaders must be first to ensure other middleware sees the correct IP/Protocol
+        app.UseForwardedHeaders();
+
         app.UseMiddleware<CorrelationIdMiddleware>();
         app.UseMiddleware<SecurityHeadersMiddleware>();
 

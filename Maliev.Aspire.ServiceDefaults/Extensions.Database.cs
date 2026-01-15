@@ -19,8 +19,25 @@ public static class DatabaseExtensions
         where TContext : DbContext
     {
         var connStringName = connectionName ?? typeof(TContext).Name;
-        var connectionString = builder.Configuration.GetConnectionString(connStringName)
-            ?? throw new InvalidOperationException($"Database connection string '{connStringName}' not configured");
+        var connectionString = builder.Configuration.GetConnectionString(connStringName);
+
+        if (string.IsNullOrEmpty(connectionString))
+        {
+            // Log available connection strings for debugging (without values for security)
+            var connectionStrings = builder.Configuration.GetSection("ConnectionStrings");
+            var availableKeys = connectionStrings.GetChildren().Select(c => c.Key).ToList();
+
+            var errorMessage = $"Database connection string '{connStringName}' not configured. " +
+                $"Available connection strings: [{string.Join(", ", availableKeys)}]. " +
+                $"Environment: {builder.Environment.EnvironmentName}";
+
+            // Force flush to ensure Aspire captures the error before process exits
+            Console.Error.WriteLine($"FATAL: {errorMessage}");
+            Console.Error.Flush();
+            Console.Out.Flush();
+
+            throw new InvalidOperationException(errorMessage);
+        }
 
         // Enhance connection string with pooling configuration if not already present
         connectionString = EnsureConnectionPooling(connectionString);
@@ -119,6 +136,11 @@ public static class DatabaseExtensions
         CancellationToken cancellationToken = default)
         where TContext : DbContext
     {
+        // Enforce a 60s timeout to prevent silent hangs (e.g. database locks)
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        var migrationToken = linkedCts.Token;
+
         // Use fewer retries in test environment for faster feedback
         var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
         var isTest = environment == "Test" || environment == "Testing";
@@ -135,9 +157,10 @@ public static class DatabaseExtensions
 
             await strategy.ExecuteAsync(async () =>
             {
-                // Wait for database connectivity
+                // Wait for database connectivity with jittered retry to avoid thundering herd
                 int retryCount = 0;
-                while (!await dbContext.Database.CanConnectAsync(cancellationToken))
+                var random = new Random();
+                while (!await dbContext.Database.CanConnectAsync(migrationToken))
                 {
                     if (retryCount >= retries)
                     {
@@ -146,20 +169,30 @@ public static class DatabaseExtensions
                     }
 
                     retryCount++;
-                    logger.LogWarning("Waiting for database connectivity (attempt {Attempt}/{Max})",
-                        retryCount, retries);
-                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                    var delaySeconds = 2 + random.Next(0, 3); // 2-5 seconds jittered delay
+                    logger.LogWarning("Waiting for database connectivity (attempt {Attempt}/{Max}). Retrying in {Delay}s...",
+                        retryCount, retries, delaySeconds);
+                    await Task.Delay(TimeSpan.FromSeconds(delaySeconds), migrationToken);
                 }
 
                 logger.LogInformation("Applying database migrations for {ContextType}", typeof(TContext).Name);
 
                 // Ensure migrations history table exists before EF Core checks for it.
                 // This prevents the 'fail: Microsoft.EntityFrameworkCore.Database.Command' log on the first run.
-                await EnsureMigrationsHistoryTableExistsAsync(dbContext, cancellationToken);
+                await EnsureMigrationsHistoryTableExistsAsync(dbContext, migrationToken);
 
-                await dbContext.Database.MigrateAsync(cancellationToken);
+                await dbContext.Database.MigrateAsync(migrationToken);
                 logger.LogInformation("Database migrations applied successfully for {ContextType}", typeof(TContext).Name);
             });
+        }
+        catch (OperationCanceledException)
+        {
+            // Log explicitly if it was our timeout
+            if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                logger.LogError("Database migration timed out after 60 seconds. This may indicate a database lock or connectivity issue.");
+            }
+            throw;
         }
         catch (Exception ex)
         {

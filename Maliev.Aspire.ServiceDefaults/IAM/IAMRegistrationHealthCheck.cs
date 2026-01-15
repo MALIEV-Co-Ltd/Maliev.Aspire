@@ -29,12 +29,15 @@ public class IAMRegistrationHealthCheck : IHealthCheck
             RegistrationStatus.Registered =>
                 Task.FromResult(HealthCheckResult.Healthy("IAM registration successful", data)),
 
-            RegistrationStatus.Pending or RegistrationStatus.Attempting =>
-                Task.FromResult(HealthCheckResult.Healthy("IAM registration in progress", data)),
+            RegistrationStatus.Pending =>
+                Task.FromResult(HealthCheckResult.Unhealthy("IAM registration pending application startup", null, data)),
+
+            RegistrationStatus.Attempting =>
+                Task.FromResult(HealthCheckResult.Unhealthy("IAM registration in progress (publishing to RabbitMQ)", null, data)),
 
             RegistrationStatus.PartiallyRegistered =>
                 Task.FromResult(HealthCheckResult.Degraded(
-                    $"IAM registration failed after multiple retries. Service running with cached permissions only.",
+                    $"IAM registration failed after multiple retries. Service running with cached permissions only. Error: {_statusTracker.LastException?.Message}",
                     _statusTracker.LastException,
                     data)),
 
