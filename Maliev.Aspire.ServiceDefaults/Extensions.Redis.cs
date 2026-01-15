@@ -48,9 +48,20 @@ public static class RedisExtensions
             }
             else
             {
-                throw new InvalidOperationException(
-                    "Redis connection string 'redis' not configured. " +
-                    "Redis is required in all environments unless explicitly disabled via Redis:Enabled=false or Cache:RedisEnabled=false.");
+                // Log available connection strings for debugging
+                var connectionStrings = builder.Configuration.GetSection("ConnectionStrings");
+                var availableKeys = connectionStrings.GetChildren().Select(c => c.Key).ToList();
+
+                var errorMessage = "Redis connection string 'redis' not configured. " +
+                    $"Available connection strings: [{string.Join(", ", availableKeys)}]. " +
+                    "Redis is required in all environments unless explicitly disabled via Redis:Enabled=false or Cache:RedisEnabled=false.";
+
+                // Force flush to ensure Aspire captures the error before process exits
+                Console.Error.WriteLine($"FATAL: {errorMessage}");
+                Console.Error.Flush();
+                Console.Out.Flush();
+
+                throw new InvalidOperationException(errorMessage);
             }
         }
 

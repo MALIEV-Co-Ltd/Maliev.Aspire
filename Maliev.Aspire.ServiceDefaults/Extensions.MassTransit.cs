@@ -36,9 +36,20 @@ public static class MassTransitExtensions
             }
             else
             {
-                throw new InvalidOperationException(
-                    "RabbitMQ connection string 'rabbitmq' not configured. " +
-                    "RabbitMQ is required in all environments.");
+                // Log available connection strings for debugging
+                var connectionStrings = builder.Configuration.GetSection("ConnectionStrings");
+                var availableKeys = connectionStrings.GetChildren().Select(c => c.Key).ToList();
+
+                var errorMessage = "RabbitMQ connection string 'rabbitmq' not configured. " +
+                    $"Available connection strings: [{string.Join(", ", availableKeys)}]. " +
+                    "RabbitMQ is required in all environments.";
+
+                // Force flush to ensure Aspire captures the error before process exits
+                Console.Error.WriteLine($"FATAL: {errorMessage}");
+                Console.Error.Flush();
+                Console.Out.Flush();
+
+                throw new InvalidOperationException(errorMessage);
             }
         }
 

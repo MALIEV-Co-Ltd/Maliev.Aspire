@@ -48,16 +48,7 @@ public class BackgroundIAMRegistrationService : BackgroundService
     /// <param name="stoppingToken">Cancellation token for graceful shutdown.</param>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("IAM registration background service started, waiting for application to be ready...");
-
-        // Wait for the application to be fully started (MassTransit bus will be ready at this point)
-        await WaitForApplicationStartAsync(stoppingToken);
-
-        if (stoppingToken.IsCancellationRequested)
-        {
-            _logger.LogInformation("IAM registration cancelled before application startup completed");
-            return;
-        }
+        _logger.LogInformation("IAM registration background service started.");
 
         if (!_registrationServices.Any())
         {
@@ -66,26 +57,45 @@ public class BackgroundIAMRegistrationService : BackgroundService
             return;
         }
 
+        // Wait for the application to be fully started (MassTransit bus will be ready at this point)
+        // We use Task.Yield() to ensure we don't block the startup sequence if this is called synchronously
+        await Task.Yield();
+        await WaitForApplicationStartAsync(stoppingToken);
+
+        if (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("IAM registration cancelled before application startup completed");
+            return;
+        }
+
         _logger.LogInformation("Application started, beginning IAM registration via RabbitMQ for {ServiceCount} domains", _registrationServices.Count());
         _statusTracker.MarkAttempting();
 
-        try
+        bool anyFailure = false;
+        foreach (var registrationService in _registrationServices)
         {
-            foreach (var registrationService in _registrationServices)
+            try
             {
                 await RegisterServiceAsync(registrationService, stoppingToken);
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to register service {ServiceName}", registrationService.ServiceName);
+                anyFailure = true;
+            }
+        }
 
+        if (anyFailure)
+        {
+            _statusTracker.MarkPartiallyRegistered(new AggregateException("One or more IAM registrations failed."));
+        }
+        else
+        {
             _statusTracker.MarkRegistered();
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            _logger.LogInformation("IAM registration cancelled during shutdown");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to complete IAM registration request");
-            _statusTracker.MarkPartiallyRegistered(ex);
         }
     }
 

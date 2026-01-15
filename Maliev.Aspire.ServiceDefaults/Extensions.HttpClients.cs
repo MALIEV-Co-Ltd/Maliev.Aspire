@@ -121,7 +121,7 @@ public static class HttpClientExtensions
                     $"Required configuration 'Services:{serviceName}:BaseUrl' is missing. Check appsettings.json or environment variables.");
 
             client.BaseAddress = new Uri(url);
-            client.Timeout = TimeSpan.FromMinutes(6);
+            client.Timeout = TimeSpan.FromSeconds(90);
         });
 
         // Note: Standard resilience handler is already applied by ConfigureHttpClientDefaults in AddServiceDefaults()
@@ -163,7 +163,7 @@ public static class HttpClientExtensions
                     $"Required configuration 'Services:{serviceName}:BaseUrl' is missing. Check appsettings.json or environment variables.");
 
             client.BaseAddress = new Uri(url);
-            client.Timeout = TimeSpan.FromMinutes(6);
+            client.Timeout = TimeSpan.FromSeconds(90);
 
             configureClient?.Invoke(client);
         });
