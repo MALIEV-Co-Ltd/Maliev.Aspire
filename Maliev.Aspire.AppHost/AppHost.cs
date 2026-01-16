@@ -67,6 +67,9 @@ static partial class Program
         var jwtIssuer = builder.AddParameterFromConfig("JwtIssuer", "Jwt:Issuer");
         var jwtAudience = builder.AddParameterFromConfig("JwtAudience", "Jwt:Audience");
 
+        var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId");
+        var googleClientSecret = builder.AddParameterFromConfig("GoogleClientSecret", "Authentication:Google:ClientSecret", secret: true);
+
         var corsAllowedOrigins = builder.AddParameter("CorsAllowedOrigins");
         // Convert the JSON array to a comma-separated string for easier environment injection
         var origins = builder.Configuration.GetSection("CORS:AllowedOrigins").Get<string[]>();
@@ -78,6 +81,8 @@ static partial class Program
             JwtPublicKey: jwtPublicKey,
             JwtIssuer: jwtIssuer,
             JwtAudience: jwtAudience,
+            GoogleClientId: googleClientId,
+            GoogleClientSecret: googleClientSecret,
             CorsAllowedOrigins: corsAllowedOrigins
             );
     }
@@ -607,6 +612,8 @@ static partial class Program
             .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)  // RSA private key for JWT signing
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
+            .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
+            .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins)
             .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http"))
             .WaitFor(otelCollector);
@@ -622,6 +629,8 @@ record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtPublicKey,
     IResourceBuilder<ParameterResource> JwtIssuer,
     IResourceBuilder<ParameterResource> JwtAudience,
+    IResourceBuilder<ParameterResource> GoogleClientId,
+    IResourceBuilder<ParameterResource> GoogleClientSecret,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins);
 
 /// <summary>
