@@ -29,6 +29,11 @@ public static class Extensions
     /// <returns>The configured <see cref="IHostApplicationBuilder"/>.</returns>
     public static IHostApplicationBuilder AddServiceDefaults(this IHostApplicationBuilder builder)
     {
+        // Disable GSSAPI authentication globally to avoid SPNEGO negotiation noise in postgres-server logs.
+        // This resolves the "DETAIL: No credentials were supplied... SPNEGO cannot find mechanisms to negotiate" error.
+        Environment.SetEnvironmentVariable("NPGSQL_GSSAPI_AUTHENTICATION", "false");
+        Environment.SetEnvironmentVariable("PGGSSENCMODE", "disable");
+
         // Reduce log verbosity for noisy categories
         // ASP.NET Core infrastructure (keep errors only)
         builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
@@ -117,7 +122,7 @@ public static class Extensions
                 // Increased timeouts to accommodate IAM registration during startup (20+ services registering)
                 // and other potentially slow service-to-service operations.
                 options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
-                options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5); // 5m total budget
+                options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(100);
                 options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(125); // Must be >= 2 * AttemptTimeout
             });
 

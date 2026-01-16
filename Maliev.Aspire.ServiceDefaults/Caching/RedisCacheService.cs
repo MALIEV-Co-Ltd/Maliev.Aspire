@@ -117,17 +117,17 @@ public class RedisCacheService : ICacheService
             var database = _redis.GetDatabase();
             var prefixedPattern = _instanceName + pattern;
 
-            // Note: Keys() can be expensive on large databases as it is a blocking operation.
-            // StackExchange.Redis uses SCAN when possible, but ToArray() still materializes all matching keys.
+            // Use KeysAsync which uses SCAN to avoid blocking the server
             foreach (var endpoint in endpoints)
             {
                 var server = _redis.GetServer(endpoint);
-                var keys = server.Keys(pattern: prefixedPattern).ToArray();
-                if (keys.Length > 0)
+
+                await foreach (var key in server.KeysAsync(pattern: prefixedPattern))
                 {
-                    await database.KeyDeleteAsync(keys);
-                    _logger.LogInformation("Removed {Count} keys matching pattern {Pattern} from Redis endpoint {Endpoint}", keys.Length, prefixedPattern, endpoint);
+                    await database.KeyDeleteAsync(key);
                 }
+
+                _logger.LogInformation("Finished removing keys matching pattern {Pattern} from Redis endpoint {Endpoint}", prefixedPattern, endpoint);
             }
         }
         catch (Exception ex)

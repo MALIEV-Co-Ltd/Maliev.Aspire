@@ -1,6 +1,11 @@
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
 using Microsoft.Extensions.Configuration;
 
+// Disable GSSAPI negotiation globally for the AppHost process and its probes.
+// This silences the "SPNEGO cannot find mechanisms to negotiate" logs in postgres-server.
+Environment.SetEnvironmentVariable("NPGSQL_GSSAPI_AUTHENTICATION", "false");
+Environment.SetEnvironmentVariable("PGGSSENCMODE", "disable");
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 var config = Program.LoadSharedConfiguration(builder);
@@ -67,7 +72,7 @@ static partial class Program
         var jwtIssuer = builder.AddParameterFromConfig("JwtIssuer", "Jwt:Issuer");
         var jwtAudience = builder.AddParameterFromConfig("JwtAudience", "Jwt:Audience");
 
-        var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId");
+        var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId", secret: true);
         var googleClientSecret = builder.AddParameterFromConfig("GoogleClientSecret", "Authentication:Google:ClientSecret", secret: true);
 
         var corsAllowedOrigins = builder.AddParameter("CorsAllowedOrigins");
@@ -129,18 +134,17 @@ static partial class Program
 
         static IResourceBuilder<PostgresServerResource> ConfigurePostgres(IDistributedApplicationBuilder builder)
         {
-            var postgres = builder.AddPostgres("postgres-server")
+            return builder.AddPostgres("postgres-server")
                 .WithImageTag("18-alpine")
-                .WithArgs("-c", "max_connections=5000"); // Increased to handle 20+ services with large pools
-
-            // pgAdmin is an optional tool; configure it separately so it doesn't block the main postgres resource chain
-            postgres.WithPgAdmin(option =>
-            {
-                option.WithImageTag("9.11")
-                    .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
-            });
-
-            return postgres;
+                .WithArgs("-c", "max_connections=2000")
+                .WithEnvironment("PGGSSENCMODE", "disable") // Disable GSSAPI for internal container probes (pg_isready)
+                .WithPgAdmin(option =>
+                {
+                    option.WithImageTag("9.11")
+                        .WithEnvironment("PGGSSENCMODE", "disable") // Disable GSSAPI for pgAdmin connections
+                        .WithEnvironment("PYTHONWARNINGS", "ignore") // Suppress SyntaxWarnings from sshtunnel in Python 3.14+
+                        .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
+                });
         }
     }
 
@@ -229,6 +233,19 @@ static partial class Program
             grafana,
             otelCollector);
 
+        var uploadService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_UploadService_Api>("maliev-uploadservice-api")
+                .WithReference(databases.Upload, "UploadDbContext")
+                .WaitFor(databases.Upload)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/upload/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector);
+
         var customerService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CustomerService_Api>("maliev-customerservice-api")
                 .WithReference(databases.Customer, "CustomerDbContext")
@@ -237,6 +254,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(countryService)
+                .WithReference(uploadService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/customer/aspire-liveness"),
             config,
@@ -307,19 +325,6 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/notification/aspire-liveness"),
-            config,
-            grafana,
-            otelCollector);
-
-        var uploadService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_UploadService_Api>("maliev-uploadservice-api")
-                .WithReference(databases.Upload, "UploadDbContext")
-                .WaitFor(databases.Upload)
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis)
-                .WithReference(iamService)
-                .WithHttpHealthCheck("/upload/aspire-liveness"),
             config,
             grafana,
             otelCollector);
@@ -592,8 +597,7 @@ static partial class Program
             .WithHttpEndpoint(targetPort: 8080, name: "http")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
             .WithHttpHealthCheck("/geometry/aspire-liveness")
-            .WithVirtualEnvironment(".venv")
-            .WaitFor(otelCollector);
+            .WithVirtualEnvironment(".venv");
     }
 
     /// <summary>
@@ -616,7 +620,8 @@ static partial class Program
             .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins)
             .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http"))
-            .WaitFor(otelCollector);
+            .WithEnvironment("NPGSQL_GSSAPI_AUTHENTICATION", "false")
+            .WithEnvironment("PGGSSENCMODE", "disable");
     }
 }
 
