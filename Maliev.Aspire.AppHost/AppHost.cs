@@ -614,10 +614,10 @@ static partial class Program
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
             .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
             .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)  // RSA private key for JWT signing
-            .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
-            .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
+            .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
+            .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins)
             .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http"))
             .WithEnvironment("NPGSQL_GSSAPI_AUTHENTICATION", "false")
