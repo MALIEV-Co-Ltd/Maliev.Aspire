@@ -1,8 +1,8 @@
+using Maliev.MessagingContracts.Generated;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Maliev.MessagingContracts.Generated;
 
 namespace Maliev.Aspire.ServiceDefaults.IAM;
 
