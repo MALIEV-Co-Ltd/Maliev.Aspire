@@ -58,26 +58,28 @@ public static class DatabaseExtensions
                 options.UseNpgsql(dataSource, npgsqlOptions =>
                 {
                     npgsqlOptions.EnableRetryOnFailure(
-                        maxRetryCount: 5,
+                        maxRetryCount: 10,
                         maxRetryDelay: TimeSpan.FromSeconds(10),
                         errorCodesToAdd: null);
 
                     // Increased from 30s to 120s to handle heavy IAM startup load
                     npgsqlOptions.CommandTimeout(120);
                 });
+
             }
             else
             {
                 options.UseNpgsql(connectionString, npgsqlOptions =>
                 {
                     npgsqlOptions.EnableRetryOnFailure(
-                        maxRetryCount: 5,
+                        maxRetryCount: 10,
                         maxRetryDelay: TimeSpan.FromSeconds(10),
                         errorCodesToAdd: null);
 
                     // Increased from 30s to 120s to handle heavy IAM startup load
                     npgsqlOptions.CommandTimeout(120);
                 });
+
             }
 
             // Enable detailed logging in development for debugging
