@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Maliev.MessagingContracts.Generated;
 using MassTransit;
@@ -11,7 +6,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Xunit;
 
 namespace Maliev.Aspire.Tests.IAM;
 

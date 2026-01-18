@@ -1,13 +1,9 @@
+using Maliev.Aspire.ServiceDefaults.Authorization;
+using Maliev.Aspire.ServiceDefaults.IAM;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Http.Resilience;
-using Microsoft.AspNetCore.Authorization;
-using Maliev.Aspire.ServiceDefaults.Authorization;
-using Maliev.Aspire.ServiceDefaults.IAM;
-using Microsoft.Extensions.Logging;
-using System.Diagnostics.CodeAnalysis;
-using Polly;
 
 namespace Maliev.Aspire.ServiceDefaults;
 

@@ -1,9 +1,7 @@
+using Maliev.Aspire.ServiceDefaults.Caching;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
-using Maliev.Aspire.ServiceDefaults.Caching;
 
 namespace Microsoft.Extensions.Hosting;
 
