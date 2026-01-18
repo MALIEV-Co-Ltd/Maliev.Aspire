@@ -1,8 +1,7 @@
+using Maliev.Aspire.ServiceDefaults.Middleware;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Maliev.Aspire.ServiceDefaults.Middleware;
 
 namespace Microsoft.Extensions.Hosting;
 
