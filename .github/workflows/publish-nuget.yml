@@ -10,7 +10,7 @@ on:
       - 'Maliev.Aspire.ServiceDefaults/**'
       - '.github/workflows/**'
       - 'nuget.config'
-      - 'Maliev.Aspire.sln'
+      - 'Maliev.Aspire.slnx'
   release:
     types: [published]
   workflow_dispatch:

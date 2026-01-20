@@ -49,6 +49,7 @@
     <ProjectReference Include="..\..\Maliev.PaymentService\Maliev.PaymentService.Api\Maliev.PaymentService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PdfService\Maliev.PdfService.Api\Maliev.PdfService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PerformanceService\Maliev.PerformanceService.Api\Maliev.PerformanceService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.PricingService\Maliev.PricingService.Api\Maliev.PricingService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PurchaseOrderService\Maliev.PurchaseOrderService.Api\Maliev.PurchaseOrderService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.QuotationService\Maliev.QuotationService.Api\Maliev.QuotationService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.SupplierService\Maliev.SupplierService.Api\Maliev.SupplierService.Api.csproj" />

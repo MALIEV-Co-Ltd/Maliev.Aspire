@@ -187,6 +187,7 @@ static partial class Program
             Pdf: postgres.AddDatabase("pdf-app-db"),
             Performance: postgres.AddDatabase("performance-app-db"),
             PurchaseOrder: postgres.AddDatabase("purchaseorder-app-db"),
+            Pricing: postgres.AddDatabase("pricing-app-db"),
             Quotation: postgres.AddDatabase("quotation-app-db"),
             Receipt: postgres.AddDatabase("receipt-app-db"),
             Supplier: postgres.AddDatabase("supplier-app-db"),
@@ -487,6 +488,21 @@ static partial class Program
             grafana,
             otelCollector);
 
+        var pricingService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_PricingService_Api>("maliev-pricingservice-api")
+                .WithReference(databases.Pricing, "PricingDbContext")
+                .WaitFor(databases.Pricing)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(materialService)
+                .WithReference(currencyService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/pricing/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector);
+
         var orderService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_OrderService_Api>("maliev-orderservice-api")
                 .WithReference(databases.Order, "OrderDbContext")
@@ -671,6 +687,7 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Payment,
     IResourceBuilder<PostgresDatabaseResource> Pdf,
     IResourceBuilder<PostgresDatabaseResource> Performance,
+    IResourceBuilder<PostgresDatabaseResource> Pricing,
     IResourceBuilder<PostgresDatabaseResource> PurchaseOrder,
     IResourceBuilder<PostgresDatabaseResource> Quotation,
     IResourceBuilder<PostgresDatabaseResource> Receipt,
