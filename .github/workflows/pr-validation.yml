@@ -11,7 +11,7 @@ on:
       - 'Maliev.Aspire.AppHost/**'
       - 'Maliev.Aspire.Tests/**'
       - '.github/workflows/**'
-      - '*.sln'
+      - '*.slnx'
 
 env:
   DOTNET_VERSION: '10.0.x'
