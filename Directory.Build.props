@@ -1,0 +1,43 @@
+<Project>
+  <!-- 
+    MALIEV Platform Global Build Configuration
+    Enforces the "Maliev Constitution" rules for library usage and code quality.
+  -->
+  
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <NoWarn>$(NoWarn);1591;1573</NoWarn>
+  </PropertyGroup>
+
+  <!-- Disable TreatWarningsAsErrors for generated contracts -->
+  <PropertyGroup Condition="$(MSBuildProjectName.Contains('MessagingContracts'))">
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Enforce Banned Libraries -->
+  <Target Name="EnforceBannedLibraries" BeforeTargets="CollectPackageReferences">
+    <ItemGroup>
+      <BannedPackage Include="AutoMapper" />
+      <BannedPackage Include="FluentValidation" />
+      <BannedPackage Include="FluentAssertions" />
+      <BannedPackage Include="Swashbuckle.AspNetCore" />
+      <BannedPackage Include="Swashbuckle.AspNetCore.Swagger" />
+      <BannedPackage Include="Swashbuckle.AspNetCore.SwaggerGen" />
+      <BannedPackage Include="Swashbuckle.AspNetCore.SwaggerUI" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="ValidateBannedLibraries" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <BannedPackageMatch Include="@(PackageDefinitions)" Condition="'%(Identity)' == 'AutoMapper' or '%(Identity)' == 'FluentValidation' or '%(Identity)' == 'FluentAssertions' or $([System.String]::new('%(Identity)').StartsWith('Swashbuckle.AspNetCore'))" />
+    </ItemGroup>
+    <Error Text="Banned library detected: %(BannedPackageMatch.Identity). The Maliev Constitution prohibits AutoMapper, FluentValidation, FluentAssertions, and Swashbuckle (use Scalar instead)." Condition="'@(BannedPackageMatch)' != ''" />
+  </Target>
+
+</Project>
