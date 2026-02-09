@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Microsoft.Extensions.Hosting;
@@ -43,6 +44,54 @@ public static class CorsExtensions
                           .AllowCredentials();
                 });
             }
+        });
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Adds CORS with fail-fast validation for production environments.
+    /// Requires CORS:AllowedOrigins to be explicitly configured.
+    /// Throws InvalidOperationException if not configured in non-development environments.
+    /// </summary>
+    /// <param name="builder">The host application builder.</param>
+    /// <returns>The configured builder.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when CORS origins are not configured in non-development environments.</exception>
+    public static IHostApplicationBuilder AddStandardCors(
+        this IHostApplicationBuilder builder)
+    {
+        var corsOrigins = builder.Configuration
+            .GetSection("CORS:AllowedOrigins")
+            .Get<string[]>()
+            ?? builder.Configuration["CORS_ALLOWED_ORIGINS"]?.Split(',')
+            ?? Array.Empty<string>();
+
+        if (corsOrigins.Length == 0)
+        {
+            if (builder.Environment.IsDevelopment())
+            {
+                // In development, default to localhost:3000 but log warning
+                corsOrigins = new[] { "http://localhost:3000" };
+                Console.WriteLine("WARNING: CORS origins not configured. Using default: http://localhost:3000");
+            }
+            else
+            {
+                var message = "CORS origins not configured. Set CORS:AllowedOrigins in configuration. " +
+                    "This is a FATAL error in production.";
+                Console.Error.WriteLine($"FATAL: {message}");
+                throw new InvalidOperationException(message);
+            }
+        }
+
+        builder.Services.AddCors(options =>
+        {
+            options.AddDefaultPolicy(policy =>
+            {
+                policy.WithOrigins(corsOrigins)
+                      .AllowAnyMethod()
+                      .AllowAnyHeader()
+                      .AllowCredentials();
+            });
         });
 
         return builder;

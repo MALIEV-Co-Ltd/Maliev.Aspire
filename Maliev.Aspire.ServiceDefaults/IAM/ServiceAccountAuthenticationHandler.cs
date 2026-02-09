@@ -23,7 +23,7 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        _logger.LogInformation("ServiceAccountAuthenticationHandler invoked for {Method} {Uri}", request.Method, request.RequestUri);
+        _logger.LogDebug("ServiceAccountAuthenticationHandler invoked for {Method} {Uri}", request.Method, request.RequestUri);
 
         // Defensive check: Ensure InnerHandler is set
         if (InnerHandler == null)
@@ -40,7 +40,7 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
             _logger.LogDebug("Generated fresh service account token for request to {Uri}", request.RequestUri);
 
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            _logger.LogInformation("Authorization header set on request");
+            _logger.LogDebug("Authorization header set on request");
 
             return await base.SendAsync(request, cancellationToken);
         }

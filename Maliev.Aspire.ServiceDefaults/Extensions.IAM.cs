@@ -32,25 +32,35 @@ public static class IAMExtensions
 
         var httpClientBuilder = services.AddHttpClient("IAMService", client =>
         {
-            var iamConfig = configuration.GetSection("IAM");
+            // Check if there's an explicit URL configured (for GKE deployment)
+            var explicitUrl = configuration["Services:IAMService:BaseUrl"];
 
-            // ENFORCED PATTERN: Services:IAMService:BaseUrl (no fallbacks)
-            var baseUrl = configuration["Services:IAMService:BaseUrl"]
-                ?? throw new InvalidOperationException(
-                    "Required configuration 'Services:IAMService:BaseUrl' is missing. Check appsettings.json or environment variables.");
+            // DEBUG: Log what we're reading from configuration
+            Console.WriteLine($"[IAM Client Config] Services:IAMService:BaseUrl = '{explicitUrl ?? "null"}'");
 
-            client.BaseAddress = new Uri(baseUrl);
+            if (!string.IsNullOrEmpty(explicitUrl))
+            {
+                // Use explicit URL for GKE/production
+                Console.WriteLine($"[IAM Client Config] Using explicit BaseAddress: {explicitUrl}");
+                client.BaseAddress = new Uri(explicitUrl);
+            }
+            else
+            {
+                // Use service name for Aspire service discovery
+                // Service discovery will resolve "http://IAMService" to actual endpoint
+                Console.WriteLine("[IAM Client Config] Using service discovery with service name: http://IAMService");
+                client.BaseAddress = new Uri("http://IAMService");
+            }
+
             client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);
-
-            // Timeout must be >= TotalRequestTimeout (5m) to let resilience handler control retries
-            var timeout = iamConfig.GetValue<int?>("Timeout") ?? 300000; // 5 minutes default
-            client.Timeout = TimeSpan.FromMilliseconds(timeout);
+            client.Timeout = TimeSpan.FromSeconds(30);
         });
 
-        // Add the authentication handler from DI
+        // Add the authentication handler only once
         httpClientBuilder.AddHttpMessageHandler<ServiceAccountAuthenticationHandler>();
 
-        httpClientBuilder.AddServiceDiscovery(); // Enable service discovery for IAM client
+        // Enable Aspire service discovery to resolve IAMService endpoint
+        httpClientBuilder.AddServiceDiscovery();
 
         return httpClientBuilder;
     }

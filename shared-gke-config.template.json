@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "description": "Shared GKE configuration template for MALIEV microservices. Copy this file to 'shared-gke-config.json' and configure service URLs for your GKE deployment.",
+  "Services": {
+    "IAMService": {
+      "BaseUrl": "http://maliev-iamservice-api",
+      "Description": "Identity and Access Management Service"
+    },
+    "CountryService": {
+      "BaseUrl": "http://maliev-countryservice-api",
+      "Description": "Country and location data service"
+    },
+    "UploadService": {
+      "BaseUrl": "http://maliev-uploadservice-api",
+      "Description": "File upload and storage service"
+    },
+    "AuthService": {
+      "BaseUrl": "http://maliev-authservice-api",
+      "Description": "Authentication service"
+    },
+    "CustomerService": {
+      "BaseUrl": "http://maliev-customerservice-api",
+      "Description": "Customer management service"
+    },
+    "EmployeeService": {
+      "BaseUrl": "http://maliev-employeeservice-api",
+      "Description": "Employee management service"
+    },
+    "OrderService": {
+      "BaseUrl": "http://maliev-orderservice-api",
+      "Description": "Order processing service"
+    },
+    "MaterialService": {
+      "BaseUrl": "http://maliev-materialservice-api",
+      "Description": "Material and inventory service"
+    },
+    "PaymentService": {
+      "BaseUrl": "http://maliev-paymentservice-api",
+      "Description": "Payment processing service"
+    },
+    "InvoiceService": {
+      "BaseUrl": "http://maliev-invoiceservice-api",
+      "Description": "Invoice generation and management service"
+    },
+    "QuotationService": {
+      "BaseUrl": "http://maliev-quotationservice-api",
+      "Description": "Quotation and pricing service"
+    },
+    "NotificationService": {
+      "BaseUrl": "http://maliev-notificationservice-api",
+      "Description": "Notification and messaging service"
+    },
+    "AccountingService": {
+      "BaseUrl": "http://maliev-accountingservice-api",
+      "Description": "Accounting and financial service"
+    },
+    "CareerService": {
+      "BaseUrl": "http://maliev-careerservice-api",
+      "Description": "Career and recruitment service"
+    },
+    "ChatbotService": {
+      "BaseUrl": "http://maliev-chatbotservice-api",
+      "Description": "AI chatbot service"
+    },
+    "CompensationService": {
+      "BaseUrl": "http://maliev-compensationservice-api",
+      "Description": "Employee compensation service"
+    },
+    "ComplianceService": {
+      "BaseUrl": "http://maliev-complianceservice-api",
+      "Description": "Compliance and regulatory service"
+    },
+    "ContactService": {
+      "BaseUrl": "http://maliev-contactservice-api",
+      "Description": "Contact management service"
+    },
+    "CurrencyService": {
+      "BaseUrl": "http://maliev-currencyservice-api",
+      "Description": "Currency exchange and conversion service"
+    },
+    "GeometryService": {
+      "BaseUrl": "http://maliev-geometryservice-api",
+      "Description": "Geometric calculations service"
+    },
+    "LeaveService": {
+      "BaseUrl": "http://maliev-leaveservice-api",
+      "Description": "Employee leave management service"
+    },
+    "LifecycleService": {
+      "BaseUrl": "http://maliev-lifecycleservice-api",
+      "Description": "Employee lifecycle service"
+    },
+    "MessagingService": {
+      "BaseUrl": "http://maliev-messagingservice-api",
+      "Description": "Internal messaging service"
+    },
+    "PdfService": {
+      "BaseUrl": "http://maliev-pdfservice-api",
+      "Description": "PDF generation and processing service"
+    },
+    "PerformanceService": {
+      "BaseUrl": "http://maliev-performanceservice-api",
+      "Description": "Employee performance tracking service"
+    },
+    "PredictionService": {
+      "BaseUrl": "http://maliev-predictionservice-api",
+      "Description": "ML prediction and analytics service"
+    },
+    "PricingService": {
+      "BaseUrl": "http://maliev-pricingservice-api",
+      "Description": "Dynamic pricing service"
+    },
+    "PurchaseOrderService": {
+      "BaseUrl": "http://maliev-purchaseorderservice-api",
+      "Description": "Purchase order management service"
+    },
+    "ReceiptService": {
+      "BaseUrl": "http://maliev-receiptservice-api",
+      "Description": "Receipt generation service"
+    },
+    "RegistryService": {
+      "BaseUrl": "http://maliev-registryservice-api",
+      "Description": "Service registry and discovery"
+    },
+    "SupplierService": {
+      "BaseUrl": "http://maliev-supplierservice-api",
+      "Description": "Supplier management service"
+    }
+  }
+}

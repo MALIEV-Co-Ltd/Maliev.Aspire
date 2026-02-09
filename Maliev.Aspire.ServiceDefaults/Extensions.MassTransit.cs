@@ -23,6 +23,9 @@ public static class MassTransitExtensions
         Action<IBusRegistrationConfigurator>? configure = null,
         Action<IBusRegistrationContext, IRabbitMqBusFactoryConfigurator>? configureRabbitMq = null)
     {
+        // Disable MassTransit usage telemetry to prevent "Failed to report usage telemetry" warnings
+        Environment.SetEnvironmentVariable("MT_USAGE_TELEMETRY", "false");
+
         var rabbitmqConnectionString = builder.Configuration.GetConnectionString("rabbitmq")
             ?? builder.Configuration.GetConnectionString("RabbitMQ");
 

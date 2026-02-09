@@ -69,4 +69,37 @@ public static class ApiDocumentationExtensions
     {
         return app.MapApiDocumentation(servicePrefix: null, documentName: documentName, configureScalar: configureScalar);
     }
+
+    /// <summary>
+    /// Adds Scalar API documentation (NOT Swagger).
+    /// Configures OpenAPI with the specified title and version.
+    /// </summary>
+    /// <param name="builder">The host application builder.</param>
+    /// <param name="apiTitle">The API title.</param>
+    /// <param name="apiVersion">The API version (default: "v1").</param>
+    /// <returns>The configured builder.</returns>
+    public static IHostApplicationBuilder AddScalarApiDocumentation(
+        this IHostApplicationBuilder builder,
+        string apiTitle,
+        string apiVersion = "v1")
+    {
+        return builder.AddStandardOpenApi(title: apiTitle, documentName: apiVersion);
+    }
+
+    /// <summary>
+    /// Maps Scalar API documentation UI endpoint.
+    /// Only available in Development environment.
+    /// </summary>
+    /// <param name="app">The web application.</param>
+    /// <returns>The configured application.</returns>
+    public static WebApplication UseScalarApiDocumentation(
+        this WebApplication app)
+    {
+        if (app.Environment.IsDevelopment())
+        {
+            app.MapApiDocumentationDefault();
+        }
+
+        return app;
+    }
 }

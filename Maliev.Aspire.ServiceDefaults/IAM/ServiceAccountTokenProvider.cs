@@ -72,12 +72,12 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
         {
             new Claim("sub", $"system:service:{serviceNameLower}"),
             new Claim("service_name", serviceName),
+            new Claim("user_type", "service"),
             new Claim("role", "service-account"),
             new Claim("purpose", "iam-registration"),
             new Claim("iss", issuer),
             new Claim("aud", audience),
-            new Claim("permissions", "iam.auth.check-permission"),
-            new Claim("permissions", "iam.auth.resolve-permissions")
+            new Claim("permissions", "*") // Full access for service accounts in platform
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey));
@@ -127,8 +127,10 @@ public static class ServiceAccountTokenGenerator
         {
             new Claim("sub", $"system:service:{serviceName.ToLowerInvariant()}"),
             new Claim("service_name", serviceName),
+            new Claim("user_type", "service"),
             new Claim("role", "service-account"),
-            new Claim("purpose", "iam-registration")
+            new Claim("purpose", "iam-registration"),
+            new Claim("permissions", "*")
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey));

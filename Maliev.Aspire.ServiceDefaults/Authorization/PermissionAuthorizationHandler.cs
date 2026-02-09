@@ -12,57 +12,43 @@ namespace Maliev.Aspire.ServiceDefaults.Authorization;
 public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionRequirement>
 {
     private readonly IServiceProvider _serviceProvider;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IIamServiceClient? _iamClient;
     private readonly ILogger<PermissionAuthorizationHandler> _logger;
     private readonly IAuthMetrics? _authMetrics;
 
     public PermissionAuthorizationHandler(
         IServiceProvider serviceProvider,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<PermissionAuthorizationHandler> logger,
+        IIamServiceClient? iamClient = null,
         IAuthMetrics? authMetrics = null)
     {
         _serviceProvider = serviceProvider;
+        _httpContextAccessor = httpContextAccessor;
+        _iamClient = iamClient;
         _logger = logger;
         _authMetrics = authMetrics;
     }
 
-    protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, PermissionRequirement requirement)
+    protected override async Task HandleRequirementAsync(
+        AuthorizationHandlerContext context,
+        PermissionRequirement requirement)
     {
-        var succeeded = await CheckRequirementAsync(
-            context,
-            requirement.Permission,
-            requirement.ResourcePathTemplate,
-            requirement.RequireLiveCheck,
-            requirement.PreValidateModel,
-            requirement.IsCritical,
-            requirement.AuditPurpose);
-
-        if (succeeded)
+        try
         {
-            context.Succeed(requirement);
+            if (await CheckRequirementAsync(
+                context,
+                requirement.Permission,
+                requirement.ResourcePathTemplate,
+                requirement.AuditPurpose))
+            {
+                context.Succeed(requirement);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            // Veto Behavior Documentation
-            // ===========================
-            // We explicitly call context.Fail() to veto the authorization request.
-            // This is INTENTIONAL for permission-based authorization because:
-            //
-            // 1. Permission requirements are MANDATORY - lack of permission = explicit denial
-            // 2. Prevents other authorization handlers from incorrectly satisfying this requirement
-            // 3. Ensures permission checks cannot be bypassed by fallback handlers
-            //
-            // Alternative Considered: Just not calling Succeed()
-            // - This would leave the requirement unsatisfied but not explicitly failed
-            // - Other handlers could potentially satisfy it (security risk for permissions)
-            // - ASP.NET Core would still deny if no handler succeeds, but less explicit
-            //
-            // Multiple Auth Schemes Compatibility:
-            // - Unlikely to cause issues because permission requirements are specific
-            // - If using multiple schemes, ensure each scheme has appropriate requirements
-            // - Veto is appropriate for permission-based access control (PBAC)
-            //
-            // Reviewed: 2025-12-26 - Veto behavior is CORRECT for permission authorization
-            context.Fail();
+            _logger.LogError(ex, "Unhandled exception in PermissionAuthorizationHandler");
         }
     }
 
@@ -70,101 +56,76 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         AuthorizationHandlerContext context,
         string permission,
         string? resourcePathTemplate,
-        bool requireLiveCheck,
-        bool preValidateModel,
-        bool isCritical,
         string? auditPurpose)
     {
-        var httpContext = _serviceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext;
-        if (httpContext == null)
-        {
-            return false;
-        }
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext == null) return false;
 
         var user = context.User;
-        _logger.LogDebug("Checking authorization for principal with {Count} identities.", user.Identities.Count());
-        foreach (var identity in user.Identities)
-        {
-            _logger.LogDebug("Identity: Scheme={Scheme}, IsAuthenticated={IsAuthenticated}, Name={Name}",
-                identity.AuthenticationType, identity.IsAuthenticated, identity.Name);
-        }
+        if (user?.Identity?.IsAuthenticated != true) return false;
 
-        if (!user.Identities.Any(i => i.IsAuthenticated))
-        {
-            _logger.LogWarning("Authorization failed: No authenticated identities found. Total identities: {Count}", user.Identities.Count());
-            return false;
-        }
+        var principalId = user.FindFirst("user_id")?.Value
+            ?? user.FindFirst("sub")?.Value
+            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-        var principalId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? user.FindFirst("sub")?.Value;
+        if (string.IsNullOrEmpty(principalId)) return false;
 
-        // Security fix: Use Distinct() to prevent duplicate permission processing
-        // Concatenating claims from both "permissions" and "permission" types could result in duplicates
-        // if a token contains both claim types or multiple claims of the same type
-        var userPermissions = user.Claims
-            .Where(c => c.Type == "permissions" || c.Type == "permission")
-            .Select(c => c.Value)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (string.IsNullOrEmpty(principalId))
-        {
-            return false;
-        }
+        _logger.LogInformation("Checking permission {Permission} for Principal {PrincipalId} on Resource {ResourcePath}",
+            permission, principalId, resourcePathTemplate ?? "global");
 
         bool hasPermission = false;
         string? resourcePath = null;
 
-        if (PermissionMatcher.Match(permission, userPermissions))
+        // Try IAM live check first if client is available
+        if (_iamClient != null)
         {
-            hasPermission = true;
-        }
-        else
-        {
-            // Fallback to IAM if enabled and required
-            var config = _serviceProvider.GetRequiredService<IConfiguration>();
-            var resourceScopedEnabled = config.GetValue<bool>("Features:ResourceScopedAuthEnabled", false);
-            var needsResourceCheck = !string.IsNullOrEmpty(resourcePathTemplate) && resourceScopedEnabled;
-            var shouldCallIam = requireLiveCheck || needsResourceCheck;
-
-            if (shouldCallIam)
+            if (!string.IsNullOrEmpty(resourcePathTemplate))
             {
-                var iamClient = _serviceProvider.GetService<IIamServiceClient>();
-                if (iamClient != null)
+                var config = _serviceProvider.GetService<IConfiguration>();
+                var resourceScopedEnabled = config?.GetValue<bool>("Features:ResourceScopedAuthEnabled", false) ?? false;
+                if (resourceScopedEnabled)
                 {
-                    if (!string.IsNullOrEmpty(resourcePathTemplate))
-                    {
-                        resourcePath = ResolveResourcePath(resourcePathTemplate, httpContext.GetRouteData().Values);
-                    }
-
-                    try
-                    {
-                        hasPermission = await iamClient.CheckPermissionAsync(principalId, permission, resourcePath);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "IAM service call failed");
-                        if (config.GetValue<bool>("Features:FailOpenOnIAMError", false))
-                        {
-                            hasPermission = true;
-                        }
-                    }
+                    resourcePath = ResolveResourcePath(resourcePathTemplate, httpContext.GetRouteData().Values);
                 }
+            }
+
+            try
+            {
+                hasPermission = await _iamClient.CheckPermissionAsync(principalId, permission, resourcePath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "IAM service call failed for permission {Permission}", permission);
+                var config = _serviceProvider.GetService<IConfiguration>();
+                if (config?.GetValue<bool>("Features:FailOpenOnIAMError", false) ?? false)
+                {
+                    hasPermission = true;
+                }
+            }
+        }
+
+        // Fallback to JWT claims if IAM check failed or client not available
+        if (!hasPermission)
+        {
+            var userPermissions = user.Claims
+                .Where(c => c.Type == "permissions" || c.Type == "permission" || c.Type == "role" || c.Type == "roles" || c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/role")
+                .Select(c => c.Value)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _logger.LogInformation("IAM check failed, falling back to claims. Found {Count} permission claims for Principal {PrincipalId}",
+                userPermissions.Count, principalId);
+
+            if (PermissionMatcher.Match(permission, userPermissions))
+            {
+                hasPermission = true;
             }
         }
 
         if (hasPermission)
         {
-            if (isCritical)
-            {
-                LogEnhancedAudit(httpContext, user, permission, auditPurpose);
-            }
-
             if (!string.IsNullOrEmpty(auditPurpose))
             {
-                // Security: Use internal header prefix to prevent client spoofing
-                // Client-provided "X-Audit-Purpose" headers are ignored; only server-side
-                // attribute-based audit purposes are trusted
                 httpContext.Request.Headers["X-Internal-Audit-Purpose"] = auditPurpose;
             }
 
@@ -172,32 +133,17 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             return true;
         }
 
-        _authMetrics?.RecordFailure(permission, "Insufficient permissions");
+        _authMetrics?.RecordFailure(permission, "Permission denied");
         return false;
     }
 
-    private void LogEnhancedAudit(HttpContext context, ClaimsPrincipal user, string permission, string? auditPurpose)
+    private string ResolveResourcePath(string template, RouteValueDictionary routeValues)
     {
-        var principalId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
-        var clientId = user.FindFirst("client_id")?.Value ?? "unknown";
-        var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-
-        _logger.LogInformation(
-            "CRITICAL_PERMISSION_CHECK: PrincipalId={PrincipalId}, ClientId={ClientId}, IPAddress={IPAddress}, PermissionId={PermissionId}, Purpose={Purpose}",
-            principalId, clientId, ipAddress, permission, auditPurpose ?? "not specified");
-    }
-
-    private static string ResolveResourcePath(string template, RouteValueDictionary routeValues)
-    {
-        var result = template;
-        foreach (var (key, value) in routeValues)
+        var path = template;
+        foreach (var rv in routeValues)
         {
-            var placeholder = $"{{{key}}}";
-            if (result.Contains(placeholder, StringComparison.OrdinalIgnoreCase))
-            {
-                result = result.Replace(placeholder, value?.ToString() ?? "", StringComparison.OrdinalIgnoreCase);
-            }
+            path = path.Replace($"{{{rv.Key}}}", rv.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
         }
-        return result;
+        return path;
     }
 }

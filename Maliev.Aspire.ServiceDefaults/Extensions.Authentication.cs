@@ -114,9 +114,16 @@ public static class AuthenticationExtensions
                 options.MapInboundClaims = false;
                 options.TokenValidationParameters = tokenValidationParameters;
 
+                // Development convenience: Allow HTTP metadata if not in Production
+                if (!builder.Environment.IsProduction())
+                {
+                    options.RequireHttpsMetadata = false;
+                }
+
                 // Apply custom configuration if provided
                 configureOptions?.Invoke(options);
             });
+
 
         builder.Services.AddPermissionAuthorization();
 

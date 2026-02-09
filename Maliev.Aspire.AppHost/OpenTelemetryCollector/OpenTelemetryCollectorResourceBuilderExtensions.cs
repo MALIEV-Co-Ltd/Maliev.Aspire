@@ -31,37 +31,22 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
             .WithEnvironment("ASPIRE_API_KEY", builder.Configuration[DashboardOtlpApiKeyVariableName])
             .WithEnvironment("ASPIRE_INSECURE", isHttpsEnabled ? "false" : "true");
 
-        builder.Eventing.Subscribe<BeforeStartEvent>((e, ct) =>
+        builder.Eventing.Subscribe<BeforeResourceStartedEvent>((e, ct) =>
         {
-            var logger = e.Services.GetRequiredService<ILogger<OpenTelemetryCollectorResource>>();
             var endpoint = collectorResource.GetEndpoint(OpenTelemetryCollectorResource.OtlpGrpcEndpointName);
-
             if (!endpoint.Exists)
             {
-                if (logger.IsEnabled(LogLevel.Warning))
-                {
-                    logger.LogWarning($"No {OpenTelemetryCollectorResource.OtlpGrpcEndpointName} endpoint for the collector.");
-                }
                 return Task.CompletedTask;
             }
 
-            // Update all resources to forward telemetry to the collector.
-            var appModel = e.Services.GetRequiredService<DistributedApplicationModel>();
-            foreach (var resource in appModel.Resources)
+            // Update the starting resource to forward telemetry to the collector.
+            e.Resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
             {
-                resource.Annotations.Add(new EnvironmentCallbackAnnotation(context =>
+                if (context.EnvironmentVariables.ContainsKey(OtelExporterOtlpEndpoint))
                 {
-                    if (context.EnvironmentVariables.ContainsKey(OtelExporterOtlpEndpoint))
-                    {
-                        if (logger.IsEnabled(LogLevel.Debug))
-                        {
-                            logger.LogDebug("Forwarding telemetry for {ResourceName} to the collector.", resource.Name);
-                        }
-
-                        context.EnvironmentVariables[OtelExporterOtlpEndpoint] = endpoint;
-                    }
-                }));
-            }
+                    context.EnvironmentVariables[OtelExporterOtlpEndpoint] = endpoint;
+                }
+            }));
 
             return Task.CompletedTask;
         });

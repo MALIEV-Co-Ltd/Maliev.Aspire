@@ -80,6 +80,10 @@ static partial class Program
         var origins = builder.Configuration.GetSection("CORS:AllowedOrigins").Get<string[]>();
         builder.Configuration["Parameters:CorsAllowedOrigins"] = origins != null ? string.Join(",", origins) : string.Empty;
 
+        // GCP credentials for UploadService (loaded from sharedsecrets.json)
+        var gcpProjectId = builder.AddParameterFromConfig("GcpProjectId", "GCP:ProjectId", secret: true);
+        var gcpServiceAccountKeyBase64 = builder.AddParameterFromConfig("GcpServiceAccountKeyBase64", "GCP:ServiceAccountKeyBase64", secret: true);
+
         return new SharedConfiguration(
             JwtSecurityKey: jwtSecurityKey,
             JwtPrivateKey: jwtPrivateKey,
@@ -88,7 +92,9 @@ static partial class Program
             JwtAudience: jwtAudience,
             GoogleClientId: googleClientId,
             GoogleClientSecret: googleClientSecret,
-            CorsAllowedOrigins: corsAllowedOrigins
+            CorsAllowedOrigins: corsAllowedOrigins,
+            GcpProjectId: gcpProjectId,
+            GcpServiceAccountKeyBase64: gcpServiceAccountKeyBase64
             );
     }
 
@@ -190,6 +196,7 @@ static partial class Program
             Pricing: postgres.AddDatabase("pricing-app-db"),
             Quotation: postgres.AddDatabase("quotation-app-db"),
             Receipt: postgres.AddDatabase("receipt-app-db"),
+            Registry: postgres.AddDatabase("registry-app-db"),
             Supplier: postgres.AddDatabase("supplier-app-db"),
             Upload: postgres.AddDatabase("upload-app-db")
         );
@@ -209,7 +216,7 @@ static partial class Program
     {
         // --- Core Services (dependencies for Auth) ---
         var iamService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_IAMService_Api>("maliev-iamservice-api")
+            builder.AddProject<Projects.Maliev_IAMService_Api>("IAMService")
                 .WithReference(databases.IAM, "IamDbContext")
                 .WaitFor(databases.IAM)
                 .WithReference(infrastructure.RabbitMQ)
@@ -222,7 +229,7 @@ static partial class Program
 
         // Note: CountryService must be declared before CustomerService to be referenced
         var countryService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CountryService_Api>("maliev-countryservice-api")
+            builder.AddProject<Projects.Maliev_CountryService_Api>("CountryService")
                 .WithReference(databases.Country, "CountryDbContext")
                 .WaitFor(databases.Country)
                 .WithReference(infrastructure.RabbitMQ)
@@ -234,8 +241,21 @@ static partial class Program
             grafana,
             otelCollector);
 
+        var registryService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_RegistryService_Api>("RegistryService")
+                .WithReference(databases.Registry, "RegistryDbContext")
+                .WaitFor(databases.Registry)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/registry/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector);
+
         var uploadService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_UploadService_Api>("maliev-uploadservice-api")
+            builder.AddProject<Projects.Maliev_UploadService_Api>("UploadService")
                 .WithReference(databases.Upload, "UploadDbContext")
                 .WaitFor(databases.Upload)
                 .WithReference(infrastructure.RabbitMQ)
@@ -245,10 +265,12 @@ static partial class Program
                 .WithHttpHealthCheck("/upload/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector)
+            .WithEnvironment("GCP__ProjectId", config.GcpProjectId)
+            .WithEnvironment("GCP__ServiceAccountKeyBase64", config.GcpServiceAccountKeyBase64);
 
         var customerService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CustomerService_Api>("maliev-customerservice-api")
+            builder.AddProject<Projects.Maliev_CustomerService_Api>("CustomerService")
                 .WithReference(databases.Customer, "CustomerDbContext")
                 .WaitFor(databases.Customer)
                 .WithReference(infrastructure.RabbitMQ)
@@ -256,6 +278,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(countryService)
                 .WithReference(uploadService)
+                .WaitFor(uploadService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/customer/aspire-liveness"),
             config,
@@ -263,7 +286,7 @@ static partial class Program
             otelCollector);
 
         var employeeService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_EmployeeService_Api>("maliev-employeeservice-api")
+            builder.AddProject<Projects.Maliev_EmployeeService_Api>("EmployeeService")
                 .WithReference(databases.Employee, "EmployeeDbContext")
                 .WaitFor(databases.Employee)
                 .WithReference(infrastructure.RabbitMQ)
@@ -276,7 +299,7 @@ static partial class Program
             otelCollector);
 
         var authService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_AuthService_Api>("maliev-authservice-api")
+            builder.AddProject<Projects.Maliev_AuthService_Api>("AuthService")
                 .WithReference(databases.Auth, "AuthDbContext")
                 .WaitFor(databases.Auth)
                 .WithReference(infrastructure.RabbitMQ)
@@ -292,7 +315,7 @@ static partial class Program
 
         // --- Business Services ---
         var accountingService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_AccountingService_Api>("maliev-accountingservice-api")
+            builder.AddProject<Projects.Maliev_AccountingService_Api>("AccountingService")
                 .WithReference(databases.Accounting, "AccountingDbContext")
                 .WaitFor(databases.Accounting)
                 .WithReference(infrastructure.RabbitMQ)
@@ -305,7 +328,7 @@ static partial class Program
             otelCollector);
 
         var chatbotService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_ChatbotService_Api>("maliev-chatbotservice-api")
+            builder.AddProject<Projects.Maliev_ChatbotService_Api>("ChatbotService")
                 .WithReference(databases.Chatbot, "ChatbotDbContext")
                 .WaitFor(databases.Chatbot)
                 .WithReference(infrastructure.RabbitMQ)
@@ -318,7 +341,7 @@ static partial class Program
             otelCollector);
 
         var notificationService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_NotificationService_Api>("maliev-notificationservice-api")
+            builder.AddProject<Projects.Maliev_NotificationService_Api>("NotificationService")
                 .WithReference(databases.Notification, "NotificationDbContext")
                 .WaitFor(databases.Notification)
                 .WithReference(infrastructure.RabbitMQ)
@@ -331,7 +354,7 @@ static partial class Program
             otelCollector);
 
         var careerService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CareerService_Api>("maliev-careerservice-api")
+            builder.AddProject<Projects.Maliev_CareerService_Api>("CareerService")
                 .WithReference(databases.Career, "CareerDbContext")
                 .WaitFor(databases.Career)
                 .WithReference(infrastructure.RabbitMQ)
@@ -339,8 +362,10 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(uploadService)
+                .WaitFor(uploadService)
                 .WithReference(countryService)
                 .WithReference(notificationService)
+                .WaitFor(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/career/aspire-liveness"),
             config,
@@ -348,7 +373,7 @@ static partial class Program
             otelCollector);
 
         var compensationService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CompensationService_Api>("maliev-compensationservice-api")
+            builder.AddProject<Projects.Maliev_CompensationService_Api>("CompensationService")
                 .WithReference(databases.Compensation, "CompensationDbContext")
                 .WaitFor(databases.Compensation)
                 .WithReference(infrastructure.RabbitMQ)
@@ -362,7 +387,7 @@ static partial class Program
             otelCollector);
 
         var complianceService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_ComplianceService_Api>("maliev-complianceservice-api")
+            builder.AddProject<Projects.Maliev_ComplianceService_Api>("ComplianceService")
                 .WithReference(databases.Compliance, "ComplianceDbContext")
                 .WaitFor(databases.Compliance)
                 .WithReference(infrastructure.RabbitMQ)
@@ -376,7 +401,7 @@ static partial class Program
             otelCollector);
 
         var leaveService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_LeaveService_Api>("maliev-leaveservice-api")
+            builder.AddProject<Projects.Maliev_LeaveService_Api>("LeaveService")
                 .WithReference(databases.Leave, "LeaveDbContext")
                 .WaitFor(databases.Leave)
                 .WithReference(infrastructure.RabbitMQ)
@@ -384,6 +409,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(notificationService)
+                .WaitFor(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/leave/aspire-liveness"),
             config,
@@ -391,7 +417,7 @@ static partial class Program
             otelCollector);
 
         var lifecycleService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_LifecycleService_Api>("maliev-lifecycleservice-api")
+            builder.AddProject<Projects.Maliev_LifecycleService_Api>("LifecycleService")
                 .WithReference(databases.Lifecycle, "LifecycleDbContext")
                 .WaitFor(databases.Lifecycle)
                 .WithReference(infrastructure.RabbitMQ)
@@ -405,7 +431,7 @@ static partial class Program
             otelCollector);
 
         var performanceService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_PerformanceService_Api>("maliev-performanceservice-api")
+            builder.AddProject<Projects.Maliev_PerformanceService_Api>("PerformanceService")
                 .WithReference(databases.Performance, "PerformanceDbContext")
                 .WaitFor(databases.Performance)
                 .WithReference(infrastructure.RabbitMQ)
@@ -413,6 +439,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(notificationService)
+                .WaitFor(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/performance/aspire-liveness"),
             config,
@@ -420,13 +447,14 @@ static partial class Program
             otelCollector);
 
         var contactService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_ContactService_Api>("maliev-contactservice-api")
+            builder.AddProject<Projects.Maliev_ContactService_Api>("ContactService")
                 .WithReference(databases.Contact, "ContactDbContext")
                 .WaitFor(databases.Contact)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(uploadService)
+                .WaitFor(uploadService)
                 .WithReference(countryService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/contact/aspire-liveness"),
@@ -435,7 +463,7 @@ static partial class Program
             otelCollector);
 
         var currencyService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CurrencyService_Api>("maliev-currencyservice-api")
+            builder.AddProject<Projects.Maliev_CurrencyService_Api>("CurrencyService")
                 .WithReference(databases.Currency, "CurrencyDbContext")
                 .WaitFor(databases.Currency)
                 .WithReference(infrastructure.RabbitMQ)
@@ -448,7 +476,7 @@ static partial class Program
             otelCollector);
 
         var quotationService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_QuotationService_Api>("maliev-quotationservice-api")
+            builder.AddProject<Projects.Maliev_QuotationService_Api>("QuotationService")
                 .WithReference(databases.Quotation, "QuotationDbContext")
                 .WaitFor(databases.Quotation)
                 .WithReference(infrastructure.RabbitMQ)
@@ -461,7 +489,7 @@ static partial class Program
             otelCollector);
 
         var invoiceService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_InvoiceService_Api>("maliev-invoiceservice-api")
+            builder.AddProject<Projects.Maliev_InvoiceService_Api>("InvoiceService")
                 .WithReference(databases.Invoice, "InvoiceDbContext")
                 .WaitFor(databases.Invoice)
                 .WithReference(infrastructure.RabbitMQ)
@@ -476,7 +504,7 @@ static partial class Program
             otelCollector);
 
         var materialService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_MaterialService_Api>("maliev-materialservice-api")
+            builder.AddProject<Projects.Maliev_MaterialService_Api>("MaterialService")
                 .WithReference(databases.Material, "MaterialDbContext")
                 .WaitFor(databases.Material)
                 .WithReference(infrastructure.RabbitMQ)
@@ -489,7 +517,7 @@ static partial class Program
             otelCollector);
 
         var pricingService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_PricingService_Api>("maliev-pricingservice-api")
+            builder.AddProject<Projects.Maliev_PricingService_Api>("PricingService")
                 .WithReference(databases.Pricing, "PricingDbContext")
                 .WaitFor(databases.Pricing)
                 .WithReference(infrastructure.RabbitMQ)
@@ -504,7 +532,7 @@ static partial class Program
             otelCollector);
 
         var orderService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_OrderService_Api>("maliev-orderservice-api")
+            builder.AddProject<Projects.Maliev_OrderService_Api>("OrderService")
                 .WithReference(databases.Order, "OrderDbContext")
                 .WaitFor(databases.Order)
                 .WithReference(infrastructure.RabbitMQ)
@@ -513,9 +541,11 @@ static partial class Program
                 .WithReference(customerService)
                 .WithReference(materialService)
                 .WithReference(uploadService)
+                .WaitFor(uploadService)
                 .WithReference(authService)
                 .WithReference(employeeService)
                 .WithReference(notificationService)
+                .WaitFor(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/order/aspire-liveness"),
             config,
@@ -523,7 +553,7 @@ static partial class Program
             otelCollector);
 
         var paymentService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_PaymentService_Api>("maliev-paymentservice-api")
+            builder.AddProject<Projects.Maliev_PaymentService_Api>("PaymentService")
                 .WithReference(databases.Payment, "PaymentDbContext")
                 .WaitFor(databases.Payment)
                 .WithReference(infrastructure.RabbitMQ)
@@ -536,13 +566,14 @@ static partial class Program
             otelCollector);
 
         var pdfService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_PdfService_Api>("maliev-pdfservice-api")
+            builder.AddProject<Projects.Maliev_PdfService_Api>("PdfService")
                 .WithReference(databases.Pdf, "PdfDbContext")
                 .WaitFor(databases.Pdf)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(uploadService)
+                .WaitFor(uploadService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/pdf/aspire-liveness"),
             config,
@@ -550,7 +581,7 @@ static partial class Program
             otelCollector);
 
         var purchaseOrderService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_PurchaseOrderService_Api>("maliev-purchaseorderservice-api")
+            builder.AddProject<Projects.Maliev_PurchaseOrderService_Api>("PurchaseOrderService")
                 .WithReference(databases.PurchaseOrder, "PurchaseOrderDbContext")
                 .WaitFor(databases.PurchaseOrder)
                 .WithReference(infrastructure.RabbitMQ)
@@ -563,7 +594,7 @@ static partial class Program
             otelCollector);
 
         var receiptService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_ReceiptService_Api>("maliev-receiptservice-api")
+            builder.AddProject<Projects.Maliev_ReceiptService_Api>("ReceiptService")
                 .WithReference(databases.Receipt, "ReceiptDbContext")
                 .WaitFor(databases.Receipt)
                 .WithReference(infrastructure.RabbitMQ)
@@ -577,7 +608,7 @@ static partial class Program
             otelCollector);
 
         var supplierService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_SupplierService_Api>("maliev-supplierservice-api")
+            builder.AddProject<Projects.Maliev_SupplierService_Api>("SupplierService")
                 .WithReference(databases.Supplier, "SupplierDbContext")
                 .WaitFor(databases.Supplier)
                 .WithReference(infrastructure.RabbitMQ)
@@ -593,11 +624,22 @@ static partial class Program
             otelCollector);
 
         var intranetBff = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_Intranet_Bff>("maliev-intranet-bff")
+            builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
                 .WithReference(authService)
                 .WithReference(customerService)
                 .WithReference(orderService)
                 .WithReference(iamService)
+                .WithReference(countryService)
+                .WithReference(registryService)
+                .WithReference(uploadService)
+                .WithReference(quotationService)
+                .WithReference(materialService)
+                .WithReference(employeeService)
+                .WithReference(invoiceService)
+                .WithReference(paymentService)
+                .WithReference(supplierService)
+                .WithReference(chatbotService)
+                .WithReference(careerService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
                 .WithHttpHealthCheck("/intranet/aspire-liveness"),
@@ -644,7 +686,7 @@ static partial class Program
 /// <summary>
 /// Shared configuration values loaded from configuration sources.
 /// </summary>
-record SharedConfiguration(
+public record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtSecurityKey,
     IResourceBuilder<ParameterResource> JwtPrivateKey,
     IResourceBuilder<ParameterResource> JwtPublicKey,
@@ -652,7 +694,9 @@ record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtAudience,
     IResourceBuilder<ParameterResource> GoogleClientId,
     IResourceBuilder<ParameterResource> GoogleClientSecret,
-    IResourceBuilder<ParameterResource> CorsAllowedOrigins);
+    IResourceBuilder<ParameterResource> CorsAllowedOrigins,
+    IResourceBuilder<ParameterResource> GcpProjectId,
+    IResourceBuilder<ParameterResource> GcpServiceAccountKeyBase64);
 
 /// <summary>
 /// Infrastructure resource references (messaging, caching, database server).
@@ -691,5 +735,6 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> PurchaseOrder,
     IResourceBuilder<PostgresDatabaseResource> Quotation,
     IResourceBuilder<PostgresDatabaseResource> Receipt,
+    IResourceBuilder<PostgresDatabaseResource> Registry,
     IResourceBuilder<PostgresDatabaseResource> Supplier,
     IResourceBuilder<PostgresDatabaseResource> Upload);

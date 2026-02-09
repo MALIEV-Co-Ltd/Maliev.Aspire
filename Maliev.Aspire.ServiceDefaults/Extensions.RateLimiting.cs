@@ -1,26 +1,35 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.DependencyInjection;
 using System.Threading.RateLimiting;
 
 namespace Microsoft.Extensions.Hosting;
 
+/// <summary>
+/// Extension methods for configuring rate limiting optimized for low-spec nodes.
+/// </summary>
 public static class RateLimitingExtensions
 {
     /// <summary>
     /// Adds standard rate limiting with configurable options.
     /// Uses fixed window rate limiter by default.
     /// </summary>
+    /// <param name="builder">The host application builder.</param>
+    /// <param name="configure">Optional action to configure rate limiter options.</param>
+    /// <returns>The configured builder.</returns>
     public static IHostApplicationBuilder AddStandardRateLimiting(
         this IHostApplicationBuilder builder,
         Action<RateLimiterOptions>? configure = null)
     {
+        // Memory-optimized defaults for n1-standard-1 nodes (1 vCPU, 3.75GB RAM)
         var options = new RateLimiterOptions
         {
             PermitLimit = 100,
             WindowMinutes = 1,
-            QueueLimit = 0,
-            QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            QueueLimit = 5, // Reduced from 10 to save memory
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            UseGlobalLimiter = false // Disabled by default to reduce overhead
         };
 
         configure?.Invoke(options);
@@ -37,17 +46,29 @@ public static class RateLimitingExtensions
                                        context.User.Identity?.Name ??
                                        context.Request.Headers.Host.ToString();
 
-                    return RateLimitPartition.GetFixedWindowLimiter(
+                    // Use sliding window with reduced segments for memory efficiency
+                    return RateLimitPartition.GetSlidingWindowLimiter(
                         partitionKey: partitionKey,
-                        factory: _ => new FixedWindowRateLimiterOptions
+                        factory: _ => new SlidingWindowRateLimiterOptions
                         {
                             PermitLimit = options.PermitLimit,
                             Window = TimeSpan.FromMinutes(options.WindowMinutes),
+                            SegmentsPerWindow = 4, // Reduced from 6 to save memory
                             QueueProcessingOrder = options.QueueProcessingOrder,
                             QueueLimit = options.QueueLimit
                         });
                 });
             }
+
+            // Default policy using sliding window for better traffic smoothing
+            rateLimiterOptions.AddSlidingWindowLimiter("default", limiterOptions =>
+            {
+                limiterOptions.PermitLimit = 100;
+                limiterOptions.Window = TimeSpan.FromMinutes(1);
+                limiterOptions.SegmentsPerWindow = 4; // Reduced from 6 to save memory
+                limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+                limiterOptions.QueueLimit = 5; // Reduced from 10 for memory
+            });
 
             // Named policy for API endpoints
             rateLimiterOptions.AddFixedWindowLimiter("api", limiterOptions =>
@@ -75,6 +96,20 @@ public static class RateLimitingExtensions
                 limiterOptions.QueueProcessingOrder = options.QueueProcessingOrder;
                 limiterOptions.QueueLimit = options.QueueLimit;
             });
+
+            // Custom rejection handler with detailed error information
+            rateLimiterOptions.OnRejected = async (context, cancellationToken) =>
+            {
+                context.HttpContext.Response.StatusCode = 429;
+                await context.HttpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "Too many requests",
+                    message = "Rate limit exceeded. Please try again later.",
+                    retryAfter = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
+                        ? retryAfter.ToString()
+                        : "60"
+                }, cancellationToken);
+            };
         });
 
         return builder;

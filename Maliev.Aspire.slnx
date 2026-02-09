@@ -124,6 +124,10 @@
     <Project Path="..\Maliev.ReceiptService\Maliev.ReceiptService.Api\Maliev.ReceiptService.Api.csproj" />
     <Project Path="..\Maliev.ReceiptService\Maliev.ReceiptService.Data\Maliev.ReceiptService.Data.csproj" />
   </Folder>
+  <Folder Name="/Registry Service/">
+    <Project Path="..\Maliev.RegistryService\Maliev.RegistryService.Api\Maliev.RegistryService.Api.csproj" />
+    <Project Path="..\Maliev.RegistryService\Maliev.RegistryService.Data\Maliev.RegistryService.Data.csproj" />
+  </Folder>
   <Folder Name="/Supplier Service/">
     <Project Path="..\Maliev.SupplierService\Maliev.SupplierService.Api\Maliev.SupplierService.Api.csproj" />
     <Project Path="..\Maliev.SupplierService\Maliev.SupplierService.Data\Maliev.SupplierService.Data.csproj" />
@@ -133,6 +137,7 @@
     <Project Path="..\Maliev.UploadService\Maliev.UploadService.Data\Maliev.UploadService.Data.csproj" />
   </Folder>
   <Project Path="Maliev.Aspire.AppHost\Maliev.Aspire.AppHost.csproj" />
+  <Project Path="Maliev.Aspire.DatabaseSeeder\Maliev.Aspire.DatabaseSeeder.csproj" />
   <Project Path="Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" />
   <Project Path="Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj" />
 </Solution>

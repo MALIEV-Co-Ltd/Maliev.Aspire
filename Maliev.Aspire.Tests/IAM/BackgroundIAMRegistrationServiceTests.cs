@@ -101,7 +101,8 @@ public class BackgroundIAMRegistrationServiceTests
             _serviceProviderMock.Object,
             _loggerMock.Object,
             _statusTracker,
-            _lifetimeMock.Object
+            _lifetimeMock.Object,
+            _configMock.Object
         );
 
         // Act
@@ -140,7 +141,8 @@ public class BackgroundIAMRegistrationServiceTests
             _serviceProviderMock.Object,
             _loggerMock.Object,
             _statusTracker,
-            _lifetimeMock.Object
+            _lifetimeMock.Object,
+            _configMock.Object
         );
 
         // Act
@@ -182,7 +184,8 @@ public class BackgroundIAMRegistrationServiceTests
             _serviceProviderMock.Object,
             _loggerMock.Object,
             _statusTracker,
-            _lifetimeMock.Object
+            _lifetimeMock.Object,
+            _configMock.Object
         );
 
         // Act

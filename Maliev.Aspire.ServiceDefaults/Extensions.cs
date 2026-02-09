@@ -41,17 +41,17 @@ public static class Extensions
         // Health checks - Enabled for debugging
         builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService", LogLevel.Information);
 
-        // Service discovery and resilience (only errors)
-        builder.Logging.AddFilter("Microsoft.Extensions.ServiceDiscovery", LogLevel.Error);
+        // Service discovery and resilience (temporarily verbose for debugging)
+        builder.Logging.AddFilter("Microsoft.Extensions.ServiceDiscovery", LogLevel.Information);
         builder.Logging.AddFilter("Polly", LogLevel.Error);
 
         // Infrastructure components
         builder.Logging.AddFilter("StackExchange.Redis", LogLevel.Warning); // Redis connection noise
         builder.Logging.AddFilter("Npgsql", LogLevel.Warning); // PostgreSQL connection noise
 
-        // MassTransit/RabbitMQ - Relaxed for debugging IAM registration
+        // MassTransit/RabbitMQ - Information level for monitoring events without debug noise
         builder.Logging.AddFilter("MassTransit", LogLevel.Information);
-        builder.Logging.AddFilter("MassTransit.Messages", LogLevel.Debug);
+        builder.Logging.AddFilter("MassTransit.Messages", LogLevel.Information);
 
         // IAM and Authorization
         builder.Logging.AddFilter("IAM.Handler.Factory", LogLevel.Warning);
@@ -87,7 +87,9 @@ public static class Extensions
             .WithTracing(tracing =>
             {
                 tracing.AddAspNetCoreInstrumentation()
-                       .AddHttpClientInstrumentation();
+                       .AddHttpClientInstrumentation()
+                       .AddSource("MassTransit") // Track messaging activities
+                       .AddSource("Npgsql");      // Track DB activities
 
                 if (useOtlpExporter)
                 {
@@ -104,23 +106,22 @@ public static class Extensions
         // Configure HealthCheck publisher options for background checks
         builder.Services.Configure<HealthCheckPublisherOptions>(options =>
         {
-            options.Delay = TimeSpan.FromSeconds(10); // Delay first check to allow infrastructure to start
+            options.Delay = TimeSpan.FromSeconds(30); // Increased delay (10s -> 30s) to allow migrations and IAM registration to stabilize
             options.Period = TimeSpan.FromSeconds(30);
-            options.Timeout = TimeSpan.FromMinutes(2); // Individual check timeout
+            options.Timeout = TimeSpan.FromMinutes(3); // Increased timeout (2m -> 3m) for heavy startup load
         });
 
         // --- Service Discovery and Resilience ---
         builder.Services.AddServiceDiscovery();
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            // Turn on resilience by default with relaxed timeouts for IAM registration
+            // Turn on resilience by default with optimized timeouts
             http.AddStandardResilienceHandler(options =>
             {
-                // Increased timeouts to accommodate IAM registration during startup (20+ services registering)
-                // and other potentially slow service-to-service operations.
-                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
-                options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(100);
-                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(125); // Must be >= 2 * AttemptTimeout
+                // Tuned timeouts: IAM registration can be slow but 100s is excessive
+                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(30);
+                options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(60);
+                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(65); // Must be >= 2 * AttemptTimeout
             });
 
             // Turn on service discovery by default

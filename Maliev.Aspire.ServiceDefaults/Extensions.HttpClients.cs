@@ -24,12 +24,11 @@ public static class HttpClientExtensions
             ?? throw new InvalidOperationException("Service name must be provided to AddIAMServiceClient via the 'serviceName' parameter or configuration key 'ServiceName'.");
 
         // Register the named client "IAMService" with full configuration (resilience + service account auth)
-        // This uses the AddIAMClient extension which configures auth handler and resilience
+        // This uses the AddIAMClient extension which configures auth handler and service discovery
         builder.Services.AddIAMClient(builder.Configuration, finalServiceName);
 
-        // Register the typed client using the same named configuration.
-        // It will automatically inherit the auth handler and resilience configured in AddIAMClient.
-        builder.Services.AddHttpClient<IIamServiceClient, IamServiceClient>("IAMService");
+        // Register the IamServiceClient which uses IHttpClientFactory to create "IAMService" clients
+        builder.Services.AddScoped<IIamServiceClient, IamServiceClient>();
 
         return builder;
     }
@@ -91,6 +90,48 @@ public static class HttpClientExtensions
     }
 
     /// <summary>
+    /// Adds a typed service HTTP client with standardized discovery, resilience and Service Account authentication.
+    /// </summary>
+    public static IHttpClientBuilder AddAuthenticatedServiceClient<TInterface, TImplementation>(
+        this IHostApplicationBuilder builder,
+        string serviceName,
+        string? sourceServiceName = null)
+        where TInterface : class
+        where TImplementation : class, TInterface
+    {
+        // 1. Add standard service account auth handler to the service collection
+        var finalSourceServiceName = sourceServiceName
+            ?? builder.Configuration["ServiceName"]
+            ?? throw new InvalidOperationException("ServiceName must be configured in appsettings.json or passed as 'sourceServiceName' parameter to use AddAuthenticatedServiceClient.");
+
+        // This configures the named client "IAMService" (used as a template)
+        builder.Services.AddIAMClient(builder.Configuration, finalSourceServiceName);
+
+        // 2. Register the typed client using the named configuration
+        return builder.Services.AddHttpClient<TInterface, TImplementation>(serviceName, (sp, client) =>
+        {
+            // Check if there's an explicit URL configured (for GKE deployment)
+            var explicitUrl = builder.Configuration[$"Services:{serviceName}:BaseUrl"];
+
+            if (!string.IsNullOrEmpty(explicitUrl))
+            {
+                // Use explicit URL for GKE/production
+                client.BaseAddress = new Uri(explicitUrl);
+            }
+            else
+            {
+                // Use service name for Aspire service discovery
+                // Service discovery will resolve "http://{serviceName}" to actual endpoint
+                client.BaseAddress = new Uri($"http://{serviceName}");
+            }
+
+            client.Timeout = TimeSpan.FromSeconds(90);
+        })
+        .AddServiceDiscovery() // Resolves serviceName -> BaseAddress via Aspire
+        .AddHttpMessageHandler<ServiceAccountAuthenticationHandler>();
+    }
+
+    /// <summary>
     /// Adds a typed service HTTP client with standardized Triple Fallback discovery and resilience.
     /// </summary>
     public static IHttpClientBuilder AddServiceClient<TInterface, TImplementation>(
@@ -115,17 +156,24 @@ public static class HttpClientExtensions
     {
         var httpClientBuilder = services.AddHttpClient<TInterface, TImplementation>((sp, client) =>
         {
-            // ENFORCED PATTERN: Services:{ServiceName}:BaseUrl (no fallbacks)
-            var url = configuration[$"Services:{serviceName}:BaseUrl"]
-                ?? throw new InvalidOperationException(
-                    $"Required configuration 'Services:{serviceName}:BaseUrl' is missing. Check appsettings.json or environment variables.");
+            // Check if there's an explicit URL configured (for GKE deployment)
+            var explicitUrl = configuration[$"Services:{serviceName}:BaseUrl"];
 
-            client.BaseAddress = new Uri(url);
+            if (!string.IsNullOrEmpty(explicitUrl))
+            {
+                // Use explicit URL for GKE/production
+                client.BaseAddress = new Uri(explicitUrl);
+            }
+            else
+            {
+                // Use service name for Aspire service discovery
+                // Service discovery will resolve "http://{serviceName}" to actual endpoint
+                client.BaseAddress = new Uri($"http://{serviceName}");
+            }
+
             client.Timeout = TimeSpan.FromSeconds(90);
-        });
-
-        // Note: Standard resilience handler is already applied by ConfigureHttpClientDefaults in AddServiceDefaults()
-        // No need to add a duplicate handler here
+        })
+        .AddServiceDiscovery(); // Resolves serviceName -> BaseAddress via Aspire
 
         return httpClientBuilder;
     }
@@ -155,21 +203,26 @@ public static class HttpClientExtensions
     {
         var httpClientBuilder = services.AddHttpClient(serviceName, (sp, client) =>
         {
-            // ENFORCED PATTERN: Services:{ServiceName}:BaseUrl (no fallbacks)
-            // Only allow explicit baseUrl parameter for test overrides
-            var url = baseUrl
-                ?? configuration[$"Services:{serviceName}:BaseUrl"]
-                ?? throw new InvalidOperationException(
-                    $"Required configuration 'Services:{serviceName}:BaseUrl' is missing. Check appsettings.json or environment variables.");
+            // Check if there's an explicit URL configured (for GKE deployment)
+            var explicitUrl = baseUrl ?? configuration[$"Services:{serviceName}:BaseUrl"];
 
-            client.BaseAddress = new Uri(url);
+            if (!string.IsNullOrEmpty(explicitUrl))
+            {
+                // Use explicit URL for GKE/production
+                client.BaseAddress = new Uri(explicitUrl);
+            }
+            else
+            {
+                // Use service name for Aspire service discovery
+                // Service discovery will resolve "http://{serviceName}" to actual endpoint
+                client.BaseAddress = new Uri($"http://{serviceName}");
+            }
+
             client.Timeout = TimeSpan.FromSeconds(90);
 
             configureClient?.Invoke(client);
-        });
-
-        // Note: Standard resilience handler is already applied by ConfigureHttpClientDefaults in AddServiceDefaults()
-        // No need to add a duplicate handler here
+        })
+        .AddServiceDiscovery(); // Resolves serviceName -> BaseAddress via Aspire
 
         return httpClientBuilder;
     }

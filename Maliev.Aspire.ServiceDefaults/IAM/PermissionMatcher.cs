@@ -10,7 +10,15 @@ public static class PermissionMatcher
             return false;
         }
 
-        return userPermissions.Any(p => IsMatch(requiredPermission, p));
+        var permissionsList = userPermissions.ToList();
+
+        // T220: Platform Owner bypass (standard for Maliev platform)
+        if (permissionsList.Any(p => string.Equals(p, "roles.platform.owner", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return permissionsList.Any(p => IsMatch(requiredPermission, p));
     }
 
     public static bool IsMatch(string required, string claim)
@@ -41,6 +49,8 @@ public static class PermissionMatcher
         if (claimParts.Length == 1 && claimParts[0] == "*") return true;
 
         // SECURE WILDCARD MATCHING LOGIC
+
+
         // Security fix: Validate segments BEFORE wildcard, ensure wildcard only at end
         // Prevents bypasses like "*.delete" matching "invoices.create"
         for (int i = 0; i < claimParts.Length; i++)

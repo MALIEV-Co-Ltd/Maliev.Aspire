@@ -9,26 +9,28 @@ namespace Maliev.Aspire.ServiceDefaults.IAM;
 /// </summary>
 public partial class IamServiceClient : IIamServiceClient
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<IamServiceClient> _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IamServiceClient"/> class.
     /// </summary>
-    /// <param name="httpClient">The HTTP client configured for the IAM service.</param>
+    /// <param name="httpClientFactory">The HTTP client factory for creating named clients.</param>
     /// <param name="logger">The logger instance.</param>
-    public IamServiceClient(HttpClient httpClient, ILogger<IamServiceClient> logger)
+    public IamServiceClient(IHttpClientFactory httpClientFactory, ILogger<IamServiceClient> logger)
     {
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
+
+    private HttpClient GetHttpClient() => _httpClientFactory.CreateClient("IAMService");
 
     /// <inheritdoc />
     public async Task<IEnumerable<string>> GetUserPermissionsAsync(string userId, CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync(
+            var response = await GetHttpClient().PostAsJsonAsync(
                 "/iam/v1/auth/resolve-permissions",
                 new { PrincipalId = userId },
                 cancellationToken);
@@ -60,7 +62,7 @@ public partial class IamServiceClient : IIamServiceClient
         {
             var request = new CheckPermissionRequest(principalId, permissionId, resourcePath);
 
-            var response = await _httpClient.PostAsJsonAsync(
+            var response = await GetHttpClient().PostAsJsonAsync(
                 "/iam/v1/auth/check-permission",
                 request,
                 cancellationToken);

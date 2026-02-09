@@ -29,7 +29,8 @@ public static class DatabaseExtensions
 
             var errorMessage = $"Database connection string '{connStringName}' not configured. " +
                 $"Available connection strings: [{string.Join(", ", availableKeys)}]. " +
-                $"Environment: {builder.Environment.EnvironmentName}";
+                $"Environment: {builder.Environment.EnvironmentName}. " +
+                $"IMPORTANT: Use Testcontainers for tests, NOT InMemory databases.";
 
             // Force flush to ensure Aspire captures the error before process exits
             Console.Error.WriteLine($"FATAL: {errorMessage}");
@@ -169,7 +170,7 @@ public static class DatabaseExtensions
                     }
 
                     retryCount++;
-                    var delaySeconds = 2 + random.Next(0, 3); // 2-5 seconds jittered delay
+                    var delaySeconds = 5 + random.Next(0, 10); // Increased jitter (5-15s) to mitigate thundering herd on 20+ services
                     logger.LogWarning("Waiting for database connectivity (attempt {Attempt}/{Max}). Retrying in {Delay}s...",
                         retryCount, retries, delaySeconds);
                     await Task.Delay(TimeSpan.FromSeconds(delaySeconds), migrationToken);
@@ -230,25 +231,26 @@ public static class DatabaseExtensions
     }
 
     /// <summary>
-    /// Ensures connection string has optimal pooling configuration for high-concurrency scenarios.
+    /// Ensures connection string has optimal pooling configuration optimized for low-spec nodes.
+    /// Configured for n1-standard-1 (1 vCPU, 3.75GB RAM) with max 20 connections to conserve resources.
     /// </summary>
     private static string EnsureConnectionPooling(string connectionString)
     {
         var builder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
 
-        // Set pooling parameters if they are at their defaults
+        // Optimize for low-spec nodes (n1-standard-1: 1 vCPU, 3.75GB RAM)
+        // Lower connection pool to prevent resource exhaustion
         if (builder.MaxPoolSize == 100)
         {
-            builder.MaxPoolSize = 200; // Increase for 20+ microservices
+            builder.MaxPoolSize = 20; // Reduced from 200 for low-spec nodes
         }
         if (builder.MinPoolSize == 0)
         {
-            builder.MinPoolSize = 10; // Keep warm connections ready
+            builder.MinPoolSize = 2; // Minimal warm connections to save memory
         }
         if (builder.ConnectionIdleLifetime == 300)
         {
-            // Default is 300, keep it or adjust if needed.
-            // No action needed if we just want to ensure it's set.
+            builder.ConnectionIdleLifetime = 60; // Recycle idle connections faster (1 minute)
         }
         if (builder.ConnectionPruningInterval == 10)
         {
