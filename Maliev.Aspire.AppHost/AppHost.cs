@@ -327,18 +327,7 @@ static partial class Program
             grafana,
             otelCollector);
 
-        var chatbotService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_ChatbotService_Api>("ChatbotService")
-                .WithReference(databases.Chatbot, "ChatbotDbContext")
-                .WaitFor(databases.Chatbot)
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis)
-                .WithReference(iamService)
-                .WithHttpHealthCheck("/chatbot/aspire-liveness"),
-            config,
-            grafana,
-            otelCollector);
+
 
         var notificationService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_NotificationService_Api>("NotificationService")
@@ -619,6 +608,45 @@ static partial class Program
                 .WithReference(materialService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/supplier/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector);
+
+        var chatbotService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_ChatbotService_Api>("ChatbotService")
+                .WithReference(databases.Chatbot, "ChatbotDbContext")
+                .WaitFor(databases.Chatbot)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithReference(countryService)
+                .WithReference(registryService)
+                .WithReference(uploadService)
+                .WithReference(customerService)
+                .WithReference(employeeService)
+                .WithReference(authService)
+                .WithReference(accountingService)
+                .WithReference(notificationService)
+                .WithReference(careerService)
+                .WithReference(compensationService)
+                .WithReference(complianceService)
+                .WithReference(leaveService)
+                .WithReference(lifecycleService)
+                .WithReference(performanceService)
+                .WithReference(contactService)
+                .WithReference(currencyService)
+                .WithReference(quotationService)
+                .WithReference(invoiceService)
+                .WithReference(materialService)
+                .WithReference(pricingService)
+                .WithReference(orderService)
+                .WithReference(paymentService)
+                .WithReference(pdfService)
+                .WithReference(purchaseOrderService)
+                .WithReference(receiptService)
+                .WithReference(supplierService)
+                .WithHttpHealthCheck("/chatbot/aspire-liveness"),
             config,
             grafana,
             otelCollector);
