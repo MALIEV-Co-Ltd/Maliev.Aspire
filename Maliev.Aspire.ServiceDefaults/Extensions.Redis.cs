@@ -1,6 +1,7 @@
 using Maliev.Aspire.ServiceDefaults.Caching;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace Microsoft.Extensions.Hosting;
@@ -54,10 +55,9 @@ public static class RedisExtensions
                     $"Available connection strings: [{string.Join(", ", availableKeys)}]. " +
                     "Redis is required in all environments unless explicitly disabled via Redis:Enabled=false or Cache:RedisEnabled=false.";
 
-                // Force flush to ensure Aspire captures the error before process exits
-                Console.Error.WriteLine($"FATAL: {errorMessage}");
-                Console.Error.Flush();
-                Console.Out.Flush();
+                using var loggerFactory = LoggerFactory.Create(lb => lb.AddConsole());
+                var logger = loggerFactory.CreateLogger("RedisExtensions");
+                logger.LogCritical("FATAL: {ErrorMessage}", errorMessage);
 
                 throw new InvalidOperationException(errorMessage);
             }

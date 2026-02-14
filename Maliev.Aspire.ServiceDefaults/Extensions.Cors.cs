@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -72,13 +73,20 @@ public static class CorsExtensions
             {
                 // In development, default to localhost:3000 but log warning
                 corsOrigins = new[] { "http://localhost:3000" };
-                Console.WriteLine("WARNING: CORS origins not configured. Using default: http://localhost:3000");
+
+                using var loggerFactory = LoggerFactory.Create(lb => lb.AddConsole());
+                var logger = loggerFactory.CreateLogger("CorsExtensions");
+                logger.LogWarning("CORS origins not configured. Using default: http://localhost:3000");
             }
             else
             {
                 var message = "CORS origins not configured. Set CORS:AllowedOrigins in configuration. " +
                     "This is a FATAL error in production.";
-                Console.Error.WriteLine($"FATAL: {message}");
+
+                using var loggerFactory = LoggerFactory.Create(lb => lb.AddConsole());
+                var logger = loggerFactory.CreateLogger("CorsExtensions");
+                logger.LogCritical("FATAL: {Message}", message);
+
                 throw new InvalidOperationException(message);
             }
         }

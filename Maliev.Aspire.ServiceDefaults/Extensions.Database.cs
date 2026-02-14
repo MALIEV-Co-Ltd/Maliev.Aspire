@@ -32,10 +32,9 @@ public static class DatabaseExtensions
                 $"Environment: {builder.Environment.EnvironmentName}. " +
                 $"IMPORTANT: Use Testcontainers for tests, NOT InMemory databases.";
 
-            // Force flush to ensure Aspire captures the error before process exits
-            Console.Error.WriteLine($"FATAL: {errorMessage}");
-            Console.Error.Flush();
-            Console.Out.Flush();
+            using var loggerFactory = LoggerFactory.Create(lb => lb.AddConsole());
+            var logger = loggerFactory.CreateLogger("DatabaseExtensions");
+            logger.LogCritical("FATAL: {ErrorMessage}", errorMessage);
 
             throw new InvalidOperationException(errorMessage);
         }

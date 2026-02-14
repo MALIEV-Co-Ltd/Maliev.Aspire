@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 
 namespace Maliev.Aspire.ServiceDefaults;
 
@@ -30,25 +31,27 @@ public static class IAMExtensions
         // Register the handler in DI so it can be resolved by the HttpClient builder
         services.TryAddTransient<ServiceAccountAuthenticationHandler>();
 
-        var httpClientBuilder = services.AddHttpClient("IAMService", client =>
+        var httpClientBuilder = services.AddHttpClient("IAMService").ConfigureHttpClient((sp, client) =>
         {
+            var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("IAMClientConfig");
+
             // Check if there's an explicit URL configured (for GKE deployment)
             var explicitUrl = configuration["Services:IAMService:BaseUrl"];
 
             // DEBUG: Log what we're reading from configuration
-            Console.WriteLine($"[IAM Client Config] Services:IAMService:BaseUrl = '{explicitUrl ?? "null"}'");
+            logger.LogDebug("[IAM Client Config] Services:IAMService:BaseUrl = '{ExplicitUrl}'", explicitUrl ?? "null");
 
             if (!string.IsNullOrEmpty(explicitUrl))
             {
                 // Use explicit URL for GKE/production
-                Console.WriteLine($"[IAM Client Config] Using explicit BaseAddress: {explicitUrl}");
+                logger.LogInformation("[IAM Client Config] Using explicit BaseAddress: {ExplicitUrl}", explicitUrl);
                 client.BaseAddress = new Uri(explicitUrl);
             }
             else
             {
                 // Use service name for Aspire service discovery
                 // Service discovery will resolve "http://IAMService" to actual endpoint
-                Console.WriteLine("[IAM Client Config] Using service discovery with service name: http://IAMService");
+                logger.LogInformation("[IAM Client Config] Using service discovery with service name: http://IAMService");
                 client.BaseAddress = new Uri("http://IAMService");
             }
 
