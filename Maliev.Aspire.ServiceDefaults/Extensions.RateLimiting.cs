@@ -1,7 +1,10 @@
+using Maliev.Aspire.ServiceDefaults;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Options;
 using System.Threading.RateLimiting;
 
 namespace Microsoft.Extensions.Hosting;
@@ -12,92 +15,141 @@ namespace Microsoft.Extensions.Hosting;
 public static class RateLimitingExtensions
 {
     /// <summary>
-    /// Adds standard rate limiting with configurable options.
-    /// Uses fixed window rate limiter by default.
+    /// Adds standard rate limiting configuration. 
     /// </summary>
-    /// <param name="builder">The host application builder.</param>
-    /// <param name="configure">Optional action to configure rate limiter options.</param>
-    /// <returns>The configured builder.</returns>
     public static IHostApplicationBuilder AddStandardRateLimiting(
         this IHostApplicationBuilder builder,
         Action<RateLimiterOptions>? configure = null)
     {
-        // Memory-optimized defaults for n1-standard-1 nodes (1 vCPU, 3.75GB RAM)
-        var options = new RateLimiterOptions
+        builder.Services.Configure<RateLimiterOptions>(builder.Configuration.GetSection("RateLimiting"));
+        if (configure != null)
         {
-            PermitLimit = 100,
-            WindowMinutes = 1,
-            QueueLimit = 5, // Reduced from 10 to save memory
-            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-            UseGlobalLimiter = false // Disabled by default to reduce overhead
-        };
+            builder.Services.PostConfigure(configure);
+        }
 
-        configure?.Invoke(options);
+        // Register the dynamic configuration handler
+        builder.Services.AddTransient<IConfigureOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>, ConfigureRateLimiterOptions>();
 
-        builder.Services.AddRateLimiter(rateLimiterOptions =>
+        builder.Services.AddRateLimiter(_ => { });
+
+        return builder;
+    }
+
+    private class ConfigureRateLimiterOptions : IConfigureOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>
+    {
+        private readonly IConfiguration _config;
+        private readonly RateLimiterOptions _options;
+
+        public ConfigureRateLimiterOptions(IConfiguration config, IOptions<RateLimiterOptions> options)
+        {
+            _config = config;
+            _options = options.Value;
+        }
+
+        public void Configure(Microsoft.AspNetCore.RateLimiting.RateLimiterOptions rateLimiterOptions)
         {
             rateLimiterOptions.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-            if (options.UseGlobalLimiter)
+            // Read from current IConfiguration (picks up test overrides)
+            var basePermitLimit = _config.GetValue("RateLimiting:PermitLimit", _options.PermitLimit);
+            var baseWindowMinutes = _config.GetValue("RateLimiting:WindowMinutes", _options.WindowMinutes);
+            var baseQueueLimit = _config.GetValue("RateLimiting:QueueLimit", _options.QueueLimit);
+            var useGlobal = _config.GetValue("RateLimiting:UseGlobalLimiter", _options.UseGlobalLimiter);
+
+            var window = TimeSpan.FromMinutes(baseWindowMinutes);
+
+            if (useGlobal)
             {
                 rateLimiterOptions.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 {
-                    var partitionKey = options.PartitionKeySelector?.Invoke(context) ??
-                                       context.User.Identity?.Name ??
+                    var partitionKey = context.User.Identity?.Name ??
                                        context.Request.Headers.Host.ToString();
 
-                    // Use sliding window with reduced segments for memory efficiency
                     return RateLimitPartition.GetSlidingWindowLimiter(
                         partitionKey: partitionKey,
                         factory: _ => new SlidingWindowRateLimiterOptions
                         {
-                            PermitLimit = options.PermitLimit,
-                            Window = TimeSpan.FromMinutes(options.WindowMinutes),
-                            SegmentsPerWindow = 4, // Reduced from 6 to save memory
-                            QueueProcessingOrder = options.QueueProcessingOrder,
-                            QueueLimit = options.QueueLimit
+                            PermitLimit = basePermitLimit,
+                            Window = window,
+                            SegmentsPerWindow = 4,
+                            QueueProcessingOrder = _options.QueueProcessingOrder,
+                            QueueLimit = baseQueueLimit
                         });
                 });
             }
 
-            // Default policy using sliding window for better traffic smoothing
-            rateLimiterOptions.AddSlidingWindowLimiter("default", limiterOptions =>
+            // Standard Policies
+            rateLimiterOptions.AddSlidingWindowLimiter("default", lo =>
             {
-                limiterOptions.PermitLimit = 100;
-                limiterOptions.Window = TimeSpan.FromMinutes(1);
-                limiterOptions.SegmentsPerWindow = 4; // Reduced from 6 to save memory
-                limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
-                limiterOptions.QueueLimit = 5; // Reduced from 10 for memory
+                lo.PermitLimit = basePermitLimit;
+                lo.Window = window;
+                lo.SegmentsPerWindow = 4;
+                lo.QueueProcessingOrder = _options.QueueProcessingOrder;
+                lo.QueueLimit = baseQueueLimit;
             });
 
-            // Named policy for API endpoints
-            rateLimiterOptions.AddFixedWindowLimiter("api", limiterOptions =>
+            rateLimiterOptions.AddFixedWindowLimiter(RateLimitPolicies.Api, lo =>
             {
-                limiterOptions.PermitLimit = options.PermitLimit;
-                limiterOptions.Window = TimeSpan.FromMinutes(options.WindowMinutes);
-                limiterOptions.QueueProcessingOrder = options.QueueProcessingOrder;
-                limiterOptions.QueueLimit = options.QueueLimit;
+                lo.PermitLimit = _config.GetValue($"RateLimiting:{RateLimitPolicies.Api}:PermitLimit", basePermitLimit);
+                lo.Window = window;
+                lo.QueueLimit = baseQueueLimit;
             });
 
-            // Stricter policy for write operations
-            rateLimiterOptions.AddFixedWindowLimiter("write", limiterOptions =>
+            var publicLimit = _config.GetValue($"RateLimiting:{RateLimitPolicies.Public}:PermitLimit", basePermitLimit / 2);
+            rateLimiterOptions.AddFixedWindowLimiter(RateLimitPolicies.Public, lo =>
             {
-                limiterOptions.PermitLimit = options.PermitLimit / 2;
-                limiterOptions.Window = TimeSpan.FromMinutes(options.WindowMinutes);
-                limiterOptions.QueueProcessingOrder = options.QueueProcessingOrder;
-                limiterOptions.QueueLimit = options.QueueLimit;
+                lo.PermitLimit = publicLimit;
+                lo.Window = window;
+                lo.QueueLimit = baseQueueLimit;
             });
 
-            // More lenient policy for read operations
-            rateLimiterOptions.AddFixedWindowLimiter("read", limiterOptions =>
+            var adminLimit = _config.GetValue($"RateLimiting:{RateLimitPolicies.Admin}:PermitLimit", Math.Max(1, basePermitLimit / 4));
+            rateLimiterOptions.AddFixedWindowLimiter(RateLimitPolicies.Admin, lo =>
             {
-                limiterOptions.PermitLimit = options.PermitLimit * 2;
-                limiterOptions.Window = TimeSpan.FromMinutes(options.WindowMinutes);
-                limiterOptions.QueueProcessingOrder = options.QueueProcessingOrder;
-                limiterOptions.QueueLimit = options.QueueLimit;
+                lo.PermitLimit = adminLimit;
+                lo.Window = window;
+                lo.QueueLimit = baseQueueLimit;
             });
 
-            // Custom rejection handler with detailed error information
+            rateLimiterOptions.AddFixedWindowLimiter(RateLimitPolicies.Batch, lo =>
+            {
+                lo.PermitLimit = _config.GetValue($"RateLimiting:{RateLimitPolicies.Batch}:PermitLimit", Math.Max(1, basePermitLimit / 10));
+                lo.Window = window;
+                lo.QueueLimit = baseQueueLimit;
+            });
+
+            var authLimit = _config.GetValue($"RateLimiting:{RateLimitPolicies.Auth}:PermitLimit", Math.Max(1, basePermitLimit / 20));
+            rateLimiterOptions.AddFixedWindowLimiter(RateLimitPolicies.Auth, lo =>
+            {
+                lo.PermitLimit = authLimit;
+                lo.Window = window;
+                lo.QueueLimit = baseQueueLimit;
+            });
+
+            rateLimiterOptions.AddFixedWindowLimiter(RateLimitPolicies.Read, lo =>
+            {
+                lo.PermitLimit = _config.GetValue($"RateLimiting:{RateLimitPolicies.Read}:PermitLimit", basePermitLimit * 2);
+                lo.Window = window;
+                lo.QueueLimit = baseQueueLimit;
+            });
+
+            rateLimiterOptions.AddFixedWindowLimiter(RateLimitPolicies.Write, lo =>
+            {
+                lo.PermitLimit = _config.GetValue($"RateLimiting:{RateLimitPolicies.Write}:PermitLimit", basePermitLimit / 2);
+                lo.Window = window;
+                lo.QueueLimit = baseQueueLimit;
+            });
+
+            // Legacy Aliases
+            rateLimiterOptions.AddFixedWindowLimiter("admin-endpoints", lo => { lo.PermitLimit = adminLimit; lo.Window = window; });
+            rateLimiterOptions.AddFixedWindowLimiter("PublicApi", lo => { lo.PermitLimit = publicLimit; lo.Window = window; });
+            rateLimiterOptions.AddFixedWindowLimiter("AuthenticatedApi", lo => { lo.PermitLimit = basePermitLimit; lo.Window = window; });
+            rateLimiterOptions.AddFixedWindowLimiter("token_limit", lo => { lo.PermitLimit = authLimit; lo.Window = window; });
+            rateLimiterOptions.AddFixedWindowLimiter("ContactPolicy", lo => { lo.PermitLimit = publicLimit; lo.Window = window; });
+            rateLimiterOptions.AddFixedWindowLimiter("GlobalPolicy", lo => { lo.PermitLimit = basePermitLimit; lo.Window = window; });
+            rateLimiterOptions.AddFixedWindowLimiter("general", lo => { lo.PermitLimit = basePermitLimit; lo.Window = window; });
+            rateLimiterOptions.AddFixedWindowLimiter("anonymous", lo => { lo.PermitLimit = publicLimit; lo.Window = window; });
+
             rateLimiterOptions.OnRejected = async (context, cancellationToken) =>
             {
                 context.HttpContext.Response.StatusCode = 429;
@@ -110,47 +162,15 @@ public static class RateLimitingExtensions
                         : "60"
                 }, cancellationToken);
             };
-        });
-
-        return builder;
+        }
     }
 }
 
 public class RateLimiterOptions
 {
-    /// <summary>
-    /// Use global rate limiter (applies to all requests).
-    /// Default: true
-    /// </summary>
-    public bool UseGlobalLimiter { get; set; } = true;
-
-    /// <summary>
-    /// Number of requests allowed per window.
-    /// Default: 100
-    /// </summary>
+    public bool UseGlobalLimiter { get; set; } = false;
     public int PermitLimit { get; set; } = 100;
-
-    /// <summary>
-    /// Time window in minutes.
-    /// Default: 1 minute
-    /// </summary>
-    public int WindowMinutes { get; set; } = 1;
-
-    /// <summary>
-    /// Maximum queue size for waiting requests.
-    /// Default: 0 (no queue)
-    /// </summary>
+    public double WindowMinutes { get; set; } = 1;
     public int QueueLimit { get; set; } = 0;
-
-    /// <summary>
-    /// Queue processing order.
-    /// Default: OldestFirst
-    /// </summary>
     public QueueProcessingOrder QueueProcessingOrder { get; set; } = QueueProcessingOrder.OldestFirst;
-
-    /// <summary>
-    /// Custom partition key selector.
-    /// Default: User name or Host header
-    /// </summary>
-    public Func<HttpContext, string>? PartitionKeySelector { get; set; }
 }

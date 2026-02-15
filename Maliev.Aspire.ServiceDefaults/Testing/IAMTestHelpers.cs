@@ -37,12 +37,12 @@ public static class IAMTestHelpers
         SigningCredentials creds;
         if (_testRsa != null)
         {
-            var key = new RsaSecurityKey(_testRsa);
+            var key = new RsaSecurityKey(_testRsa) { KeyId = "test-rsa-key" };
             creds = new SigningCredentials(key, SecurityAlgorithms.RsaSha256);
         }
         else
         {
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-key-at-least-32-characters-long-for-integration-tests"));
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-key-at-least-32-characters-long-for-integration-tests")) { KeyId = "test-symmetric-key" };
             creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         }
 
