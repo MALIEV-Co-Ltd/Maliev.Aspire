@@ -39,6 +39,7 @@
     <ProjectReference Include="..\..\Maliev.CountryService\Maliev.CountryService.Api\Maliev.CountryService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CurrencyService\Maliev.CurrencyService.Api\Maliev.CurrencyService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CustomerService\Maliev.CustomerService.Api\Maliev.CustomerService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.DeliveryService\Maliev.DeliveryService.Api\Maliev.DeliveryService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.EmployeeService\Maliev.EmployeeService.Api\Maliev.EmployeeService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.InvoiceService\Maliev.InvoiceService.Api\Maliev.InvoiceService.Api.csproj" />

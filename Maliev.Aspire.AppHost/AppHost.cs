@@ -181,6 +181,7 @@ static partial class Program
             Country: postgres.AddDatabase("country-app-db"),
             Currency: postgres.AddDatabase("currency-app-db"),
             Customer: postgres.AddDatabase("customer-app-db"),
+            Delivery: postgres.AddDatabase("delivery-app-db"),
             Employee: postgres.AddDatabase("employee-app-db"),
             IAM: postgres.AddDatabase("iam-app-db"),
             Invoice: postgres.AddDatabase("invoice-app-db"),
@@ -192,8 +193,8 @@ static partial class Program
             Payment: postgres.AddDatabase("payment-app-db"),
             Pdf: postgres.AddDatabase("pdf-app-db"),
             Performance: postgres.AddDatabase("performance-app-db"),
-            PurchaseOrder: postgres.AddDatabase("purchaseorder-app-db"),
             Pricing: postgres.AddDatabase("pricing-app-db"),
+            PurchaseOrder: postgres.AddDatabase("purchaseorder-app-db"),
             Quotation: postgres.AddDatabase("quotation-app-db"),
             Receipt: postgres.AddDatabase("receipt-app-db"),
             Registry: postgres.AddDatabase("registry-app-db"),
@@ -541,6 +542,21 @@ static partial class Program
             grafana,
             otelCollector);
 
+        var deliveryService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_DeliveryService_Api>("DeliveryService")
+                .WithReference(databases.Delivery, "DeliveryDbContext")
+                .WaitFor(databases.Delivery)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(orderService)
+                .WithReference(customerService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/delivery/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector);
+
         var paymentService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PaymentService_Api>("PaymentService")
                 .WithReference(databases.Payment, "PaymentDbContext")
@@ -563,6 +579,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(uploadService)
                 .WaitFor(uploadService)
+                .WithReference(deliveryService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/pdf/aspire-liveness"),
             config,
@@ -641,6 +658,7 @@ static partial class Program
                 .WithReference(materialService)
                 .WithReference(pricingService)
                 .WithReference(orderService)
+                .WithReference(deliveryService)
                 .WithReference(paymentService)
                 .WithReference(pdfService)
                 .WithReference(purchaseOrderService)
@@ -656,6 +674,7 @@ static partial class Program
                 .WithReference(authService)
                 .WithReference(customerService)
                 .WithReference(orderService)
+                .WithReference(deliveryService)
                 .WithReference(iamService)
                 .WithReference(countryService)
                 .WithReference(registryService)
@@ -668,6 +687,9 @@ static partial class Program
                 .WithReference(supplierService)
                 .WithReference(chatbotService)
                 .WithReference(careerService)
+                .WithReference(complianceService)
+                .WithReference(performanceService)
+                .WithReference(compensationService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
                 .WithHttpHealthCheck("/intranet/aspire-liveness"),
@@ -748,6 +770,7 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Country,
     IResourceBuilder<PostgresDatabaseResource> Currency,
     IResourceBuilder<PostgresDatabaseResource> Customer,
+    IResourceBuilder<PostgresDatabaseResource> Delivery,
     IResourceBuilder<PostgresDatabaseResource> Employee,
     IResourceBuilder<PostgresDatabaseResource> IAM,
     IResourceBuilder<PostgresDatabaseResource> Invoice,
