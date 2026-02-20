@@ -31,6 +31,9 @@ public static class Extensions
         Environment.SetEnvironmentVariable("NPGSQL_GSSAPI_AUTHENTICATION", "false");
         Environment.SetEnvironmentVariable("PGGSSENCMODE", "disable");
 
+        // Disable MassTransit usage telemetry to prevent "Usage Telemetry:" JSON logs
+        Environment.SetEnvironmentVariable("MT_USAGE_TELEMETRY", "false");
+
         // Reduce log verbosity for noisy categories
         // ASP.NET Core infrastructure (keep errors only)
         builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
@@ -49,6 +52,8 @@ public static class Extensions
         // Infrastructure components
         builder.Logging.AddFilter("StackExchange.Redis", LogLevel.Warning); // Redis connection noise
         builder.Logging.AddFilter("Npgsql", LogLevel.Warning); // PostgreSQL connection noise
+        // EF Core checks __EFMigrationsHistory on fresh DBs and logs a command error that is handled internally
+        builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Critical);
 
         // MassTransit/RabbitMQ - Information level for monitoring events without debug noise
         builder.Logging.AddFilter("MassTransit", LogLevel.Information);
