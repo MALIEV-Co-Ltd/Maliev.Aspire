@@ -54,6 +54,8 @@ public static class MassTransitExtensions
 
         builder.Services.AddMassTransit(x =>
         {
+            x.DisableUsageTelemetry();
+
             // Allow caller to add consumers and configure
             configure?.Invoke(x);
 

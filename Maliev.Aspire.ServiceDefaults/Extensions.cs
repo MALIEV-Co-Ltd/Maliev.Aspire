@@ -32,7 +32,7 @@ public static class Extensions
         Environment.SetEnvironmentVariable("PGGSSENCMODE", "disable");
 
         // Disable MassTransit usage telemetry to prevent "Usage Telemetry:" JSON logs
-        Environment.SetEnvironmentVariable("MT_USAGE_TELEMETRY", "false");
+        Environment.SetEnvironmentVariable("MASSTRANSIT_USAGE_TELEMETRY", "false");
 
         // Reduce log verbosity for noisy categories
         // ASP.NET Core infrastructure (keep errors only)
