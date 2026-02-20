@@ -1,5 +1,7 @@
 using Aspire.Hosting.Testing;
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Integration;
@@ -10,6 +12,7 @@ namespace Maliev.Aspire.Tests.Integration;
 public class AspireAppHostFixture : IAsyncLifetime
 {
     public DistributedApplicationFactory AppFactory { get; private set; } = null!;
+    private string? _adminToken;
 
     public async Task InitializeAsync()
     {
@@ -21,6 +24,37 @@ public class AspireAppHostFixture : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await AppFactory.DisposeAsync();
+    }
+
+    public async Task<string> GetAdminTokenAsync()
+    {
+        if (!string.IsNullOrEmpty(_adminToken))
+            return _adminToken;
+
+        var authClient = AppFactory.CreateHttpClient("AuthService");
+        var exchangeRequest = new
+        {
+            email = "admin@maliev.com",
+            full_name = "Platform Owner",
+            google_user_id = "google-platform-owner-id"
+        };
+
+        var response = await authClient.PostAsJsonAsync("/auth/v1/exchange/google", exchangeRequest);
+        response.EnsureSuccessStatusCode();
+
+        var content = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(content);
+        _adminToken = doc.RootElement.GetProperty("access_token").GetString()
+            ?? throw new InvalidOperationException("access_token was null in auth response");
+
+        var iamClient = AppFactory.CreateHttpClient("IAMService");
+        iamClient.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _adminToken);
+        await iamClient.PostAsync("/iam/v1/principals/bootstrap/promote", null);
+
+        // Re-acquire token to get updated permissions
+        _adminToken = null;
+        return await GetAdminTokenAsync();
     }
 }
 
@@ -79,7 +113,41 @@ public class ServiceDiscoveryTests
     }
 
     /// <summary>
+    /// Verifies the BFF system health endpoint reports all downstream services as reachable.
+    /// </summary>
+    [Fact]
+    public async Task IntranetBff_SystemHealth_ReportsAllServicesReachable()
+    {
+        _output.WriteLine("Checking BFF system health...");
+
+        var token = await _fixture.GetAdminTokenAsync();
+        var client = _fixture.AppFactory.CreateHttpClient("IntranetBff");
+        client.Timeout = TimeSpan.FromSeconds(60);
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        var response = await client.GetAsync("/api/system-health");
+
+        _output.WriteLine($"  BFF /api/system-health: {response.StatusCode}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        var services = doc.RootElement.GetProperty("services");
+
+        foreach (var service in services.EnumerateArray())
+        {
+            var name = service.GetProperty("serviceName").GetString();
+            var status = service.GetProperty("status").GetString();
+            _output.WriteLine($"  {name}: {status}");
+            Assert.True(status != "Unreachable",
+                $"Service '{name}' was unreachable — missing WithReference in AppHost?");
+        }
+    }
+
+    /// <summary>
     /// Verifies core services pass their full readiness check (DB, Redis, RabbitMQ, IAM).
+    /// Retries up to 20 times with 5s delay to allow IAM registration to complete after startup.
     /// </summary>
     [Theory]
     [MemberData(nameof(CoreServices))]
@@ -90,8 +158,24 @@ public class ServiceDiscoveryTests
         var client = _fixture.AppFactory.CreateHttpClient(resourceName);
         client.Timeout = TimeSpan.FromSeconds(30);
 
-        var response = await client.GetAsync(readinessPath);
-        var content = await response.Content.ReadAsStringAsync();
+        HttpResponseMessage response = null!;
+        string content = string.Empty;
+        const int maxRetries = 20;
+        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        {
+            response = await client.GetAsync(readinessPath);
+            content = await response.Content.ReadAsStringAsync();
+
+            if (response.IsSuccessStatusCode)
+                break;
+
+            // Only retry for IAM registration pending — other failures are real errors
+            if (!content.Contains("IAM registration pending"))
+                break;
+
+            _output.WriteLine($"  {resourceName}: IAM registration pending (attempt {attempt}/{maxRetries}), retrying in 5s...");
+            await Task.Delay(5000);
+        }
 
         _output.WriteLine($"  {resourceName}: {response.StatusCode}");
         if (!response.IsSuccessStatusCode)
@@ -135,6 +219,7 @@ public class ServiceDiscoveryTests
         { "PdfService", "/pdf/aspire-liveness" },
         { "PurchaseOrderService", "/purchase-order/aspire-liveness" },
         { "ReceiptService", "/receipt/aspire-liveness" },
+        { "maliev-geometryservice", "/geometry/aspire-liveness" },
     };
 
     /// <summary>

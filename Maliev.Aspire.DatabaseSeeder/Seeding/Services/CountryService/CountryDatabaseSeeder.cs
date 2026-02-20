@@ -8,7 +8,7 @@ namespace Maliev.Aspire.DatabaseSeeder.Seeding.Services.CountryService;
 
 public class CountryDatabaseSeeder : DatabaseSeeder<CountryDbContext>
 {
-    public CountryDatabaseSeeder(CountryDbContext context, ILogger<CountryDatabaseSeeder> logger) 
+    public CountryDatabaseSeeder(CountryDbContext context, ILogger<CountryDatabaseSeeder> logger)
         : base(context, logger)
     {
     }

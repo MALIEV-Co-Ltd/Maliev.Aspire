@@ -13,7 +13,7 @@ public class EmployeeDatabaseSeeder : DatabaseSeeder<EmployeeDbContext>
     private static readonly Guid BootstrapAdminPrincipalId = Guid.Parse("00000000-0000-0000-0000-000000000002");
     private static readonly Guid BootstrapAdminEmployeeId = Guid.Parse("00000000-0000-0000-0000-000000000003");
 
-    public EmployeeDatabaseSeeder(EmployeeDbContext context, ILogger<EmployeeDatabaseSeeder> logger) 
+    public EmployeeDatabaseSeeder(EmployeeDbContext context, ILogger<EmployeeDatabaseSeeder> logger)
         : base(context, logger)
     {
     }

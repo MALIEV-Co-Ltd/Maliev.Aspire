@@ -17,7 +17,7 @@ public class CustomerOnboardingTests : MalievTestBase
     public async Task OnboardCustomer_AsAdmin_Succeeds()
     {
         Output.WriteLine("=== Customer Onboarding Integration Test Starting ===");
-        
+
         // Step 1: Ensure Country Exists
         // Using Admin Token from Base
         var country = await EnsureCountryExistsAsync("TH", "Thailand");
@@ -25,9 +25,9 @@ public class CustomerOnboardingTests : MalievTestBase
         Output.WriteLine($"✓ Using Country: {country.Name} ({country.Id})");
 
         // Step 2: Create Customer via BFF
-        var bffClient = await CreateAuthenticatedClient("maliev-intranet-bff");
+        var bffClient = await CreateAuthenticatedClient("IntranetBff");
         var testId = Guid.NewGuid().ToString("N")[..8];
-        
+
         var request = new CustomerOnboardingRequest
         {
             Customer = new CreateCustomerRequest
@@ -63,40 +63,41 @@ public class CustomerOnboardingTests : MalievTestBase
 
         Output.WriteLine($"\n[Step 2] Sending onboarding request via BFF...");
         var response = await bffClient.PostAsJsonAsync("/api/customers/onboard", request);
-        
+
         var content = await response.Content.ReadAsStringAsync();
-        Assert.True(response.StatusCode == HttpStatusCode.Created || response.StatusCode == HttpStatusCode.OK, 
+        Assert.True(response.StatusCode == HttpStatusCode.Created || response.StatusCode == HttpStatusCode.OK,
             $"Failed with {response.StatusCode}: {content}");
-            
+
         var createdCustomer = await response.Content.ReadFromJsonAsync<CustomerResponse>();
         Assert.NotNull(createdCustomer);
         Output.WriteLine($"✓ Customer created with ID: {createdCustomer.Id}");
-        
+
         // Step 3: Verify Addresses via Customer Service
         Output.WriteLine("\n[Step 3] Verifying addresses in Customer Service...");
-        var customerServiceClient = await CreateAuthenticatedClient("maliev-customerservice-api");
-        
+        var customerServiceClient = await CreateAuthenticatedClient("CustomerService");
+
         var addressResponse = await customerServiceClient.GetAsync($"/customer/v1/addresses?ownerType=Customer&ownerId={createdCustomer.Id}");
         addressResponse.EnsureSuccessStatusCode();
-        
+
         var addresses = await addressResponse.Content.ReadFromJsonAsync<List<AddressSummaryDto>>();
         Assert.NotNull(addresses);
         Assert.NotEmpty(addresses);
         Assert.Equal(request.Addresses[0].AddressLine1, addresses[0].AddressLine1);
-        
+
         Output.WriteLine("✓ Address verification successful");
     }
 
     private async Task<CountryDto> EnsureCountryExistsAsync(string iso2, string name)
     {
-        var countryClient = await CreateAuthenticatedClient("maliev-countryservice-api");
-        
+        var countryClient = await CreateAuthenticatedClient("CountryService");
+
         // Check if exists
         var existing = await countryClient.GetFromJsonAsync<PagedResponse<CountryDto>>($"/country/v1/countries/search?query={iso2}");
         if (existing?.Data.Any() == true) return existing.Data.First();
 
         // Seed if not exists
-        var seedRequest = new {
+        var seedRequest = new
+        {
             iso2 = iso2,
             iso3 = iso2 + "A", // Simple hack for test
             name = name,
@@ -112,16 +113,16 @@ public class CustomerOnboardingTests : MalievTestBase
             translations = "{}",
             flags = "{}"
         };
-        
+
         var seedResponse = await countryClient.PostAsJsonAsync("/country/v1/admin/countries", seedRequest);
         seedResponse.EnsureSuccessStatusCode();
-        
-        return await seedResponse.Content.ReadFromJsonAsync<CountryDto>() 
+
+        return await seedResponse.Content.ReadFromJsonAsync<CountryDto>()
                ?? throw new InvalidOperationException("Failed to seed country");
     }
 
     private class PagedResponse<T> { public List<T> Data { get; set; } = new(); }
-    
+
     private class AddressSummaryDto
     {
         public string AddressLine1 { get; set; } = string.Empty;

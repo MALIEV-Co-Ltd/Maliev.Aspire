@@ -45,6 +45,10 @@
     <Project Path="..\Maliev.CustomerService\Maliev.CustomerService.Api\Maliev.CustomerService.Api.csproj" />
     <Project Path="..\Maliev.CustomerService\Maliev.CustomerService.Data\Maliev.CustomerService.Data.csproj" />
   </Folder>
+  <Folder Name="/Delivery Service/">
+    <Project Path="../Maliev.DeliveryService/Maliev.DeliveryService.Api/Maliev.DeliveryService.Api.csproj" />
+    <Project Path="../Maliev.DeliveryService/Maliev.DeliveryService.Data/Maliev.DeliveryService.Data.csproj" />
+  </Folder>
   <Folder Name="/Employee Service/">
     <Project Path="..\Maliev.EmployeeService\Maliev.EmployeeService.Api\Maliev.EmployeeService.Api.csproj" />
     <Project Path="..\Maliev.EmployeeService\Maliev.EmployeeService.Application\Maliev.EmployeeService.Application.csproj" />

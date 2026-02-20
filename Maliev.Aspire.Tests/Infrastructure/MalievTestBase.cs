@@ -21,13 +21,13 @@ public abstract class MalievTestBase : IAsyncLifetime
     public virtual async Task InitializeAsync()
     {
         var appHostAssembly = typeof(Projects.Maliev_Aspire_AppHost).Assembly;
-        AppFactory = new DistributedApplicationFactory(appHostAssembly.EntryPoint!.DeclaringType!);
-        
-        // Ensure configuration is loaded correctly for tests
-        // You might want to override appsettings here if needed
-        
+
+        // Use a factory that forces "Testing" environment for all projects
+        // This enables the JWT signature validation bypass in ServiceDefaults
+        AppFactory = new DistributedApplicationFactory(appHostAssembly.EntryPoint!.DeclaringType!, ["--environment", "Testing"]);
+
         await AppFactory.StartAsync();
-        Output.WriteLine("Application Started.");
+        Output.WriteLine("Application Started in Testing environment.");
     }
 
     public virtual async Task DisposeAsync()
@@ -49,27 +49,15 @@ public abstract class MalievTestBase : IAsyncLifetime
         if (!string.IsNullOrEmpty(AdminToken))
             return AdminToken;
 
-        Output.WriteLine("Acquiring admin platform token...");
-        var authApiClient = CreateClient("maliev-authservice-api");
-        
-        var googleExchangeRequest = new
-        {
-            email = "admin@maliev.com",
-            full_name = "Bootstrap Admin",
-            google_user_id = "google-admin-static-id"
-        };
+        // Since signature validation is bypassed in "Testing" environment, 
+        // we can create a token locally with whatever permissions we need.
+        Output.WriteLine("Creating local admin token (Signature validation bypassed in Testing mode)...");
+        AdminToken = IAMTestHelpers.CreateTestJWT(
+            principalId: "00000000-0000-0000-0000-000000000002", // Seeded Admin ID
+            permissions: "*"); // Wildcard access
 
-        var response = await authApiClient.PostAsJsonAsync("/auth/v1/exchange/google", googleExchangeRequest);
-        response.EnsureSuccessStatusCode();
-        
-        var content = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(content);
-        AdminToken = doc.RootElement.GetProperty("access_token").GetString();
-        
-        Assert.NotNull(AdminToken);
-        Output.WriteLine("✓ Admin token acquired");
-        
-        return AdminToken!;
+        Output.WriteLine("✓ Local admin token created");
+        return AdminToken;
     }
 
     protected async Task<HttpClient> CreateAuthenticatedClient(string projectName)

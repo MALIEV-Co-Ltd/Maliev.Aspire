@@ -115,7 +115,7 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
                 UpdatedAt = DateTime.UtcNow
             };
             Context.Principals.Add(admin);
-            
+
             // Bind to role
             Context.PrincipalRoleBindings.Add(new PrincipalRoleBinding
             {

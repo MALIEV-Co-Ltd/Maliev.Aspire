@@ -1,0 +1,60 @@
+using Maliev.Aspire.Tests.Infrastructure;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Xunit.Abstractions;
+
+namespace Maliev.Aspire.Tests.Domain.SupplyChain;
+
+/// <summary>
+/// Tests for pricing service. Uses shared AspireTestFixture for performance.
+/// </summary>
+[Collection("AspireDomainTests")]
+public class PricingServiceTests : IClassFixture<AspireTestFixture>
+{
+    private readonly AspireTestFixture _fixture;
+    private readonly ITestOutputHelper _output;
+
+    public PricingServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
+    {
+        _fixture = fixture;
+        _output = output;
+    }
+
+    [Fact]
+    public async Task CalculatePrice_ReturnsPositiveAmount()
+    {
+        var client = _fixture.CreateAuthenticatedClient("PricingService");
+
+        var request = new
+        {
+            FileId = Guid.NewGuid(),
+            CustomerId = Guid.NewGuid(),
+            MaterialId = Guid.NewGuid(),
+            MaterialCode = "M-PLA-001",
+            ManufacturingProcessId = Guid.NewGuid(),
+            ManufacturingProcessName = "FDM",
+            Quantity = 10,
+            Geometry = new
+            {
+                VolumeCm3 = 25.5m,
+                SupportVolumeCm3 = 5.2m,
+                SurfaceAreaCm2 = 120.0m,
+                BoundingBoxX = 50.0m,
+                BoundingBoxY = 50.0m,
+                BoundingBoxZ = 20.0m,
+                IsManifold = true,
+                TriangleCount = 1500
+            }
+        };
+
+        var response = await client.PostAsJsonAsync("/v1/pricing/calculate", request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        var totalPrice = result.GetProperty("totalPrice").GetDecimal();
+        _output.WriteLine($"Calculated Price: {totalPrice}");
+        Assert.True(totalPrice > 0, "Calculated price should be positive.");
+    }
+}

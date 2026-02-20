@@ -63,6 +63,13 @@ public class SeederRunner
             builder.Services.AddScoped<Maliev.EmployeeService.Infrastructure.Data.Interceptors.DatabaseMetricsInterceptor>();
         }
 
+        // Add missing dependencies for CustomerDbContext if it's being used
+        if (seedTarget.Equals("CustomerDatabaseSeeder", StringComparison.OrdinalIgnoreCase))
+        {
+            builder.Services.AddSingleton<Maliev.CustomerService.Data.Interfaces.IEncryptionService, Maliev.CustomerService.Data.Security.EncryptionService>();
+            builder.Services.AddSingleton<Maliev.CustomerService.Data.Interceptors.EncryptionInterceptor>();
+        }
+
         // 5. Register ONLY the target seeder to avoid instantiation errors for others
         builder.Services.AddScoped(typeof(IDatabaseSeeder), targetType);
         builder.Services.AddScoped(targetType);
@@ -76,9 +83,9 @@ public class SeederRunner
         try
         {
             logger.LogInformation("Starting database seeding for target: {Target}", seedTarget);
-            
+
             var seeders = scope.ServiceProvider.GetServices<IDatabaseSeeder>();
-            logger.LogInformation("Found {Count} registered seeders: {SeederNames}", 
+            logger.LogInformation("Found {Count} registered seeders: {SeederNames}",
                 seeders.Count(), string.Join(", ", seeders.Select(s => s.GetType().Name)));
 
             var seeder = seeders.First(s => s.GetType().Name.Equals(seedTarget, StringComparison.OrdinalIgnoreCase));

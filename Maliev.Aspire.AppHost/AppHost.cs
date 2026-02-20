@@ -1,3 +1,4 @@
+using Maliev.Aspire.AppHost.Extensions;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
 using Microsoft.Extensions.Configuration;
 
@@ -215,6 +216,8 @@ static partial class Program
         IResourceBuilder<ContainerResource> grafana,
         IResourceBuilder<IResource> otelCollector)
     {
+        var environmentName = builder.Environment.EnvironmentName;
+
         // --- Core Services (dependencies for Auth) ---
         var iamService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_IAMService_Api>("IAMService")
@@ -226,7 +229,8 @@ static partial class Program
                 .WithHttpHealthCheck("/iam/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         // Note: CountryService must be declared before CustomerService to be referenced
         var countryService = WithSharedSecrets(
@@ -240,7 +244,8 @@ static partial class Program
                 .WithHttpHealthCheck("/country/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var registryService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_RegistryService_Api>("RegistryService")
@@ -253,7 +258,8 @@ static partial class Program
                 .WithHttpHealthCheck("/registry/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var uploadService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_UploadService_Api>("UploadService")
@@ -266,7 +272,8 @@ static partial class Program
                 .WithHttpHealthCheck("/upload/aspire-liveness"),
             config,
             grafana,
-            otelCollector)
+            otelCollector,
+            environmentName)
             .WithEnvironment("GCP__ProjectId", config.GcpProjectId)
             .WithEnvironment("GCP__ServiceAccountKeyBase64", config.GcpServiceAccountKeyBase64);
 
@@ -284,7 +291,8 @@ static partial class Program
                 .WithHttpHealthCheck("/customer/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var employeeService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_EmployeeService_Api>("EmployeeService")
@@ -297,7 +305,8 @@ static partial class Program
                 .WithHttpHealthCheck("/employee/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var authService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_AuthService_Api>("AuthService")
@@ -312,7 +321,8 @@ static partial class Program
                 .WithHttpHealthCheck("/auth/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         // --- Business Services ---
         var accountingService = WithSharedSecrets(
@@ -326,7 +336,8 @@ static partial class Program
                 .WithHttpHealthCheck("/accounting/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
 
 
@@ -341,7 +352,8 @@ static partial class Program
                 .WithHttpHealthCheck("/notification/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var careerService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CareerService_Api>("CareerService")
@@ -360,7 +372,8 @@ static partial class Program
                 .WithHttpHealthCheck("/career/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var compensationService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CompensationService_Api>("CompensationService")
@@ -374,7 +387,8 @@ static partial class Program
                 .WithHttpHealthCheck("/compensation/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var complianceService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ComplianceService_Api>("ComplianceService")
@@ -388,7 +402,8 @@ static partial class Program
                 .WithHttpHealthCheck("/compliance/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var leaveService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_LeaveService_Api>("LeaveService")
@@ -404,7 +419,8 @@ static partial class Program
                 .WithHttpHealthCheck("/leave/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var lifecycleService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_LifecycleService_Api>("LifecycleService")
@@ -418,7 +434,8 @@ static partial class Program
                 .WithHttpHealthCheck("/lifecycle/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var performanceService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PerformanceService_Api>("PerformanceService")
@@ -434,7 +451,8 @@ static partial class Program
                 .WithHttpHealthCheck("/performance/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var contactService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ContactService_Api>("ContactService")
@@ -450,7 +468,8 @@ static partial class Program
                 .WithHttpHealthCheck("/contact/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var currencyService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CurrencyService_Api>("CurrencyService")
@@ -463,7 +482,8 @@ static partial class Program
                 .WithHttpHealthCheck("/currency/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var quotationService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_QuotationService_Api>("QuotationService")
@@ -476,7 +496,8 @@ static partial class Program
                 .WithHttpHealthCheck("/quotation/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var invoiceService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_InvoiceService_Api>("InvoiceService")
@@ -491,7 +512,8 @@ static partial class Program
                 .WithHttpHealthCheck("/invoice/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var materialService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_MaterialService_Api>("MaterialService")
@@ -504,7 +526,8 @@ static partial class Program
                 .WithHttpHealthCheck("/material/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var pricingService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PricingService_Api>("PricingService")
@@ -519,7 +542,8 @@ static partial class Program
                 .WithHttpHealthCheck("/pricing/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var orderService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_OrderService_Api>("OrderService")
@@ -540,7 +564,8 @@ static partial class Program
                 .WithHttpHealthCheck("/order/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var deliveryService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_DeliveryService_Api>("DeliveryService")
@@ -555,7 +580,8 @@ static partial class Program
                 .WithHttpHealthCheck("/delivery/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var paymentService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PaymentService_Api>("PaymentService")
@@ -568,7 +594,8 @@ static partial class Program
                 .WithHttpHealthCheck("/payment/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var pdfService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PdfService_Api>("PdfService")
@@ -584,7 +611,8 @@ static partial class Program
                 .WithHttpHealthCheck("/pdf/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var purchaseOrderService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PurchaseOrderService_Api>("PurchaseOrderService")
@@ -597,7 +625,8 @@ static partial class Program
                 .WithHttpHealthCheck("/purchase-order/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var receiptService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ReceiptService_Api>("ReceiptService")
@@ -611,7 +640,8 @@ static partial class Program
                 .WithHttpHealthCheck("/receipt/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var supplierService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_SupplierService_Api>("SupplierService")
@@ -627,7 +657,8 @@ static partial class Program
                 .WithHttpHealthCheck("/supplier/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var chatbotService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ChatbotService_Api>("ChatbotService")
@@ -667,7 +698,8 @@ static partial class Program
                 .WithHttpHealthCheck("/chatbot/aspire-liveness"),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         var intranetBff = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
@@ -690,12 +722,30 @@ static partial class Program
                 .WithReference(complianceService)
                 .WithReference(performanceService)
                 .WithReference(compensationService)
+                .WithReference(accountingService)
+                .WithReference(receiptService)
+                .WithReference(lifecycleService)
+                .WithReference(purchaseOrderService)
+                .WithReference(leaveService)
+                .WithReference(pricingService)
+                .WithReference(notificationService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
-                .WithHttpHealthCheck("/intranet/aspire-liveness"),
+                .WithHttpHealthCheck("/intranet/aspire-liveness")
+                .WithHttpCommand(
+                    path: "/api/seed/customers",
+                    displayName: "Seed Customer Data",
+                    commandOptions: new HttpCommandOptions
+                    {
+                        IconName = "Database",
+                        IconVariant = IconVariant.Filled,
+                        IsHighlighted = true,
+                        Description = "Seed Maliev customer data (Company, Customer, Addresses)"
+                    }),
             config,
             grafana,
-            otelCollector);
+            otelCollector,
+            environmentName);
 
         // --- Python Services ---
         var geometryService = builder.AddPythonApp("maliev-geometryservice", "../../Maliev.GeometryService", "src/main.py")
@@ -715,10 +765,11 @@ static partial class Program
         IResourceBuilder<ProjectResource> project,
         SharedConfiguration config,
         IResourceBuilder<ContainerResource> grafana,
-        IResourceBuilder<IResource> otelCollector)
+        IResourceBuilder<IResource> otelCollector,
+        string environmentName)
     {
         return project
-            .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+            .WithEnvironment("ASPNETCORE_ENVIRONMENT", environmentName)
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
             .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
             .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)  // RSA private key for JWT signing

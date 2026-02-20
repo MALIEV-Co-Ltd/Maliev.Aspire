@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Maliev.Aspire.AppHost.Extensions;
 
@@ -32,8 +33,8 @@ public static class MalievResourceExtensions
     }
 
     /// <summary>
-    /// Configures a dedicated seeder instance for the target service using a specific seeder class.
-    /// The seeder will appear as a child process in the dashboard and run only after the service and database are ready.
+    /// Configures a dedicated seeder instance for the target service that can be manually triggered from the dashboard.
+    /// The seeder appears as a child resource with a "Seed Database" command button.
     /// </summary>
     /// <param name="targetService">The service to seed the database for.</param>
     /// <param name="database">The database resource to seed.</param>
@@ -42,6 +43,7 @@ public static class MalievResourceExtensions
         this IResourceBuilder<ProjectResource> targetService,
         IResourceBuilder<PostgresDatabaseResource> database,
         string? seederName = null)
+        where TSeeder : class
     {
         var seederClassName = typeof(TSeeder).Name;
         var seederProjectName = seederName ??
@@ -51,13 +53,30 @@ public static class MalievResourceExtensions
             .AddProject(seederProjectName,
                 "../Maliev.Aspire.DatabaseSeeder/Maliev.Aspire.DatabaseSeeder.csproj")
             .WithEnvironment("SEED_TARGET", seederClassName)
-            .WithReference(database) // Let Aspire auto-name connection
-            .WaitFor(targetService)
-            .WaitFor(database)
+            .WithReference(database)
+            .WithExplicitStart()
             .WithParentRelationship(targetService);
 
-        // Copy parent environment explicitly (cleaner than callback enumeration)
         CopyParentEnvironment(seeder, targetService);
+
+        seeder.WithCommand(
+            name: "seed-database",
+            displayName: "Seed Database",
+            executeCommand: async context =>
+            {
+                var commandService = context.ServiceProvider.GetRequiredService<ResourceCommandService>();
+                return await commandService.ExecuteCommandAsync(
+                    resource: seeder.Resource,
+                    commandName: "resource-start",
+                    cancellationToken: context.CancellationToken);
+            },
+            commandOptions: new CommandOptions
+            {
+                IconName = "Database",
+                IconVariant = IconVariant.Filled,
+                IsHighlighted = true,
+                Description = $"Manually seed database using {seederClassName}"
+            });
 
         return targetService;
     }
@@ -71,7 +90,6 @@ public static class MalievResourceExtensions
     {
         seeder.WithEnvironment(context =>
         {
-            // Get parent's environment annotations
             var parentEnvs = parent.Resource.Annotations
                 .OfType<EnvironmentCallbackAnnotation>();
 
@@ -80,7 +98,6 @@ public static class MalievResourceExtensions
                 callback.Callback(context);
             }
 
-            // Remove problematic variables for console apps
             context.EnvironmentVariables.Remove("ASPNETCORE_URLS");
             context.EnvironmentVariables.Remove("ASPNETCORE_HTTPS_PORT");
         });

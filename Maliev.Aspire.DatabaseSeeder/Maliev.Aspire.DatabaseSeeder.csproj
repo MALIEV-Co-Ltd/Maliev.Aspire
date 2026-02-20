@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Maliev.IAMService\Maliev.IAMService.Data\Maliev.IAMService.Data.csproj" />
     <ProjectReference Include="..\..\Maliev.CountryService\Maliev.CountryService.Data\Maliev.CountryService.Data.csproj" />
+    <ProjectReference Include="..\..\Maliev.CustomerService\Maliev.CustomerService.Data\Maliev.CustomerService.Data.csproj" />
     <ProjectReference Include="..\..\Maliev.EmployeeService\Maliev.EmployeeService.Domain\Maliev.EmployeeService.Domain.csproj" />
     <ProjectReference Include="..\..\Maliev.EmployeeService\Maliev.EmployeeService.Infrastructure\Maliev.EmployeeService.Infrastructure.csproj" />
     <ProjectReference Include="..\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" />

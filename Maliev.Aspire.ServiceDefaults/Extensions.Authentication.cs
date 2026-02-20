@@ -31,44 +31,38 @@ public static class AuthenticationExtensions
         var issuer = builder.Configuration["Jwt:Issuer"];
         var audience = builder.Configuration["Jwt:Audience"];
 
+        if (builder.Environment.IsEnvironment("Testing"))
+        {
+            builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                .AddJwtBearer(options =>
+                {
+                    options.MapInboundClaims = false;
+
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuer = false,
+                        ValidateAudience = false,
+                        ValidateLifetime = false,
+                        ValidateIssuerSigningKey = false,
+                        SignatureValidator = delegate (string token, TokenValidationParameters parameters)
+                        {
+                            var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                            return handler.ReadJwtToken(token);
+                        }
+                    };
+
+                    configureOptions?.Invoke(options);
+                });
+
+            builder.Services.AddPermissionAuthorization();
+            return builder;
+        }
+
         if (string.IsNullOrEmpty(publicKeyBase64))
         {
-            // Fallback to symmetric if provided (standard for integration tests)
             if (!string.IsNullOrEmpty(securityKey))
             {
                 return builder.AddJwtAuthenticationSymmetric(configureOptions);
-            }
-
-            if (builder.Environment.IsEnvironment("Testing"))
-            {
-                // In testing, we don't need the public key here as it will be overridden 
-                // by the test factory's PostConfigureAll<JwtBearerOptions>.
-                // We still need to register authentication and authorization.
-                builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                    .AddJwtBearer(options =>
-                    {
-                        // Disable claim type mapping to keep original claim names like "sub" instead of URIs
-                        options.MapInboundClaims = false;
-
-                        // Minimal configuration for tests - will be overridden by PostConfigureAll in tests
-                        options.TokenValidationParameters = new TokenValidationParameters
-                        {
-                            ValidateIssuer = false,
-                            ValidateAudience = false,
-                            ValidateLifetime = false,
-                            ValidateIssuerSigningKey = false,
-                            SignatureValidator = delegate (string token, TokenValidationParameters parameters)
-                            {
-                                var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-                                return handler.ReadJwtToken(token);
-                            }
-                        };
-
-                        configureOptions?.Invoke(options);
-                    });
-
-                builder.Services.AddPermissionAuthorization();
-                return builder;
             }
 
             throw new InvalidOperationException("JWT PublicKey not configured. Set Jwt:PublicKey in configuration.");

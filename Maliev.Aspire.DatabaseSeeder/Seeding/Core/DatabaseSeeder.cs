@@ -32,7 +32,7 @@ public abstract class DatabaseSeeder<TContext> : IDatabaseSeeder where TContext 
     {
         Logger.LogInformation("Ensuring database is ready for {Context}...", typeof(TContext).Name);
         await WaitForDatabaseAsync(cancellationToken);
-        
+
         Logger.LogInformation("Applying migrations for {Context}...", typeof(TContext).Name);
         await Context.Database.MigrateAsync(cancellationToken);
 
