@@ -1,4 +1,5 @@
 using Maliev.MessagingContracts.Generated;
+using Maliev.MessagingContracts.Contracts.Iam;
 using Microsoft.Extensions.Logging;
 
 namespace Maliev.Aspire.ServiceDefaults.IAM;
