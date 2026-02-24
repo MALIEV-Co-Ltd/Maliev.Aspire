@@ -6,6 +6,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Microsoft.Extensions.Hosting;
 
 // Standardized HTTP client extensions for Maliev microservices.
+/// <summary>
+/// Extension methods for configuring HTTP clients with standardized resilience and authentication.
+/// </summary>
 public static class HttpClientExtensions
 {
     /// <summary>

@@ -65,9 +65,17 @@
     <Project Path="..\Maliev.Intranet\Maliev.Intranet.Client\Maliev.Intranet.Client.csproj" />
     <Project Path="..\Maliev.Intranet\Maliev.Intranet.Shared\Maliev.Intranet.Shared.csproj" />
   </Folder>
+  <Folder Name="/Inventory Service/">
+    <Project Path="../Maliev.InventoryService/Maliev.InventoryService.Api/Maliev.InventoryService.Api.csproj" />
+    <Project Path="../Maliev.InventoryService/Maliev.InventoryService.Data/Maliev.InventoryService.Data.csproj" />
+  </Folder>
   <Folder Name="/Invoice Service/">
     <Project Path="..\Maliev.InvoiceService\Maliev.InvoiceService.Api\Maliev.InvoiceService.Api.csproj" />
     <Project Path="..\Maliev.InvoiceService\Maliev.InvoiceService.Data\Maliev.InvoiceService.Data.csproj" />
+  </Folder>
+  <Folder Name="/Job Service/">
+    <Project Path="../Maliev.JobService/Maliev.JobService.Api/Maliev.JobService.Api.csproj" />
+    <Project Path="../Maliev.JobService/Maliev.JobService.Data/Maliev.JobService.Data.csproj" />
   </Folder>
   <Folder Name="/Leave Service/">
     <Project Path="..\Maliev.LeaveService\Maliev.LeaveService.Api\Maliev.LeaveService.Api.csproj" />

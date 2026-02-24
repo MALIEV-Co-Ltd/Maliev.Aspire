@@ -9,11 +9,16 @@ public class IAMRegistrationHealthCheck : IHealthCheck
 {
     private readonly IAMRegistrationStatusTracker _statusTracker;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IAMRegistrationHealthCheck"/> class.
+    /// </summary>
+    /// <param name="statusTracker">The status tracker.</param>
     public IAMRegistrationHealthCheck(IAMRegistrationStatusTracker statusTracker)
     {
         _statusTracker = statusTracker ?? throw new ArgumentNullException(nameof(statusTracker));
     }
 
+    /// <inheritdoc />
     public Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)

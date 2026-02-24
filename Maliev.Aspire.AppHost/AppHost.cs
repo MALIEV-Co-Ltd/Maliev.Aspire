@@ -186,6 +186,8 @@ static partial class Program
             Employee: postgres.AddDatabase("employee-app-db"),
             IAM: postgres.AddDatabase("iam-app-db"),
             Invoice: postgres.AddDatabase("invoice-app-db"),
+            Inventory: postgres.AddDatabase("inventory-app-db"),
+            Job: postgres.AddDatabase("job-app-db"),
             Leave: postgres.AddDatabase("leave-app-db"),
             Lifecycle: postgres.AddDatabase("lifecycle-app-db"),
             Material: postgres.AddDatabase("material-app-db"),
@@ -529,6 +531,21 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        var inventoryService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_InventoryService_Api>("InventoryService")
+                .WithReference(databases.Inventory, "InventoryDbContext")
+                .WaitFor(databases.Inventory)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(materialService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/inventory/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
         var pricingService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PricingService_Api>("PricingService")
                 .WithReference(databases.Pricing, "PricingDbContext")
@@ -562,6 +579,21 @@ static partial class Program
                 .WaitFor(notificationService)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/order/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        var jobService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_JobService_Api>("JobService")
+                .WithReference(databases.Job, "JobDbContext")
+                .WaitFor(databases.Job)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(orderService)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/job/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -729,6 +761,8 @@ static partial class Program
                 .WithReference(leaveService)
                 .WithReference(pricingService)
                 .WithReference(notificationService)
+                .WithReference(jobService)
+                .WithReference(inventoryService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
                 .WithHttpHealthCheck("/intranet/aspire-liveness")
@@ -825,6 +859,8 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Employee,
     IResourceBuilder<PostgresDatabaseResource> IAM,
     IResourceBuilder<PostgresDatabaseResource> Invoice,
+    IResourceBuilder<PostgresDatabaseResource> Inventory,
+    IResourceBuilder<PostgresDatabaseResource> Job,
     IResourceBuilder<PostgresDatabaseResource> Leave,
     IResourceBuilder<PostgresDatabaseResource> Lifecycle,
     IResourceBuilder<PostgresDatabaseResource> Material,

@@ -10,6 +10,15 @@ namespace Microsoft.Extensions.Hosting;
 /// </summary>
 public static class DatabaseExtensions
 {
+    /// <summary>
+    /// Adds a PostgreSQL DbContext with standardized configuration.
+    /// </summary>
+    /// <typeparam name="TContext">The DbContext type to register.</typeparam>
+    /// <param name="builder">The host application builder.</param>
+    /// <param name="connectionName">The name of the connection string.</param>
+    /// <param name="enableDynamicJson">Whether to enable dynamic JSON support.</param>
+    /// <param name="configureOptions">Optional action to configure DbContext options.</param>
+    /// <returns>The configured builder.</returns>
     public static IHostApplicationBuilder AddPostgresDbContext<TContext>(
         this IHostApplicationBuilder builder,
         string? connectionName = null,

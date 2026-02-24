@@ -16,6 +16,12 @@ public class RedisCacheService : ICacheService
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly string _instanceName;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="RedisCacheService"/> class.
+    /// </summary>
+    /// <param name="redis">The Redis connection multiplexer.</param>
+    /// <param name="options">The Redis cache options.</param>
+    /// <param name="logger">The logger instance.</param>
     public RedisCacheService(
         IConnectionMultiplexer redis,
         IOptions<RedisCacheOptions> options,
@@ -32,6 +38,7 @@ public class RedisCacheService : ICacheService
         };
     }
 
+    /// <inheritdoc />
     public async Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default) where T : class
     {
         try
@@ -60,6 +67,7 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <inheritdoc />
     public async Task SetAsync<T>(string key, T value, TimeSpan ttl, CancellationToken cancellationToken = default) where T : class
     {
         try
@@ -85,6 +93,7 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <inheritdoc />
     public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
     {
         try
@@ -99,6 +108,7 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <inheritdoc />
     public async Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
     {
         if (!_redis.IsConnected)
@@ -132,6 +142,7 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <inheritdoc />
     public async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
     {
         try
@@ -147,6 +158,7 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <inheritdoc />
     public async Task<long> IncrementAsync(string key, TimeSpan ttl, CancellationToken cancellationToken = default)
     {
         try

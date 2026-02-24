@@ -3,12 +3,20 @@ using Microsoft.Extensions.Options;
 
 namespace Maliev.Aspire.ServiceDefaults.Authorization;
 
+/// <summary>
+/// Custom authorization policy provider that dynamically creates policies based on a "Permission:" prefix.
+/// </summary>
 public class PermissionAuthorizationPolicyProvider : DefaultAuthorizationPolicyProvider
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PermissionAuthorizationPolicyProvider"/> class.
+    /// </summary>
+    /// <param name="options">The authorization options.</param>
     public PermissionAuthorizationPolicyProvider(IOptions<AuthorizationOptions> options) : base(options)
     {
     }
 
+    /// <inheritdoc />
     public override async Task<AuthorizationPolicy?> GetPolicyAsync(string policyName)
     {
         if (policyName.StartsWith("Permission:", StringComparison.OrdinalIgnoreCase))

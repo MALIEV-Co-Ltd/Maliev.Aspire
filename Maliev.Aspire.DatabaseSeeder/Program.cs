@@ -9,8 +9,16 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Infrastructure;
 
 namespace Maliev.Aspire.DatabaseSeeder;
 
+/// <summary>
+/// Entry point for the database seeder application.
+/// </summary>
 public class SeederRunner
 {
+    /// <summary>
+    /// The main entry point for the application.
+    /// </summary>
+    /// <param name="args">The command line arguments.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public static async Task Main(string[] args)
     {
         var builder = Host.CreateApplicationBuilder(args);

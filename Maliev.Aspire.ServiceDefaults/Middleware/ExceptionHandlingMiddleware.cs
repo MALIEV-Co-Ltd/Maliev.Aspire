@@ -6,12 +6,21 @@ using System.Text.Json;
 
 namespace Maliev.Aspire.ServiceDefaults.Middleware;
 
+/// <summary>
+/// Middleware that provides standardized exception handling across all microservices.
+/// </summary>
 public class ExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
     private readonly IHostEnvironment _environment;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ExceptionHandlingMiddleware"/> class.
+    /// </summary>
+    /// <param name="next">The next middleware in the pipeline.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <param name="environment">The host environment.</param>
     public ExceptionHandlingMiddleware(
         RequestDelegate next,
         ILogger<ExceptionHandlingMiddleware> logger,
@@ -22,6 +31,10 @@ public class ExceptionHandlingMiddleware
         _environment = environment;
     }
 
+    /// <summary>
+    /// Invokes the middleware.
+    /// </summary>
+    /// <param name="context">The HTTP context.</param>
     public async Task InvokeAsync(HttpContext context)
     {
         try

@@ -32,7 +32,7 @@ public class EmployeeLifecycleTests(ITestOutputHelper output) : MalievTestBase(o
         Assert.Equal(HttpStatusCode.Created, hireResponse.StatusCode);
         var employee = await hireResponse.Content.ReadFromJsonAsync<EmployeeSummaryDto>();
         Assert.NotNull(employee);
-        Output.WriteLine($"✓ Employee hired: {employee.Name}");
+        Output.WriteLine($"✓ Employee hired: {employee.FullName}");
 
         // 3. Verify Onboarding Triggered
         Output.WriteLine("Scenario: Verify Onboarding Checklist");

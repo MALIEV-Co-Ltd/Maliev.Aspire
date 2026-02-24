@@ -1,7 +1,16 @@
 namespace Maliev.Aspire.ServiceDefaults.IAM;
 
+/// <summary>
+/// Utility class for matching required permissions against a set of user permission claims.
+/// </summary>
 public static class PermissionMatcher
 {
+    /// <summary>
+    /// Checks if any of the user permissions match the required permission.
+    /// </summary>
+    /// <param name="requiredPermission">The permission required to access the resource.</param>
+    /// <param name="userPermissions">The user's set of permission claims.</param>
+    /// <returns>True if the user has the required permission; otherwise, false.</returns>
     public static bool Match(string requiredPermission, IEnumerable<string> userPermissions)
     {
         if (string.IsNullOrWhiteSpace(requiredPermission)) return false;
@@ -21,6 +30,13 @@ public static class PermissionMatcher
         return permissionsList.Any(p => IsMatch(requiredPermission, p));
     }
 
+    /// <summary>
+    /// Performs a single comparison between a required permission and a claim string.
+    /// Supports hierarchical matching with wildcards (e.g., "invoices.*").
+    /// </summary>
+    /// <param name="required">The required permission.</param>
+    /// <param name="claim">The user's permission claim.</param>
+    /// <returns>True if they match; otherwise, false.</returns>
     public static bool IsMatch(string required, string claim)
     {
         if (string.IsNullOrWhiteSpace(required) || string.IsNullOrWhiteSpace(claim)) return false;

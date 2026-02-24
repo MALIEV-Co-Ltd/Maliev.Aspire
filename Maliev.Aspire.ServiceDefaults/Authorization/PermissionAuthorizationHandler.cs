@@ -9,6 +9,9 @@ using System.Security.Claims;
 
 namespace Maliev.Aspire.ServiceDefaults.Authorization;
 
+/// <summary>
+/// Authorization handler that validates <see cref="PermissionRequirement"/> against the IAM service or JWT claims.
+/// </summary>
 public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionRequirement>
 {
     private readonly IServiceProvider _serviceProvider;
@@ -17,6 +20,14 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
     private readonly ILogger<PermissionAuthorizationHandler> _logger;
     private readonly IAuthMetrics? _authMetrics;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PermissionAuthorizationHandler"/> class.
+    /// </summary>
+    /// <param name="serviceProvider">The service provider.</param>
+    /// <param name="httpContextAccessor">The HTTP context accessor.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <param name="iamClient">The optional IAM service client.</param>
+    /// <param name="authMetrics">The optional authentication metrics collector.</param>
     public PermissionAuthorizationHandler(
         IServiceProvider serviceProvider,
         IHttpContextAccessor httpContextAccessor,
@@ -31,6 +42,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         _authMetrics = authMetrics;
     }
 
+    /// <inheritdoc />
     protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
         PermissionRequirement requirement)

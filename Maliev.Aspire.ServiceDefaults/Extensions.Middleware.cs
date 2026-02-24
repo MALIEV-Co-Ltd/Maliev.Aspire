@@ -5,6 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Microsoft.Extensions.Hosting;
 
+/// <summary>
+/// Extension methods for registering and using standard middleware.
+/// </summary>
 public static class MiddlewareExtensions
 {
     /// <summary>
@@ -59,28 +62,31 @@ public static class MiddlewareExtensions
     }
 }
 
+/// <summary>
+/// Options for configuring standard middleware behavior.
+/// </summary>
 public class MiddlewareOptions
 {
     /// <summary>
-    /// Enable request/response logging (can be verbose).
+    /// Gets or sets a value indicating whether to enable request/response logging (can be verbose).
     /// Default: false
     /// </summary>
     public bool EnableRequestLogging { get; set; } = false;
 
     /// <summary>
-    /// Include stack traces in error responses in development.
+    /// Gets or sets a value indicating whether to include stack traces in error responses in development.
     /// Default: true
     /// </summary>
     public bool IncludeStackTraceInDevelopment { get; set; } = true;
 
     /// <summary>
-    /// Correlation ID header name.
+    /// Gets or sets the correlation ID header name.
     /// Default: X-Correlation-ID
     /// </summary>
     public string CorrelationIdHeaderName { get; set; } = "X-Correlation-ID";
 
     /// <summary>
-    /// Custom security headers to add/override.
+    /// Gets or sets the custom security headers to add/override.
     /// </summary>
     public Dictionary<string, string> CustomSecurityHeaders { get; set; } = new();
 }

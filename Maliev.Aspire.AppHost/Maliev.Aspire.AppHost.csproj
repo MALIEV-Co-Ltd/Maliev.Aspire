@@ -21,11 +21,6 @@
     <PackageReference Include="Aspire.Hosting.Redis" Version="13.1.1" />
   </ItemGroup>
 
-  <!-- Force rebuild ServiceDefaults before building AppHost to ensure all services get latest DLL -->
-  <Target Name="EnsureServiceDefaultsBuilt" BeforeTargets="BeforeBuild">
-    <MSBuild Projects="..\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
-  </Target>
-
   <ItemGroup>
     <!-- Explicitly reference ServiceDefaults to ensure Visual Studio tracks it for rebuild -->
     <ProjectReference Include="..\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" IsAspireProjectResource="false" />
@@ -43,6 +38,8 @@
     <ProjectReference Include="..\..\Maliev.EmployeeService\Maliev.EmployeeService.Api\Maliev.EmployeeService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.InvoiceService\Maliev.InvoiceService.Api\Maliev.InvoiceService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.InventoryService\Maliev.InventoryService.Api\Maliev.InventoryService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.JobService\Maliev.JobService.Api\Maliev.JobService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.LeaveService\Maliev.LeaveService.Api\Maliev.LeaveService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.LifecycleService\Maliev.LifecycleService.Api\Maliev.LifecycleService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.MaterialService\Maliev.MaterialService.Api\Maliev.MaterialService.Api.csproj" />

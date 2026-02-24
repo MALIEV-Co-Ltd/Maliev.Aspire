@@ -11,6 +11,11 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
     private readonly IServiceAccountTokenProvider _tokenProvider;
     private readonly ILogger<ServiceAccountAuthenticationHandler> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ServiceAccountAuthenticationHandler"/> class.
+    /// </summary>
+    /// <param name="tokenProvider">The service account token provider.</param>
+    /// <param name="logger">The logger instance.</param>
     public ServiceAccountAuthenticationHandler(
         IServiceAccountTokenProvider tokenProvider,
         ILogger<ServiceAccountAuthenticationHandler> logger)
@@ -19,6 +24,7 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <inheritdoc />
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
@@ -61,6 +67,7 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
         }
     }
 
+    /// <inheritdoc />
     protected override void Dispose(bool disposing)
     {
         // Don't dispose InnerHandler - it's managed by HttpClient factory

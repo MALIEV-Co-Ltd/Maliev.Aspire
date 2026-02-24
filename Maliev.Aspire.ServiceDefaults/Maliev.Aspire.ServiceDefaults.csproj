@@ -42,8 +42,8 @@
     <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
 
     <!-- OpenTelemetry -->
-    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.2.0" />
-    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.3.0" />
+    <PackageReference Include="Microsoft.Extensions.ServiceDiscovery" Version="10.3.0" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.14.0-beta.1" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
@@ -54,17 +54,17 @@
     <!-- Infrastructure -->
     <PackageReference Include="MassTransit.RabbitMQ" Version="[8.5.7, 9.0.0)" />
     <PackageReference Include="MassTransit.Abstractions" Version="[8.5.7, 9.0.0)" />
-    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.2" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.3" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
 
     <!-- Authentication -->
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.2" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.15.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.3" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.16.0" />
 
     <!-- API Documentation -->
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
-    <PackageReference Include="Scalar.AspNetCore" Version="2.12.24" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
+    <PackageReference Include="Scalar.AspNetCore" Version="2.12.46" />
 
     <!-- API Versioning -->
     <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.1" />

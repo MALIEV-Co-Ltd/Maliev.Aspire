@@ -10,6 +10,14 @@ namespace Microsoft.Extensions.Hosting;
 /// </summary>
 public static class ApiDocumentationExtensions
 {
+    /// <summary>
+    /// Maps the API documentation (OpenAPI and Scalar) endpoints.
+    /// </summary>
+    /// <param name="app">The web application.</param>
+    /// <param name="servicePrefix">The optional URL prefix for the service.</param>
+    /// <param name="documentName">The OpenAPI document name.</param>
+    /// <param name="configureScalar">Optional action to configure Scalar options.</param>
+    /// <returns>The web application.</returns>
     public static WebApplication MapApiDocumentation(
         this WebApplication app,
         string? servicePrefix = null,
@@ -39,6 +47,14 @@ public static class ApiDocumentationExtensions
         return app;
     }
 
+    /// <summary>
+    /// Adds standard OpenAPI documentation to the service.
+    /// </summary>
+    /// <param name="builder">The host application builder.</param>
+    /// <param name="title">The API title.</param>
+    /// <param name="description">The API description.</param>
+    /// <param name="documentName">The OpenAPI document name.</param>
+    /// <returns>The configured builder.</returns>
     public static IHostApplicationBuilder AddStandardOpenApi(
         this IHostApplicationBuilder builder,
         string? title = null,
@@ -62,6 +78,13 @@ public static class ApiDocumentationExtensions
         return builder;
     }
 
+    /// <summary>
+    /// Maps the default API documentation endpoints.
+    /// </summary>
+    /// <param name="app">The web application.</param>
+    /// <param name="documentName">The OpenAPI document name.</param>
+    /// <param name="configureScalar">Optional action to configure Scalar options.</param>
+    /// <returns>The web application.</returns>
     public static WebApplication MapApiDocumentationDefault(
         this WebApplication app,
         string documentName = "v1",

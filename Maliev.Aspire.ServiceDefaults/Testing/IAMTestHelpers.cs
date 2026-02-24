@@ -7,6 +7,9 @@ using System.Text;
 
 namespace Maliev.Aspire.ServiceDefaults.Testing;
 
+/// <summary>
+/// Helper methods for testing IAM-related functionality.
+/// </summary>
 public static class IAMTestHelpers
 {
     private static RSA? _testRsa;

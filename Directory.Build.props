@@ -12,7 +12,6 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <NoWarn>$(NoWarn);1591;1573</NoWarn>
   </PropertyGroup>
 
   <!-- Disable TreatWarningsAsErrors for generated contracts -->

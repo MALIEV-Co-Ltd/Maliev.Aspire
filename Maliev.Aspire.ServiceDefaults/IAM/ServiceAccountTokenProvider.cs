@@ -27,6 +27,11 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
     private readonly IConfiguration _configuration;
     private readonly string _serviceName;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ServiceAccountTokenProvider"/> class.
+    /// </summary>
+    /// <param name="configuration">The configuration instance.</param>
+    /// <param name="serviceName">The name of the service.</param>
     public ServiceAccountTokenProvider(IConfiguration configuration, string serviceName)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));

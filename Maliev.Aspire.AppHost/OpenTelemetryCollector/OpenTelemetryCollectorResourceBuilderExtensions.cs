@@ -3,6 +3,14 @@ using Microsoft.Extensions.Logging;
 
 namespace Maliev.Aspire.AppHost.OpenTelemetryCollector;
 
+/// <summary>
+/// Provides extension methods for configuring and adding an OpenTelemetry Collector resource to a distributed
+/// application builder.
+/// </summary>
+/// <remarks>This class enables integration of the OpenTelemetry Collector into distributed applications, allowing
+/// for centralized telemetry data collection and processing. It manages configuration settings such as the collector's
+/// image name, version, endpoints, and environment variables required for operation. Use these extensions to streamline
+/// the setup of telemetry infrastructure within Aspire-based applications.</remarks>
 public static class OpenTelemetryCollectorResourceBuilderExtensions
 {
     private const string OtelExporterOtlpEndpoint = "OTEL_EXPORTER_OTLP_ENDPOINT";
@@ -12,6 +20,18 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
     private const string OTelCollectorImageName = "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib";
     private const string OTelCollectorImageTag = "0.114.0";
 
+    /// <summary>
+    /// Adds an OpenTelemetry collector resource to the distributed application builder, configuring it with the
+    /// specified name and settings from the provided configuration file.
+    /// </summary>
+    /// <remarks>This method configures the OpenTelemetry collector with endpoints and environment variables
+    /// to enable telemetry forwarding. It also ensures the collector is properly initialized with the specified
+    /// configuration file and updates resource annotations to forward telemetry to the collector's endpoint.</remarks>
+    /// <param name="builder">The distributed application builder to which the OpenTelemetry collector resource will be added.</param>
+    /// <param name="name">The name to assign to the OpenTelemetry collector resource.</param>
+    /// <param name="configFileLocation">The file path to the OpenTelemetry collector configuration file. Must point to a valid YAML configuration.</param>
+    /// <returns>An instance of <see cref="IResourceBuilder{T}"/> of <see cref="OpenTelemetryCollectorResource"/> that can be used to further configure the
+    /// OpenTelemetry collector resource.</returns>
     public static IResourceBuilder<OpenTelemetryCollectorResource> AddOpenTelemetryCollector(this IDistributedApplicationBuilder builder, string name, string configFileLocation)
     {
         var url = builder.Configuration[DashboardOtlpUrlVariableName] ?? DashboardOtlpUrlDefaultValue;
