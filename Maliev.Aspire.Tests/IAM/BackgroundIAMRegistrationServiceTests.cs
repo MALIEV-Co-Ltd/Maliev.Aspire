@@ -1,5 +1,5 @@
 using Maliev.Aspire.ServiceDefaults.IAM;
-using Maliev.MessagingContracts.Generated;
+using Maliev.MessagingContracts.Contracts.Iam;
 using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
