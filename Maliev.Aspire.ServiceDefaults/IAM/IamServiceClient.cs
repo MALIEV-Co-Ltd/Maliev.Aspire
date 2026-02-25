@@ -131,7 +131,42 @@ public partial class IamServiceClient : IIamServiceClient
         }
     }
 
+    /// <inheritdoc />
+    public async Task<IEnumerable<string>> GetAuthorizedResourcesAsync(
+        string principalId,
+        string permissionId,
+        string resourceType,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await GetHttpClient().GetAsync(
+                $"/iam/v1/auth/authorized-resources?principalId={principalId}&permissionId={permissionId}&resourceType={resourceType}",
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to fetch authorized resources for principal {PrincipalId}. Status: {StatusCode}", principalId, response.StatusCode);
+                return Enumerable.Empty<string>();
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<AuthorizedResourcesResponse>(cancellationToken: cancellationToken);
+            return result?.ResourceIds ?? Enumerable.Empty<string>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error occurred while fetching authorized resources for principal {PrincipalId}", principalId);
+            return Enumerable.Empty<string>();
+        }
+    }
+
     // DTOs for IAM API communication
+    private sealed record AuthorizedResourcesResponse(
+        string PrincipalId,
+        string PermissionId,
+        string ResourceType,
+        List<string> ResourceIds);
+
     private sealed record PermissionResolutionResponse(
         string PrincipalId,
         List<string> Permissions,
