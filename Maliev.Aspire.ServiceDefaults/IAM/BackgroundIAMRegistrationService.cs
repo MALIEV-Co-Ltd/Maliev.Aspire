@@ -1,4 +1,3 @@
-using Maliev.MessagingContracts.Contracts.Iam;
 using Maliev.MessagingContracts.Generated;
 using MassTransit;
 using Microsoft.Extensions.Configuration;

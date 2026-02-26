@@ -55,6 +55,12 @@
     <Project Path="..\Maliev.EmployeeService\Maliev.EmployeeService.Domain\Maliev.EmployeeService.Domain.csproj" />
     <Project Path="..\Maliev.EmployeeService\Maliev.EmployeeService.Infrastructure\Maliev.EmployeeService.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/Facility Service/">
+    <Project Path="..\Maliev.FacilityService\Maliev.FacilityService.Api\Maliev.FacilityService.Api.csproj" />
+    <Project Path="..\Maliev.FacilityService\Maliev.FacilityService.Application\Maliev.FacilityService.Application.csproj" />
+    <Project Path="..\Maliev.FacilityService\Maliev.FacilityService.Domain\Maliev.FacilityService.Domain.csproj" />
+    <Project Path="..\Maliev.FacilityService\Maliev.FacilityService.Infrastructure\Maliev.FacilityService.Infrastructure.csproj" />
+  </Folder>
   <Folder Name="/IAM Service/">
     <Project Path="..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
     <Project Path="..\Maliev.IAMService\Maliev.IAMService.Contracts\Maliev.IAMService.Contracts.csproj" />
