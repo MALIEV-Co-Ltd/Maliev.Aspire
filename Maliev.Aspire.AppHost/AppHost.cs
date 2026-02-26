@@ -200,7 +200,8 @@ static partial class Program
             Receipt: postgres.AddDatabase("receipt-app-db"),
             Registry: postgres.AddDatabase("registry-app-db"),
             Supplier: postgres.AddDatabase("supplier-app-db"),
-            Upload: postgres.AddDatabase("upload-app-db")
+            Upload: postgres.AddDatabase("upload-app-db"),
+            Facility: postgres.AddDatabase("facility-app-db")
         );
     }
 
@@ -256,6 +257,20 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WithHttpHealthCheck("/registry/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        var facilityService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_FacilityService_Api>("FacilityService")
+                .WithReference(databases.Facility, "FacilityDbContext")
+                .WaitFor(databases.Facility)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/facility/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -729,6 +744,7 @@ static partial class Program
                 .WithReference(leaveService)
                 .WithReference(pricingService)
                 .WithReference(notificationService)
+                .WithReference(facilityService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
                 .WithHttpHealthCheck("/intranet/aspire-liveness")
@@ -839,4 +855,5 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Receipt,
     IResourceBuilder<PostgresDatabaseResource> Registry,
     IResourceBuilder<PostgresDatabaseResource> Supplier,
-    IResourceBuilder<PostgresDatabaseResource> Upload);
+    IResourceBuilder<PostgresDatabaseResource> Upload,
+    IResourceBuilder<PostgresDatabaseResource> Facility);

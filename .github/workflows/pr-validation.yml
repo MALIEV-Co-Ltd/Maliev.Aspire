@@ -28,9 +28,9 @@ jobs:
       - id: set-version
         run: |
           BASE_BRANCH="${{ github.base_ref }}"
-          if ["$BASE_BRANCH" == "main"]; then
+          if [[ "$BASE_BRANCH" == "main" ]]; then
             VERSION_FORMAT="1.0.*"
-          elif ["$BASE_BRANCH" == "staging"]; then
+          elif [[ "$BASE_BRANCH" == "staging" ]]; then
             VERSION_FORMAT="1.0.*-beta*"
           else
             VERSION_FORMAT="1.0.*-alpha*"
@@ -60,7 +60,7 @@ jobs:
   publish-validation:
     name: Validate NuGet Package
     runs-on: ubuntu-latest
-    needs: build-and-test
+    needs: [prep, build-and-test]
     
     steps:
       - name: Checkout code
@@ -87,7 +87,7 @@ jobs:
 
       - name: Verify Package Created
         run: |
-          if [! -f ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg]; then
+          if [ ! -f ./nupkg/Maliev.Aspire.ServiceDefaults.0.0.0-validation.nupkg ]; then
             echo "ERROR: NuGet package was not created!"
             exit 1
           fi
