@@ -1,5 +1,6 @@
 using Maliev.MessagingContracts;
 using Maliev.MessagingContracts.Contracts.Iam;
+using Maliev.MessagingContracts.Contracts.Shared;
 using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
