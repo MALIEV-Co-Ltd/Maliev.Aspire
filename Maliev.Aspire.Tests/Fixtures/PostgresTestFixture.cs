@@ -16,8 +16,8 @@ public class PostgresTestFixture : IAsyncLifetime
     /// </summary>
     public PostgresTestFixture()
     {
-        _container = new PostgreSqlBuilder()
-            .WithImage("postgres:18-alpine")  // Latest lightweight PostgreSQL
+        _container = 
+                new PostgreSqlBuilder().WithImage("postgres:18-alpine")  // Latest lightweight PostgreSQL
             .WithDatabase("test_db")
             .WithUsername("test_user")
             .WithPassword("test_password")
@@ -55,3 +55,7 @@ public class PostgresTestFixture : IAsyncLifetime
     /// </summary>
     public PostgreSqlContainer Container => _container;
 }
+
+
+
+
