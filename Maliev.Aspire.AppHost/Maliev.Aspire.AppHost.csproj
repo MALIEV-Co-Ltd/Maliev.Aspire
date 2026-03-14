@@ -62,11 +62,12 @@
     <ProjectReference Include="..\..\Maliev.NotificationService\Maliev.NotificationService.Api\Maliev.NotificationService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.RegistryService\Maliev.RegistryService.Api\Maliev.RegistryService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.FacilityService\Maliev.FacilityService.Api\Maliev.FacilityService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.InventoryService\Maliev.InventoryService.Api\Maliev.InventoryService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.JobService\Maliev.JobService.Api\Maliev.JobService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.Intranet\Maliev.Intranet.Bff\Maliev.Intranet.Bff.csproj" />
 
     <!-- Service Data layers for direct database seeding -->
-    <ProjectReference Include="..\..\Maliev.IAMService\Maliev.IAMService.Data\Maliev.IAMService.Data.csproj" IsAspireProjectResource="false" />
-     <ProjectReference Include="..\Maliev.Aspire.DatabaseSeeder\Maliev.Aspire.DatabaseSeeder.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\Maliev.Aspire.DatabaseSeeder\Maliev.Aspire.DatabaseSeeder.csproj" IsAspireProjectResource="false" />
 
   </ItemGroup>
 

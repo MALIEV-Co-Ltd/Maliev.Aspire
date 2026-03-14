@@ -84,7 +84,7 @@
     <Project Path="../Maliev.IAMService/Maliev.IAMService.Infrastructure/Maliev.IAMService.Infrastructure.csproj" />
     <Project Path="..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
   </Folder>
-  <Folder Name="/APIs/InventoryService/">
+  <Folder Name="/APIs/Inventory Service/">
     <Project Path="../Maliev.InventoryService/Maliev.InventoryService.Api/Maliev.InventoryService.Api.csproj" />
     <Project Path="../Maliev.InventoryService/Maliev.InventoryService.Application/Maliev.InventoryService.Application.csproj" />
     <Project Path="../Maliev.InventoryService/Maliev.InventoryService.Domain/Maliev.InventoryService.Domain.csproj" />
@@ -95,6 +95,12 @@
     <Project Path="../Maliev.InvoiceService/Maliev.InvoiceService.Domain/Maliev.InvoiceService.Domain.csproj" />
     <Project Path="../Maliev.InvoiceService/Maliev.InvoiceService.Infrastructure/Maliev.InvoiceService.Infrastructure.csproj" />
     <Project Path="..\Maliev.InvoiceService\Maliev.InvoiceService.Api\Maliev.InvoiceService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Job Service/">
+    <Project Path="../Maliev.JobService/Maliev.JobService.Api/Maliev.JobService.Api.csproj" />
+    <Project Path="../Maliev.JobService/Maliev.JobService.Application/Maliev.JobService.Application.csproj" />
+    <Project Path="../Maliev.JobService/Maliev.JobService.Domain/Maliev.JobService.Domain.csproj" />
+    <Project Path="../Maliev.JobService/Maliev.JobService.Infrastructure/Maliev.JobService.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/APIs/Leave Service/">
     <Project Path="..\Maliev.LeaveService\Maliev.LeaveService.Api\Maliev.LeaveService.Api.csproj" />

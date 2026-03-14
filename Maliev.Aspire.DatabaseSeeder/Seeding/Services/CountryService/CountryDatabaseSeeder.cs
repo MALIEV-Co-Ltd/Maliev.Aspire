@@ -1,5 +1,5 @@
-using Maliev.CountryService.Data;
-using Maliev.CountryService.Data.Entities;
+using Maliev.CountryService.Infrastructure.Data;
+using Maliev.CountryService.Domain.Entities;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;

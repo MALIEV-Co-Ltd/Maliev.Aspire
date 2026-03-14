@@ -66,8 +66,8 @@ public class SeederRunner
         // Add missing dependencies for CustomerDbContext if it's being used
         if (seedTarget.Equals("CustomerDatabaseSeeder", StringComparison.OrdinalIgnoreCase))
         {
-            builder.Services.AddSingleton<Maliev.CustomerService.Data.Interfaces.IEncryptionService, Maliev.CustomerService.Data.Security.EncryptionService>();
-            builder.Services.AddSingleton<Maliev.CustomerService.Data.Interceptors.EncryptionInterceptor>();
+            builder.Services.AddSingleton<Maliev.CustomerService.Application.Interfaces.IEncryptionService, Maliev.CustomerService.Infrastructure.Security.EncryptionService>();
+            builder.Services.AddSingleton<Maliev.CustomerService.Infrastructure.Persistence.Interceptors.EncryptionInterceptor>();
         }
 
         // 5. Register ONLY the target seeder to avoid instantiation errors for others

@@ -1,6 +1,6 @@
 using Maliev.Aspire.DatabaseSeeder.Seeding.Core;
-using Maliev.IAMService.Data;
-using Maliev.IAMService.Data.Entities;
+using Maliev.IAMService.Infrastructure.Persistence;
+using Maliev.IAMService.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;

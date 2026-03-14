@@ -201,7 +201,9 @@ static partial class Program
             Registry: postgres.AddDatabase("registry-app-db"),
             Supplier: postgres.AddDatabase("supplier-app-db"),
             Upload: postgres.AddDatabase("upload-app-db"),
-            Facility: postgres.AddDatabase("facility-app-db")
+            Facility: postgres.AddDatabase("facility-app-db"),
+            Inventory: postgres.AddDatabase("inventory-app-db"),
+            Job: postgres.AddDatabase("job-app-db")
         );
     }
 
@@ -763,6 +765,39 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        var inventoryService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_InventoryService_Api>("InventoryService")
+                .WithReference(databases.Inventory, "InventoryDbContext")
+                .WaitFor(databases.Inventory)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/inventory/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        var jobService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_JobService_Api>("JobService")
+                .WithReference(databases.Job, "JobDbContext")
+                .WaitFor(databases.Job)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithReference(orderService)
+                .WithReference(facilityService)
+                .WithReference(materialService)
+                .WithReference(notificationService)
+                .WaitFor(notificationService)
+                .WithHttpHealthCheck("/job/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
         // --- Python Services ---
         var geometryService = builder.AddPythonApp("maliev-geometryservice", "../../Maliev.GeometryService", "src/main.py")
             .WithReference(infrastructure.RabbitMQ)
@@ -856,4 +891,6 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Registry,
     IResourceBuilder<PostgresDatabaseResource> Supplier,
     IResourceBuilder<PostgresDatabaseResource> Upload,
-    IResourceBuilder<PostgresDatabaseResource> Facility);
+    IResourceBuilder<PostgresDatabaseResource> Facility,
+    IResourceBuilder<PostgresDatabaseResource> Inventory,
+    IResourceBuilder<PostgresDatabaseResource> Job);
