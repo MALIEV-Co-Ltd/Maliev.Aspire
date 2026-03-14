@@ -61,11 +61,20 @@ public static class CorsExtensions
     public static IHostApplicationBuilder AddStandardCors(
         this IHostApplicationBuilder builder)
     {
+        // Try JSON array config first (e.g. appsettings.json with array values),
+        // then fall back to a single comma-separated string value.
+        // The single-string path handles Aspire's env var injection which maps
+        // CORS__AllowedOrigins=<comma-separated> to the config key "CORS:AllowedOrigins".
         var corsOrigins = builder.Configuration
-            .GetSection("CORS:AllowedOrigins")
-            .Get<string[]>()
-            ?? builder.Configuration["CORS_ALLOWED_ORIGINS"]?.Split(',')
-            ?? Array.Empty<string>();
+                              .GetSection("CORS:AllowedOrigins")
+                              .Get<string[]>()
+                          ?? builder.Configuration["CORS:AllowedOrigins"]
+                                    ?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                          ?? builder.Configuration["CORS__AllowedOrigins"]
+                                    ?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                          ?? builder.Configuration["CORS_ALLOWED_ORIGINS"]
+                                    ?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                          ?? Array.Empty<string>();
 
         if (corsOrigins.Length == 0)
         {

@@ -135,8 +135,10 @@ public static class DatabaseExtensions
         CancellationToken cancellationToken = default)
         where TContext : DbContext
     {
-        // Enforce a 60s timeout to prevent silent hangs (e.g. database locks)
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        // Enforce a 300s timeout to handle heavy concurrent startup with 30+ services.
+        // 60s was too short when all services start simultaneously and PostgreSQL is busy
+        // creating databases. Each retry has 5-15s jitter, so 8 retries can exceed 60s.
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(300));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
         var migrationToken = linkedCts.Token;
 
@@ -185,7 +187,7 @@ public static class DatabaseExtensions
             // Log explicitly if it was our timeout
             if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
-                logger.LogError("Database migration timed out after 60 seconds. This may indicate a database lock or connectivity issue.");
+                logger.LogError("Database migration timed out after 300 seconds. This may indicate a database lock or connectivity issue.");
             }
             throw;
         }

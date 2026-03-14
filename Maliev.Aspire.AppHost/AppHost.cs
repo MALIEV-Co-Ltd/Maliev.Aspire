@@ -194,6 +194,7 @@ static partial class Program
             Payment: postgres.AddDatabase("payment-app-db"),
             Pdf: postgres.AddDatabase("pdf-app-db"),
             Performance: postgres.AddDatabase("performance-app-db"),
+            Prediction: postgres.AddDatabase("prediction-app-db"),
             Pricing: postgres.AddDatabase("pricing-app-db"),
             PurchaseOrder: postgres.AddDatabase("purchaseorder-app-db"),
             Quotation: postgres.AddDatabase("quotation-app-db"),
@@ -798,6 +799,20 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        var predictionService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_PredictionService_Api>("PredictionService")
+                .WithReference(databases.Prediction, "PredictionDatabase")
+                .WaitFor(databases.Prediction)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis, "Redis")
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/predictionservice/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
         // --- Python Services ---
         var geometryService = builder.AddPythonApp("maliev-geometryservice", "../../Maliev.GeometryService", "src/main.py")
             .WithReference(infrastructure.RabbitMQ)
@@ -884,6 +899,7 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Payment,
     IResourceBuilder<PostgresDatabaseResource> Pdf,
     IResourceBuilder<PostgresDatabaseResource> Performance,
+    IResourceBuilder<PostgresDatabaseResource> Prediction,
     IResourceBuilder<PostgresDatabaseResource> Pricing,
     IResourceBuilder<PostgresDatabaseResource> PurchaseOrder,
     IResourceBuilder<PostgresDatabaseResource> Quotation,
