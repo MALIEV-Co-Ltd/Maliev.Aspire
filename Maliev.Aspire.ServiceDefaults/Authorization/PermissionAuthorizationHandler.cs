@@ -113,6 +113,13 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
+            // If user has wildcard permission in JWT, always allow
+            if (userPermissions.Contains("*"))
+            {
+                _logger.LogInformation("JWT contains wildcard permission - granting access for {Permission}", permission);
+                return true;
+            }
+
             _logger.LogInformation("IAM check failed, falling back to claims. Found {Count} permission claims for Principal {PrincipalId}",
                 userPermissions.Count, principalId);
 
