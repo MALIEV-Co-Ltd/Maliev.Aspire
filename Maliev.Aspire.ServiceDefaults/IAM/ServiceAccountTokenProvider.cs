@@ -26,11 +26,16 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
 {
     private readonly IConfiguration _configuration;
     private readonly string _serviceName;
+    private readonly string? _subOverride;
 
-    public ServiceAccountTokenProvider(IConfiguration configuration, string serviceName)
+    /// <param name="configuration">App configuration.</param>
+    /// <param name="serviceName">Service name used to build the sub claim.</param>
+    /// <param name="subOverride">Optional explicit sub claim value (e.g. "system"). When set, overrides the computed system:service:{name} value.</param>
+    public ServiceAccountTokenProvider(IConfiguration configuration, string serviceName, string? subOverride = null)
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _serviceName = serviceName ?? throw new ArgumentNullException(nameof(serviceName));
+        _subOverride = subOverride;
     }
 
     /// <summary>
@@ -55,7 +60,8 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
             securityKey: securityKey,
             issuer: issuer,
             audience: audience,
-            expirationMinutes: expirationMinutes
+            expirationMinutes: expirationMinutes,
+            subOverride: _subOverride
         );
     }
 
@@ -64,13 +70,15 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
         string securityKey,
         string issuer,
         string audience,
-        int expirationMinutes)
+        int expirationMinutes,
+        string? subOverride = null)
     {
         var serviceNameLower = serviceName.ToLowerInvariant().Replace("service", "");
+        var sub = subOverride ?? $"system:service:{serviceNameLower}";
 
         var claims = new[]
         {
-            new Claim("sub", $"system:service:{serviceNameLower}"),
+            new Claim("sub", sub),
             new Claim("service_name", serviceName),
             new Claim("user_type", "service"),
             new Claim("role", "service-account"),
