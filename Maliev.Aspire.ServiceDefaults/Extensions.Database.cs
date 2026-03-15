@@ -135,17 +135,15 @@ public static class DatabaseExtensions
         CancellationToken cancellationToken = default)
         where TContext : DbContext
     {
-        // Enforce a 300s timeout to handle heavy concurrent startup with 30+ services.
-        // 60s was too short when all services start simultaneously and PostgreSQL is busy
-        // creating databases. Each retry has 5-15s jitter, so 8 retries can exceed 60s.
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(300));
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-        var migrationToken = linkedCts.Token;
+        // Do NOT impose a wall-clock timeout on the connectivity retry loop — with 30+
+        // services starting simultaneously and a single PostgreSQL instance, even 300 s
+        // is not guaranteed to be enough. The retry count (maxRetries) is the only bound
+        // on the wait loop so the service will keep trying until PostgreSQL is ready.
+        //
+        // A separate per-operation timeout (120 s) guards MigrateAsync itself, which
+        // should never hang for more than a couple of minutes once connectivity is established.
 
-        // Use fewer retries in test environment for faster feedback
-        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-        var isTest = environment == "Test" || environment == "Testing";
-        const int defaultRetries = 50; // Increased to 50 for all environments to handle 20+ services startup
+        const int defaultRetries = 50; // ≈ 50 × avg-10 s jitter = ~8 minutes maximum wait
         var retries = maxRetries ?? defaultRetries;
 
         using var scope = app.Services.CreateScope();
@@ -158,10 +156,12 @@ public static class DatabaseExtensions
 
             await strategy.ExecuteAsync(async () =>
             {
-                // Wait for database connectivity with jittered retry to avoid thundering herd
+                // ── Phase 1: wait for connectivity ──────────────────────────────────────
+                // Use only the caller's cancellationToken here so the retry loop runs as
+                // long as the host is alive (Aspire restart policy handles real failures).
                 int retryCount = 0;
                 var random = new Random();
-                while (!await dbContext.Database.CanConnectAsync(migrationToken))
+                while (!await dbContext.Database.CanConnectAsync(cancellationToken))
                 {
                     if (retryCount >= retries)
                     {
@@ -170,28 +170,44 @@ public static class DatabaseExtensions
                     }
 
                     retryCount++;
-                    var delaySeconds = 5 + random.Next(0, 10); // Increased jitter (5-15s) to mitigate thundering herd on 20+ services
-                    logger.LogWarning("Waiting for database connectivity (attempt {Attempt}/{Max}). Retrying in {Delay}s...",
+                    // Jitter 5-15 s to mitigate thundering herd on 30+ service cold start
+                    var delaySeconds = 5 + random.Next(0, 10);
+                    logger.LogWarning(
+                        "Waiting for database connectivity (attempt {Attempt}/{Max}). Retrying in {Delay}s...",
                         retryCount, retries, delaySeconds);
-                    await Task.Delay(TimeSpan.FromSeconds(delaySeconds), migrationToken);
+                    await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
                 }
 
-                logger.LogInformation("Applying database migrations for {ContextType}", typeof(TContext).Name);
+                // ── Phase 2: apply migrations (separate 120 s per-operation timeout) ───
+                // MigrateAsync acquires an advisory lock in PostgreSQL and runs DDL. It
+                // should complete well within 120 s for a normal schema. If it does not,
+                // something is genuinely stuck and we want a clear error message.
+                using var migrateCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                migrateCts.CancelAfter(TimeSpan.FromSeconds(120));
 
-                await dbContext.Database.MigrateAsync(migrationToken);
+                logger.LogInformation("Applying database migrations for {ContextType}", typeof(TContext).Name);
+                try
+                {
+                    await dbContext.Database.MigrateAsync(migrateCts.Token);
+                }
+                catch (OperationCanceledException) when (migrateCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    logger.LogError(
+                        "MigrateAsync timed out after 120 seconds for {ContextType}. " +
+                        "This may indicate a long-running migration or a stuck advisory lock.",
+                        typeof(TContext).Name);
+                    throw;
+                }
+
                 logger.LogInformation("Database migrations applied successfully for {ContextType}", typeof(TContext).Name);
             });
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            // Log explicitly if it was our timeout
-            if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-            {
-                logger.LogError("Database migration timed out after 300 seconds. This may indicate a database lock or connectivity issue.");
-            }
+            // Re-throw; the inner catch already logged the timeout detail.
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Failed to apply database migrations for {ContextType}", typeof(TContext).Name);
             throw;
