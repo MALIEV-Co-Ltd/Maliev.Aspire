@@ -204,7 +204,8 @@ static partial class Program
             Upload: postgres.AddDatabase("upload-app-db"),
             Facility: postgres.AddDatabase("facility-app-db"),
             Inventory: postgres.AddDatabase("inventory-app-db"),
-            Job: postgres.AddDatabase("job-app-db")
+            Job: postgres.AddDatabase("job-app-db"),
+            Project: postgres.AddDatabase("project-app-db")
         );
     }
 
@@ -719,6 +720,25 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        var projectService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_ProjectService_Api>("ProjectService")
+                .WithReference(databases.Project, "ProjectDbContext")
+                .WaitFor(databases.Project)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithReference(customerService)
+                .WithReference(pricingService)
+                .WithReference(quotationService)
+                .WithReference(orderService)
+                .WithReference(notificationService)
+                .WithHttpHealthCheck("/project/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
         var intranetBff = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
                 .WithReference(authService)
@@ -748,6 +768,7 @@ static partial class Program
                 .WithReference(pricingService)
                 .WithReference(notificationService)
                 .WithReference(facilityService)
+                .WithReference(projectService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
                 .WithHttpHealthCheck("/intranet/aspire-liveness")
@@ -909,4 +930,5 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Upload,
     IResourceBuilder<PostgresDatabaseResource> Facility,
     IResourceBuilder<PostgresDatabaseResource> Inventory,
-    IResourceBuilder<PostgresDatabaseResource> Job);
+    IResourceBuilder<PostgresDatabaseResource> Job,
+    IResourceBuilder<PostgresDatabaseResource> Project);
