@@ -138,6 +138,13 @@
     <Project Path="..\Maliev.PaymentService\Maliev.PaymentService.Api\Maliev.PaymentService.Api.csproj" />
     <Project Path="..\Maliev.PaymentService\Maliev.PaymentService.Infrastructure\Maliev.PaymentService.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/APIs/Project Service/">
+    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Api/Maliev.ProjectService.Api.csproj" />
+    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Application/Maliev.ProjectService.Application.csproj" />
+    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Domain/Maliev.ProjectService.Domain.csproj" />
+    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Infrastructure/Maliev.ProjectService.Infrastructure.csproj" />
+    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Tests/Maliev.ProjectService.Tests.csproj" />
+  </Folder>
   <Folder Name="/APIs/PDF Service/">
     <Project Path="../Maliev.PdfService/Maliev.PdfService.Application/Maliev.PdfService.Application.csproj" />
     <Project Path="../Maliev.PdfService/Maliev.PdfService.Domain/Maliev.PdfService.Domain.csproj" />
