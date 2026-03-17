@@ -31,10 +31,12 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
             .WithEnvironment("ASPIRE_API_KEY", builder.Configuration[DashboardOtlpApiKeyVariableName])
             .WithEnvironment("ASPIRE_INSECURE", isHttpsEnabled ? "false" : "true");
 
+        var otlpEndpoint = collectorResource.GetEndpoint(OpenTelemetryCollectorResource.OtlpGrpcEndpointName);
+
         builder.Eventing.Subscribe<BeforeResourceStartedEvent>((e, ct) =>
         {
-            var endpoint = collectorResource.GetEndpoint(OpenTelemetryCollectorResource.OtlpGrpcEndpointName);
-            if (!endpoint.Exists)
+            // Skip the collector itself to avoid modifying its own annotations while they are being enumerated
+            if (ReferenceEquals(e.Resource, collectorResource))
             {
                 return Task.CompletedTask;
             }
@@ -44,7 +46,7 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
             {
                 if (context.EnvironmentVariables.ContainsKey(OtelExporterOtlpEndpoint))
                 {
-                    context.EnvironmentVariables[OtelExporterOtlpEndpoint] = endpoint;
+                    context.EnvironmentVariables[OtelExporterOtlpEndpoint] = otlpEndpoint;
                 }
             }));
 
