@@ -12,27 +12,27 @@ public class PermissionRequirement : IAuthorizationRequirement
     /// The required permission in GCP-style format (e.g., "customer.customers.create").
     /// </summary>
     public string Permission { get; }
-    
+
     /// <summary>
     /// Optional template for resource path extraction from route values for resource-scoped authorization.
     /// </summary>
     public string? ResourcePathTemplate { get; }
-    
+
     /// <summary>
     /// Indicates whether a live IAM service check is required instead of cached permissions.
     /// </summary>
     public bool RequireLiveCheck { get; }
-    
+
     /// <summary>
     /// Indicates whether model validation should occur before authorization.
     /// </summary>
     public bool PreValidateModel { get; }
-    
+
     /// <summary>
     /// Indicates whether this is a critical operation requiring elevated security checks.
     /// </summary>
     public bool IsCritical { get; }
-    
+
     /// <summary>
     /// Optional audit purpose description for compliance logging.
     /// </summary>
