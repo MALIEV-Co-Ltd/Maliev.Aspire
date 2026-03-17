@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Commercial;
 
+/// <summary>
+/// Integration tests for the commercial workflow from quotation to order to invoice.
+/// </summary>
 public class QuotationToInvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests the full commercial workflow: quotation creation, order from quotation, and invoice generation.
+    /// </summary>
     [Fact]
     public async Task FullCommercialWorkflow_QuotationToOrderToInvoice()
     {

@@ -5,6 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Microsoft.Extensions.Hosting;
 
+/// <summary>
+/// Extension methods for adding and configuring standard middleware in the application pipeline.
+/// </summary>
 public static class MiddlewareExtensions
 {
     /// <summary>
@@ -58,7 +61,9 @@ public static class MiddlewareExtensions
         return app;
     }
 }
-
+/// <summary>
+/// Configuration options for standard middleware components.
+/// </summary>
 public class MiddlewareOptions
 {
     /// <summary>

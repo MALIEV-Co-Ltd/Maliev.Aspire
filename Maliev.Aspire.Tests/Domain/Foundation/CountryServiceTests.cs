@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Foundation;
 
+/// <summary>
+/// Integration tests for the country service.
+/// </summary>
 public class CountryServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that the countries endpoint returns a non-empty list.
+    /// </summary>
     [Fact]
     public async Task GetCountries_ReturnsNonEmptyList()
     {
@@ -23,6 +29,9 @@ public class CountryServiceTests(ITestOutputHelper output) : MalievTestBase(outp
         Assert.True(data.GetArrayLength() > 0, "Country list should not be empty after seeding.");
     }
 
+    /// <summary>
+    /// Tests that a country can be retrieved by its ID.
+    /// </summary>
     [Fact]
     public async Task GetCountryById_ReturnsCorrectCountry()
     {
@@ -44,6 +53,9 @@ public class CountryServiceTests(ITestOutputHelper output) : MalievTestBase(outp
         Assert.Equal(expectedName, result.GetProperty("name").GetString());
     }
 
+    /// <summary>
+    /// Tests that a country can be retrieved by its ISO 2 code.
+    /// </summary>
     [Fact]
     public async Task GetByIso2_ReturnsCorrectCountry()
     {

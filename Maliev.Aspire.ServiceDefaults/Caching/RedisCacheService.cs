@@ -16,6 +16,12 @@ public class RedisCacheService : ICacheService
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly string _instanceName;
 
+    /// <summary>
+    /// Initializes a new instance of the RedisCacheService with the specified dependencies.
+    /// </summary>
+    /// <param name="redis">The Redis connection multiplexer.</param>
+    /// <param name="options">Redis cache configuration options.</param>
+    /// <param name="logger">Logger for cache operations.</param>
     public RedisCacheService(
         IConnectionMultiplexer redis,
         IOptions<RedisCacheOptions> options,
@@ -32,6 +38,13 @@ public class RedisCacheService : ICacheService
         };
     }
 
+    /// <summary>
+    /// Retrieves a value from the Redis cache by key.
+    /// </summary>
+    /// <typeparam name="T">The type of the cached value.</typeparam>
+    /// <param name="key">The cache key.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The cached value if found, otherwise null.</returns>
     public async Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default) where T : class
     {
         try
@@ -60,6 +73,14 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Stores a value in the Redis cache with the specified time-to-live.
+    /// </summary>
+    /// <typeparam name="T">The type of the value to cache.</typeparam>
+    /// <param name="key">The cache key.</param>
+    /// <param name="value">The value to cache.</param>
+    /// <param name="ttl">The time-to-live for the cached entry.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task SetAsync<T>(string key, T value, TimeSpan ttl, CancellationToken cancellationToken = default) where T : class
     {
         try
@@ -85,6 +106,11 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Removes a value from the Redis cache by key.
+    /// </summary>
+    /// <param name="key">The cache key to remove.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
     {
         try
@@ -99,6 +125,12 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Removes all cache entries matching the specified pattern from all Redis endpoints.
+    /// Uses SCAN to avoid blocking the Redis server.
+    /// </summary>
+    /// <param name="pattern">The key pattern to match (supports glob-style patterns).</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
     {
         if (!_redis.IsConnected)
@@ -132,6 +164,12 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Checks whether a key exists in the Redis cache.
+    /// </summary>
+    /// <param name="key">The cache key to check.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>True if the key exists, otherwise false.</returns>
     public async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
     {
         try
@@ -147,6 +185,14 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Atomically increments a counter in Redis and sets the time-to-live.
+    /// Uses a Lua script to ensure atomicity of the increment and expire operations.
+    /// </summary>
+    /// <param name="key">The cache key for the counter.</param>
+    /// <param name="ttl">The time-to-live for the key.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The new value of the counter.</returns>
     public async Task<long> IncrementAsync(string key, TimeSpan ttl, CancellationToken cancellationToken = default)
     {
         try

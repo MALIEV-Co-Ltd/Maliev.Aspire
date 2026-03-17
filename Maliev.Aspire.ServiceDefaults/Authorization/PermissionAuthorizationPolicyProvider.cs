@@ -3,12 +3,27 @@ using Microsoft.Extensions.Options;
 
 namespace Maliev.Aspire.ServiceDefaults.Authorization;
 
+/// <summary>
+/// Authorization policy provider that dynamically creates policies from permission strings.
+/// Supports parsing permission-based policy names with optional modifiers for model validation, 
+/// critical operations, and audit purposes.
+/// </summary>
 public class PermissionAuthorizationPolicyProvider : DefaultAuthorizationPolicyProvider
 {
+    /// <summary>
+    /// Initializes a new instance of the PermissionAuthorizationPolicyProvider.
+    /// </summary>
+    /// <param name="options">The authorization options configuration.</param>
     public PermissionAuthorizationPolicyProvider(IOptions<AuthorizationOptions> options) : base(options)
     {
     }
 
+    /// <summary>
+    /// Creates an authorization policy from a permission-based policy name.
+    /// Supports format: Permission:{permission}[:validate_model][:critical][:purpose_{text}]
+    /// </summary>
+    /// <param name="policyName">The policy name to parse.</param>
+    /// <returns>The authorization policy if the name starts with "Permission:", otherwise null.</returns>
     public override async Task<AuthorizationPolicy?> GetPolicyAsync(string policyName)
     {
         if (policyName.StartsWith("Permission:", StringComparison.OrdinalIgnoreCase))

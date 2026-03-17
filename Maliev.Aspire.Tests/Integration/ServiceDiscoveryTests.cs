@@ -11,9 +11,16 @@ namespace Maliev.Aspire.Tests.Integration;
 /// </summary>
 public class AspireAppHostFixture : IAsyncLifetime
 {
+    /// <summary>
+    /// The distributed application factory for creating test clients.
+    /// </summary>
     public DistributedApplicationFactory AppFactory { get; private set; } = null!;
     private string? _adminToken;
 
+    /// <summary>
+    /// Initializes the test fixture by starting the Aspire application.
+    /// </summary>
+    /// <returns>A task representing the asynchronous initialization.</returns>
     public async Task InitializeAsync()
     {
         var appHostAssembly = typeof(Projects.Maliev_Aspire_AppHost).Assembly;
@@ -21,11 +28,19 @@ public class AspireAppHostFixture : IAsyncLifetime
         await AppFactory.StartAsync();
     }
 
+    /// <summary>
+    /// Disposes of the test fixture by stopping the Aspire application.
+    /// </summary>
+    /// <returns>A task representing the asynchronous disposal.</returns>
     public async Task DisposeAsync()
     {
         await AppFactory.DisposeAsync();
     }
 
+    /// <summary>
+    /// Gets the admin JWT token for authenticated requests.
+    /// </summary>
+    /// <returns>The admin JWT token string.</returns>
     public async Task<string> GetAdminTokenAsync()
     {
         if (!string.IsNullOrEmpty(_adminToken))
@@ -58,6 +73,9 @@ public class AspireAppHostFixture : IAsyncLifetime
     }
 }
 
+/// <summary>
+/// Collection definition for service discovery tests using the Aspire AppHost fixture.
+/// </summary>
 [CollectionDefinition("AspireAppHost")]
 public class AspireAppHostCollection : ICollectionFixture<AspireAppHostFixture>;
 
@@ -71,6 +89,11 @@ public class ServiceDiscoveryTests
     private readonly AspireAppHostFixture _fixture;
     private readonly ITestOutputHelper _output;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ServiceDiscoveryTests"/> class.
+    /// </summary>
+    /// <param name="fixture">The shared AppHost fixture.</param>
+    /// <param name="output">The test output helper.</param>
     public ServiceDiscoveryTests(AspireAppHostFixture fixture, ITestOutputHelper output)
     {
         _fixture = fixture;

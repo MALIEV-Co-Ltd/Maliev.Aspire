@@ -6,6 +6,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Microsoft.Extensions.Hosting;
 
 // Standardized HTTP client extensions for Maliev microservices.
+/// <summary>
+/// Provides extension methods for registering and configuring HTTP clients for MALIEV microservices
+/// with standardized service discovery, resilience patterns, and service account authentication.
+/// </summary>
 public static class HttpClientExtensions
 {
     /// <summary>
@@ -92,6 +96,12 @@ public static class HttpClientExtensions
     /// <summary>
     /// Adds a typed service HTTP client with standardized discovery, resilience and Service Account authentication.
     /// </summary>
+    /// <typeparam name="TInterface">The HTTP client interface type.</typeparam>
+    /// <typeparam name="TImplementation">The HTTP client implementation type.</typeparam>
+    /// <param name="builder">The application builder.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <param name="sourceServiceName">Optional source service name for authentication (defaults to configured ServiceName).</param>
+    /// <returns>The HTTP client builder.</returns>
     public static IHttpClientBuilder AddAuthenticatedServiceClient<TInterface, TImplementation>(
         this IHostApplicationBuilder builder,
         string serviceName,
@@ -132,8 +142,13 @@ public static class HttpClientExtensions
     }
 
     /// <summary>
-    /// Adds a typed service HTTP client with standardized Triple Fallback discovery and resilience.
+    /// Adds a typed service HTTP client with standardized discovery and resilience using .NET Aspire service discovery.
     /// </summary>
+    /// <typeparam name="TInterface">The HTTP client interface type.</typeparam>
+    /// <typeparam name="TImplementation">The HTTP client implementation type.</typeparam>
+    /// <param name="builder">The application builder.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <returns>The HTTP client builder.</returns>
     public static IHttpClientBuilder AddServiceClient<TInterface, TImplementation>(
         this IHostApplicationBuilder builder,
         string serviceName)
@@ -147,6 +162,12 @@ public static class HttpClientExtensions
     /// Adds a typed service HTTP client with ENFORCED configuration pattern.
     /// REQUIRED: Services:{ServiceName}:BaseUrl must be configured (no fallbacks).
     /// </summary>
+    /// <typeparam name="TInterface">The HTTP client interface type.</typeparam>
+    /// <typeparam name="TImplementation">The HTTP client implementation type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <returns>The HTTP client builder.</returns>
     public static IHttpClientBuilder AddServiceClient<TInterface, TImplementation>(
         this IServiceCollection services,
         IConfiguration configuration,
@@ -179,8 +200,13 @@ public static class HttpClientExtensions
     }
 
     /// <summary>
-    /// Adds generic service HTTP client with configurable name and URL.
+    /// Adds a generic named HTTP client with standardized discovery and resilience using .NET Aspire.
     /// </summary>
+    /// <param name="builder">The application builder.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <param name="baseUrl">Optional base URL override (for testing or direct URLs).</param>
+    /// <param name="configureClient">Optional action to configure the HTTP client.</param>
+    /// <returns>The HTTP client builder.</returns>
     public static IHttpClientBuilder AddServiceClient(
         this IHostApplicationBuilder builder,
         string serviceName,
@@ -191,9 +217,15 @@ public static class HttpClientExtensions
     }
 
     /// <summary>
-    /// Adds generic service HTTP client with ENFORCED configuration pattern.
+    /// Adds a generic named HTTP client with ENFORCED configuration pattern.
     /// REQUIRED: Services:{ServiceName}:BaseUrl must be configured (no fallbacks).
     /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <param name="baseUrl">Optional base URL override.</param>
+    /// <param name="configureClient">Optional action to configure the HTTP client.</param>
+    /// <returns>The HTTP client builder.</returns>
     public static IHttpClientBuilder AddServiceClient(
         this IServiceCollection services,
         IConfiguration configuration,

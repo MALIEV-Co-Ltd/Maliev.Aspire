@@ -9,6 +9,10 @@ using System.Security.Claims;
 
 namespace Maliev.Aspire.ServiceDefaults.Authorization;
 
+/// <summary>
+/// Authorization handler that validates permissions using either live IAM service checks or JWT claims.
+/// Falls back to JWT claims-based matching when the IAM service is unavailable.
+/// </summary>
 public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionRequirement>
 {
     private readonly IServiceProvider _serviceProvider;
@@ -17,6 +21,14 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
     private readonly ILogger<PermissionAuthorizationHandler> _logger;
     private readonly IAuthMetrics? _authMetrics;
 
+    /// <summary>
+    /// Initializes a new instance of the PermissionAuthorizationHandler with the specified dependencies.
+    /// </summary>
+    /// <param name="serviceProvider">The service provider for resolving additional services.</param>
+    /// <param name="httpContextAccessor">Provides access to the current HTTP context.</param>
+    /// <param name="logger">Logger for authorization events and debugging.</param>
+    /// <param name="iamClient">Optional IAM service client for live permission checks.</param>
+    /// <param name="authMetrics">Optional metrics recorder for authorization success/failure tracking.</param>
     public PermissionAuthorizationHandler(
         IServiceProvider serviceProvider,
         IHttpContextAccessor httpContextAccessor,
@@ -31,6 +43,11 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         _authMetrics = authMetrics;
     }
 
+    /// <summary>
+    /// Handles the authorization requirement evaluation by checking permissions via IAM service or JWT claims.
+    /// </summary>
+    /// <param name="context">The authorization context containing the user and resource.</param>
+    /// <param name="requirement">The permission requirement to evaluate.</param>
     protected override async Task HandleRequirementAsync(
         AuthorizationHandlerContext context,
         PermissionRequirement requirement)

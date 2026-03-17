@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.HR;
 
+/// <summary>
+/// Integration tests for the compensation service.
+/// </summary>
 public class CompensationServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that an admin can retrieve compensation data.
+    /// </summary>
     [Fact]
     public async Task GetCompensationData_AsAdmin_ReturnsOk()
     {

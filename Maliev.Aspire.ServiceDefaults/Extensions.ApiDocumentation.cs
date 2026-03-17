@@ -10,6 +10,15 @@ namespace Microsoft.Extensions.Hosting;
 /// </summary>
 public static class ApiDocumentationExtensions
 {
+    /// <summary>
+    /// Maps Scalar API documentation and OpenAPI endpoints to the application.
+    /// Only available in non-production environments.
+    /// </summary>
+    /// <param name="app">The web application.</param>
+    /// <param name="servicePrefix">Optional URL prefix for the service (e.g., "auth" for /auth/scalar).</param>
+    /// <param name="documentName">The OpenAPI document name (default: "v1").</param>
+    /// <param name="configureScalar">Optional action to configure Scalar options.</param>
+    /// <returns>The configured application.</returns>
     public static WebApplication MapApiDocumentation(
         this WebApplication app,
         string? servicePrefix = null,
@@ -39,6 +48,14 @@ public static class ApiDocumentationExtensions
         return app;
     }
 
+    /// <summary>
+    /// Adds standard OpenAPI document generation with optional title and description.
+    /// </summary>
+    /// <param name="builder">The host application builder.</param>
+    /// <param name="title">Optional API title.</param>
+    /// <param name="description">Optional API description.</param>
+    /// <param name="documentName">The OpenAPI document name (default: "v1").</param>
+    /// <returns>The configured builder.</returns>
     public static IHostApplicationBuilder AddStandardOpenApi(
         this IHostApplicationBuilder builder,
         string? title = null,
@@ -62,6 +79,14 @@ public static class ApiDocumentationExtensions
         return builder;
     }
 
+    /// <summary>
+    /// Maps Scalar API documentation with default configuration (no service prefix).
+    /// Only available in Development environment.
+    /// </summary>
+    /// <param name="app">The web application.</param>
+    /// <param name="documentName">The OpenAPI document name (default: "v1").</param>
+    /// <param name="configureScalar">Optional action to configure Scalar options.</param>
+    /// <returns>The configured application.</returns>
     public static WebApplication MapApiDocumentationDefault(
         this WebApplication app,
         string documentName = "v1",

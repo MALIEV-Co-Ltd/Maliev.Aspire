@@ -9,11 +9,22 @@ public class IAMRegistrationHealthCheck : IHealthCheck
 {
     private readonly IAMRegistrationStatusTracker _statusTracker;
 
+    /// <summary>
+    /// Initializes a new instance of the IAMRegistrationHealthCheck with the specified status tracker.
+    /// </summary>
+    /// <param name="statusTracker">The IAM registration status tracker to query.</param>
     public IAMRegistrationHealthCheck(IAMRegistrationStatusTracker statusTracker)
     {
         _statusTracker = statusTracker ?? throw new ArgumentNullException(nameof(statusTracker));
     }
 
+    /// <summary>
+    /// Checks the IAM registration status and returns an appropriate health check result.
+    /// Reports Healthy when registered, Degraded when partially registered or failed, and Unhealthy when pending.
+    /// </summary>
+    /// <param name="context">The health check context.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A health check result reflecting the current IAM registration status.</returns>
     public Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
         CancellationToken cancellationToken = default)

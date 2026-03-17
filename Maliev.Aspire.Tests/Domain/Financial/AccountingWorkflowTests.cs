@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Financial;
 
+/// <summary>
+/// Integration tests for the accounting workflow.
+/// </summary>
 public class AccountingWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that the chart of accounts returns seeded data.
+    /// </summary>
     [Fact]
     public async Task GetChartOfAccounts_ReturnsSeededData()
     {
@@ -22,6 +28,9 @@ public class AccountingWorkflowTests(ITestOutputHelper output) : MalievTestBase(
         Output.WriteLine($"Found {result.Count} accounts in CoA.");
     }
 
+    /// <summary>
+    /// Tests that a balanced journal entry can be created successfully.
+    /// </summary>
     [Fact]
     public async Task CreateJournalEntry_WithBalancedLines_Succeeds()
     {

@@ -3,6 +3,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Maliev.Aspire.AppHost.OpenTelemetryCollector;
 
+/// <summary>
+/// Extension methods for adding OpenTelemetry Collector resources.
+/// </summary>
 public static class OpenTelemetryCollectorResourceBuilderExtensions
 {
     private const string OtelExporterOtlpEndpoint = "OTEL_EXPORTER_OTLP_ENDPOINT";
@@ -12,6 +15,13 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
     private const string OTelCollectorImageName = "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib";
     private const string OTelCollectorImageTag = "0.114.0";
 
+    /// <summary>
+    /// Adds an OpenTelemetry Collector resource to the distributed application.
+    /// </summary>
+    /// <param name="builder">The distributed application builder.</param>
+    /// <param name="name">The name of the resource.</param>
+    /// <param name="configFileLocation">The location of the collector configuration file.</param>
+    /// <returns>A resource builder for the OpenTelemetry Collector.</returns>
     public static IResourceBuilder<OpenTelemetryCollectorResource> AddOpenTelemetryCollector(this IDistributedApplicationBuilder builder, string name, string configFileLocation)
     {
         var url = builder.Configuration[DashboardOtlpUrlVariableName] ?? DashboardOtlpUrlDefaultValue;

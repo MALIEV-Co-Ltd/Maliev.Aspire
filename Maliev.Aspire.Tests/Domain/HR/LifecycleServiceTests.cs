@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.HR;
 
+/// <summary>
+/// Integration tests for the lifecycle service.
+/// </summary>
 public class LifecycleServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that the onboarding checklist can be retrieved for a new employee.
+    /// </summary>
     [Fact]
     public async Task GetOnboardingChecklist_ForNewEmployee_ReturnsChecklist()
     {

@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.HR;
 
+/// <summary>
+/// Integration tests for the performance service.
+/// </summary>
 public class PerformanceServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that an admin can create a performance review.
+    /// </summary>
     [Fact]
     public async Task CreateReview_AsAdmin_Succeeds()
     {
@@ -36,6 +42,9 @@ public class PerformanceServiceTests(ITestOutputHelper output) : MalievTestBase(
         Assert.Equal(employeeId, result.GetProperty("employeeId").GetGuid());
     }
 
+    /// <summary>
+    /// Tests that performance reviews can be retrieved.
+    /// </summary>
     [Fact]
     public async Task GetReviews_ReturnsData()
     {

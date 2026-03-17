@@ -7,12 +7,22 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Commercial;
 
+/// <summary>
+/// Integration tests for customer onboarding workflow.
+/// </summary>
 public class CustomerOnboardingTests : MalievTestBase
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CustomerOnboardingTests"/> class.
+    /// </summary>
+    /// <param name="output">The test output helper.</param>
     public CustomerOnboardingTests(ITestOutputHelper output) : base(output)
     {
     }
 
+    /// <summary>
+    /// Tests that an admin can successfully onboard a new customer with company and addresses.
+    /// </summary>
     [Fact]
     public async Task OnboardCustomer_AsAdmin_Succeeds()
     {

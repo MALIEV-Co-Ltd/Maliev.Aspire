@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Communication;
 
+/// <summary>
+/// Integration tests for the notification service.
+/// </summary>
 public class NotificationServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that an admin can retrieve notification templates.
+    /// </summary>
     [Fact]
     public async Task GetTemplates_AsAdmin_ReturnsOk()
     {
@@ -20,6 +26,9 @@ public class NotificationServiceTests(ITestOutputHelper output) : MalievTestBase
         Assert.True(result.TryGetProperty("items", out _));
     }
 
+    /// <summary>
+    /// Tests that an admin can create a notification template.
+    /// </summary>
     [Fact]
     public async Task CreateTemplate_AsAdmin_Succeeds()
     {

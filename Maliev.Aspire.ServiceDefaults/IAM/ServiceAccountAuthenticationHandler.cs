@@ -11,6 +11,11 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
     private readonly IServiceAccountTokenProvider _tokenProvider;
     private readonly ILogger<ServiceAccountAuthenticationHandler> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the ServiceAccountAuthenticationHandler with the specified dependencies.
+    /// </summary>
+    /// <param name="tokenProvider">The service account token provider.</param>
+    /// <param name="logger">Logger for authentication operations.</param>
     public ServiceAccountAuthenticationHandler(
         IServiceAccountTokenProvider tokenProvider,
         ILogger<ServiceAccountAuthenticationHandler> logger)
@@ -19,6 +24,12 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Intercepts outgoing HTTP requests and adds a service account JWT token to the Authorization header.
+    /// </summary>
+    /// <param name="request">The HTTP request message.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The HTTP response message.</returns>
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
@@ -61,6 +72,10 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
         }
     }
 
+    /// <summary>
+    /// Releases the resources used by the ServiceAccountAuthenticationHandler.
+    /// </summary>
+    /// <param name="disposing">True to release managed resources.</param>
     protected override void Dispose(bool disposing)
     {
         // Don't dispose InnerHandler - it's managed by HttpClient factory

@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Financial;
 
+/// <summary>
+/// Integration tests for the currency service.
+/// </summary>
 public class CurrencyServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that the currencies endpoint returns the seeded currency list.
+    /// </summary>
     [Fact]
     public async Task GetCurrencies_ReturnsSeededList()
     {
@@ -27,6 +33,9 @@ public class CurrencyServiceTests(ITestOutputHelper output) : MalievTestBase(out
         Output.WriteLine("Verified THB and USD exist in currency list.");
     }
 
+    /// <summary>
+    /// Tests that currency can be retrieved by country code.
+    /// </summary>
     [Fact]
     public async Task GetCurrencyByCountry_ReturnsCorrectCurrency()
     {

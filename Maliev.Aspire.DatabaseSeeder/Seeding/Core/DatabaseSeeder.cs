@@ -8,6 +8,10 @@ namespace Maliev.Aspire.DatabaseSeeder.Seeding.Core;
 /// </summary>
 public interface IDatabaseSeeder
 {
+    /// <summary>
+    /// Executes the database seeding operation.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
     Task ExecuteAsync(CancellationToken cancellationToken = default);
 }
 
@@ -16,9 +20,21 @@ public interface IDatabaseSeeder
 /// </summary>
 public abstract class DatabaseSeeder<TContext> : IDatabaseSeeder where TContext : DbContext
 {
+    /// <summary>
+    /// The database context.
+    /// </summary>
     protected readonly TContext Context;
+
+    /// <summary>
+    /// Logger instance.
+    /// </summary>
     protected readonly ILogger Logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DatabaseSeeder{TContext}"/> class.
+    /// </summary>
+    /// <param name="context">The database context.</param>
+    /// <param name="logger">The logger.</param>
     protected DatabaseSeeder(TContext context, ILogger logger)
     {
         Context = context;

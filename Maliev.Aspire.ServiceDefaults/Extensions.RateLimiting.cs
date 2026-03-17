@@ -166,11 +166,33 @@ public static class RateLimitingExtensions
     }
 }
 
+/// <summary>
+/// Configuration options for rate limiting behavior.
+/// </summary>
 public class RateLimiterOptions
 {
+    /// <summary>
+    /// Gets or sets whether to use the global rate limiter instead of per-endpoint policies.
+    /// </summary>
     public bool UseGlobalLimiter { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the maximum number of requests permitted per time window.
+    /// </summary>
     public int PermitLimit { get; set; } = 100;
+
+    /// <summary>
+    /// Gets or sets the duration of the rate limiting time window in minutes.
+    /// </summary>
     public double WindowMinutes { get; set; } = 1;
+
+    /// <summary>
+    /// Gets or sets the maximum number of requests that can be queued when the limit is reached.
+    /// </summary>
     public int QueueLimit { get; set; } = 0;
+
+    /// <summary>
+    /// Gets or sets the queue processing order for requests waiting for capacity.
+    /// </summary>
     public QueueProcessingOrder QueueProcessingOrder { get; set; } = QueueProcessingOrder.OldestFirst;
 }

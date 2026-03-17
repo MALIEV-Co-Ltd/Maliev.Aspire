@@ -9,16 +9,26 @@ using Moq;
 
 namespace Maliev.Aspire.Tests.IAM;
 
+/// <summary>
+/// Test implementation of IAM registration service.
+/// </summary>
 public class TestIAMRegistrationService : IAMRegistrationService
 {
     private readonly bool _includeInvalid;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TestIAMRegistrationService"/> class.
+    /// </summary>
+    /// <param name="configuration">The configuration.</param>
+    /// <param name="logger">The logger.</param>
+    /// <param name="includeInvalid">Whether to include invalid permissions.</param>
     public TestIAMRegistrationService(IConfiguration configuration, ILogger logger, bool includeInvalid = false)
         : base(configuration, logger, "TestService")
     {
         _includeInvalid = includeInvalid;
     }
 
+    /// <inheritdoc />
     protected override IEnumerable<PermissionRegistration> GetPermissions()
     {
         if (_includeInvalid)
@@ -32,6 +42,7 @@ public class TestIAMRegistrationService : IAMRegistrationService
         };
     }
 
+    /// <inheritdoc />
     protected override IEnumerable<RoleRegistration> GetPredefinedRoles()
     {
         return new[]
@@ -41,6 +52,9 @@ public class TestIAMRegistrationService : IAMRegistrationService
     }
 }
 
+/// <summary>
+/// Unit tests for the background IAM registration service.
+/// </summary>
 public class BackgroundIAMRegistrationServiceTests
 {
     private readonly Mock<IServiceProvider> _serviceProviderMock;
@@ -53,6 +67,9 @@ public class BackgroundIAMRegistrationServiceTests
     private readonly IAMRegistrationStatusTracker _statusTracker;
     private readonly Mock<IConfiguration> _configMock;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BackgroundIAMRegistrationServiceTests"/> class.
+    /// </summary>
     public BackgroundIAMRegistrationServiceTests()
     {
         _serviceProviderMock = new Mock<IServiceProvider>();
@@ -89,6 +106,9 @@ public class BackgroundIAMRegistrationServiceTests
         _lifetimeMock.Setup(x => x.ApplicationStarted).Returns(cts.Token);
     }
 
+    /// <summary>
+    /// Tests that the background service publishes a registration event.
+    /// </summary>
     [Fact]
     public async Task ExecuteAsync_PublishesRegistrationEvent()
     {
@@ -129,6 +149,9 @@ public class BackgroundIAMRegistrationServiceTests
         Assert.True(_statusTracker.IsRegistered);
     }
 
+    /// <summary>
+    /// Tests that invalid permissions result in an error.
+    /// </summary>
     [Fact]
     public async Task ExecuteAsync_InvalidPermission_LogsError()
     {
@@ -173,6 +196,9 @@ public class BackgroundIAMRegistrationServiceTests
         Assert.Equal(RegistrationStatus.PartiallyRegistered, _statusTracker.Status);
     }
 
+    /// <summary>
+    /// Tests that no services results in marked as registered.
+    /// </summary>
     [Fact]
     public async Task ExecuteAsync_NoServices_MarksRegistered()
     {

@@ -7,8 +7,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.HR;
 
+/// <summary>
+/// Integration tests for the leave workflow.
+/// </summary>
 public class LeaveWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests the full leave workflow from submission to approval.
+    /// </summary>
     [Fact]
     public async Task FullLeaveWorkflow_SubmitAndApprove()
     {

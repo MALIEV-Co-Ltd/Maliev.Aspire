@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.HR;
 
+/// <summary>
+/// Integration tests for the career service.
+/// </summary>
 public class CareerServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that a job posting can be created successfully.
+    /// </summary>
     [Fact]
     public async Task CreateJobPosting_Succeeds()
     {
@@ -34,6 +40,9 @@ public class CareerServiceTests(ITestOutputHelper output) : MalievTestBase(outpu
         Assert.Equal(request.PositionTitle, result.GetProperty("positionTitle").GetString());
     }
 
+    /// <summary>
+    /// Tests submitting an application for an open job posting.
+    /// </summary>
     [Fact]
     public async Task SubmitApplication_ForOpenJob_Succeeds_Or_FailsWithFileError()
     {

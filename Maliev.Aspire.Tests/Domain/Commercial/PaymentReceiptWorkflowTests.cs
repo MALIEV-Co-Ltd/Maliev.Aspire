@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Commercial;
 
+/// <summary>
+/// Integration tests for payment and receipt workflow.
+/// </summary>
 public class PaymentReceiptWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests the full payment workflow from invoice creation through payment to receipt generation.
+    /// </summary>
     [Fact]
     public async Task FullPaymentWorkflow_InvoiceToPaymentToReceipt()
     {

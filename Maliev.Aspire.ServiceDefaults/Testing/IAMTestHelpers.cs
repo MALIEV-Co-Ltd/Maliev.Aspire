@@ -7,6 +7,9 @@ using System.Text;
 
 namespace Maliev.Aspire.ServiceDefaults.Testing;
 
+/// <summary>
+/// Provides helper methods for generating test JWT tokens and configuring test authentication in integration tests.
+/// </summary>
 public static class IAMTestHelpers
 {
     private static RSA? _testRsa;

@@ -7,8 +7,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.People;
 
+/// <summary>
+/// Integration tests for the employee lifecycle.
+/// </summary>
 public class EmployeeLifecycleTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests the employee onboarding workflow and preferences.
+    /// </summary>
     [Fact]
     public async Task Employee_Onboarding_And_Preferences_Succeed()
     {

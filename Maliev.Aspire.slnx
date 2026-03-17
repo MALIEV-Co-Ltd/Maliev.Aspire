@@ -143,7 +143,6 @@
     <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Application/Maliev.ProjectService.Application.csproj" />
     <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Domain/Maliev.ProjectService.Domain.csproj" />
     <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Infrastructure/Maliev.ProjectService.Infrastructure.csproj" />
-    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Tests/Maliev.ProjectService.Tests.csproj" />
   </Folder>
   <Folder Name="/APIs/PDF Service/">
     <Project Path="../Maliev.PdfService/Maliev.PdfService.Application/Maliev.PdfService.Application.csproj" />

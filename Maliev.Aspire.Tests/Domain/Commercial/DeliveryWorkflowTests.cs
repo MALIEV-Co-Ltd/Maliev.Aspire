@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Commercial;
 
+/// <summary>
+/// Integration tests for delivery workflow.
+/// </summary>
 public class DeliveryWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests the full delivery workflow from creation to delivery completion.
+    /// </summary>
     [Fact]
     public async Task FullDeliveryWorkflow_CreateAndUpdateStatus()
     {

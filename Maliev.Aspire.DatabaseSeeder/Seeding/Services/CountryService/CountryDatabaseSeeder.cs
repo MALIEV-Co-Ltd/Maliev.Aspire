@@ -6,13 +6,22 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Maliev.Aspire.DatabaseSeeder.Seeding.Services.CountryService;
 
+/// <summary>
+/// Database seeder for countries.
+/// </summary>
 public class CountryDatabaseSeeder : DatabaseSeeder<CountryDbContext>
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CountryDatabaseSeeder"/> class.
+    /// </summary>
+    /// <param name="context">The country database context.</param>
+    /// <param name="logger">The logger.</param>
     public CountryDatabaseSeeder(CountryDbContext context, ILogger<CountryDatabaseSeeder> logger)
         : base(context, logger)
     {
     }
 
+    /// <inheritdoc />
     protected override async Task SeedAsync(CancellationToken cancellationToken = default)
     {
         if (await HasDataAsync<Country>(cancellationToken))

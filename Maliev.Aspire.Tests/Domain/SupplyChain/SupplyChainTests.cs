@@ -16,12 +16,20 @@ public class SupplyChainTests : IClassFixture<AspireTestFixture>
     private readonly AspireTestFixture _fixture;
     private readonly ITestOutputHelper _output;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SupplyChainTests"/> class.
+    /// </summary>
+    /// <param name="fixture">The shared test fixture.</param>
+    /// <param name="output">The test output helper.</param>
     public SupplyChainTests(AspireTestFixture fixture, ITestOutputHelper output)
     {
         _fixture = fixture;
         _output = output;
     }
 
+    /// <summary>
+    /// Tests the full procurement workflow from supplier onboarding to purchase order creation.
+    /// </summary>
     [Fact]
     public async Task Full_Procurement_Workflow_Succeeds()
     {

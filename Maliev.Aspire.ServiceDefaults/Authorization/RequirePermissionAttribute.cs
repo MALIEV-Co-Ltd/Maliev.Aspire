@@ -16,42 +16,64 @@ public class RequirePermissionAttribute : AuthorizeAttribute
     private string? _auditPurpose;
     private bool _preValidateModel;
 
+    /// <summary>
+    /// The required permission in GCP-style format (e.g., "customer.customers.create").
+    /// </summary>
     public string Permission
     {
         get => _permission;
         init { _permission = value; UpdatePolicy(); }
     }
 
+    /// <summary>
+    /// Optional template for resource path extraction from route values for resource-scoped authorization.
+    /// </summary>
     public string? ResourcePathTemplate
     {
         get => _resourcePathTemplate;
         set { _resourcePathTemplate = value; UpdatePolicy(); }
     }
 
+    /// <summary>
+    /// Whether to require a live IAM service check instead of using cached permissions.
+    /// </summary>
     public bool RequireLiveCheck
     {
         get => _requireLiveCheck;
         set { _requireLiveCheck = value; UpdatePolicy(); }
     }
 
+    /// <summary>
+    /// Whether this is a critical operation requiring elevated security checks.
+    /// </summary>
     public bool IsCritical
     {
         get => _isCritical;
         set { _isCritical = value; UpdatePolicy(); }
     }
 
+    /// <summary>
+    /// Optional audit purpose description for compliance logging.
+    /// </summary>
     public string? AuditPurpose
     {
         get => _auditPurpose;
         set { _auditPurpose = value; UpdatePolicy(); }
     }
 
+    /// <summary>
+    /// Whether to validate the model before performing authorization.
+    /// </summary>
     public bool PreValidateModel
     {
         get => _preValidateModel;
         set { _preValidateModel = value; UpdatePolicy(); }
     }
 
+    /// <summary>
+    /// Initializes a new instance of the RequirePermissionAttribute with the specified permission.
+    /// </summary>
+    /// <param name="permission">The required permission in GCP-style format (e.g., "customer.customers.create").</param>
     public RequirePermissionAttribute(string permission)
     {
         _permission = permission ?? throw new ArgumentNullException(nameof(permission));

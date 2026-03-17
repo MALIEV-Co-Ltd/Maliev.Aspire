@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Foundation;
 
+/// <summary>
+/// Integration tests for the registry service.
+/// </summary>
 public class RegistryServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that Thai locations autocomplete returns results.
+    /// </summary>
     [Fact]
     public async Task ThaiLocations_Autocomplete_ReturnsResults()
     {
@@ -24,6 +30,9 @@ public class RegistryServiceTests(ITestOutputHelper output) : MalievTestBase(out
         Assert.True(data.GetArrayLength() > 0, "Thai locations autocomplete should return results for 'Bangkok'");
     }
 
+    /// <summary>
+    /// Tests that Thai locations can be searched by postal code.
+    /// </summary>
     [Fact]
     public async Task ThaiLocations_ByPostalCode_ReturnsResults()
     {

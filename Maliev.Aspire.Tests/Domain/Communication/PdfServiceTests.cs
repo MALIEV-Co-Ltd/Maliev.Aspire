@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Communication;
 
+/// <summary>
+/// Integration tests for the PDF service.
+/// </summary>
 public class PdfServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that the PDF service can generate an invoice PDF and return a storage URL.
+    /// </summary>
     [Fact]
     public async Task GenerateInvoicePdf_ReturnsStorageUrl()
     {

@@ -6,8 +6,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Foundation;
 
+/// <summary>
+/// Integration tests for the authentication workflow.
+/// </summary>
 public class AuthWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests that a valid @maliev.com email can exchange for an access token.
+    /// </summary>
     [Fact]
     public async Task GoogleExchange_WithValidEmail_ReturnsAccessToken()
     {
@@ -29,6 +35,9 @@ public class AuthWorkflowTests(ITestOutputHelper output) : MalievTestBase(output
         Assert.True(result.TryGetProperty("access_token", out _));
     }
 
+    /// <summary>
+    /// Tests that a non-company email is rejected.
+    /// </summary>
     [Fact]
     public async Task GoogleExchange_WithNonCompanyEmail_ReturnsForbidden()
     {

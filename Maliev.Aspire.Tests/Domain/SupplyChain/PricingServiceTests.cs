@@ -15,12 +15,20 @@ public class PricingServiceTests : IClassFixture<AspireTestFixture>
     private readonly AspireTestFixture _fixture;
     private readonly ITestOutputHelper _output;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="PricingServiceTests"/> class.
+    /// </summary>
+    /// <param name="fixture">The shared test fixture.</param>
+    /// <param name="output">The test output helper.</param>
     public PricingServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
     {
         _fixture = fixture;
         _output = output;
     }
 
+    /// <summary>
+    /// Tests that the pricing service returns a positive price.
+    /// </summary>
     [Fact]
     public async Task CalculatePrice_ReturnsPositiveAmount()
     {

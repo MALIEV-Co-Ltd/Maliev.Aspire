@@ -15,6 +15,11 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
     private const string PlatformOwnerRoleId = "roles.platform.owner";
     private static readonly Guid BootstrapAdminId = Guid.Parse("00000000-0000-0000-0000-000000000002");
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IAMDatabaseSeeder"/> class.
+    /// </summary>
+    /// <param name="context">The IAM database context.</param>
+    /// <param name="logger">The logger.</param>
     public IAMDatabaseSeeder(
         IAMDbContext context,
         ILogger<IAMDatabaseSeeder> logger)
@@ -22,6 +27,7 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
     {
     }
 
+    /// <inheritdoc />
     protected override async Task SeedAsync(CancellationToken cancellationToken = default)
     {
         Logger.LogInformation("Seeding IAM infrastructure data...");

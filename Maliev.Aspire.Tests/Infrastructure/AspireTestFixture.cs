@@ -10,9 +10,20 @@ namespace Maliev.Aspire.Tests.Infrastructure;
 /// </summary>
 public class AspireTestFixture : IAsyncLifetime
 {
+    /// <summary>
+    /// The distributed application factory for creating test clients.
+    /// </summary>
     public DistributedApplicationFactory? AppFactory { get; private set; }
+
+    /// <summary>
+    /// The admin JWT token for authenticated requests.
+    /// </summary>
     public string? AdminToken { get; private set; }
 
+    /// <summary>
+    /// Initializes the test fixture by starting the Aspire application.
+    /// </summary>
+    /// <returns>A task representing the asynchronous initialization.</returns>
     public async Task InitializeAsync()
     {
         var appHostAssembly = typeof(Projects.Maliev_Aspire_AppHost).Assembly;
@@ -24,6 +35,10 @@ public class AspireTestFixture : IAsyncLifetime
         await AppFactory.StartAsync();
     }
 
+    /// <summary>
+    /// Disposes of the test fixture by stopping the Aspire application.
+    /// </summary>
+    /// <returns>A task representing the asynchronous disposal.</returns>
     public async Task DisposeAsync()
     {
         if (AppFactory != null)
@@ -32,11 +47,20 @@ public class AspireTestFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Creates an HTTP client for the specified project.
+    /// </summary>
+    /// <param name="projectName">The name of the project to create a client for.</param>
+    /// <returns>An HTTP client for making requests to the project.</returns>
     public HttpClient CreateClient(string projectName)
     {
         return AppFactory!.CreateHttpClient(projectName);
     }
 
+    /// <summary>
+    /// Gets the admin JWT token for authenticated requests, creating one if it doesn't exist.
+    /// </summary>
+    /// <returns>The admin JWT token string.</returns>
     public string GetAdminToken()
     {
         if (!string.IsNullOrEmpty(AdminToken))
@@ -49,6 +73,11 @@ public class AspireTestFixture : IAsyncLifetime
         return AdminToken;
     }
 
+    /// <summary>
+    /// Creates an authenticated HTTP client for the specified project using the admin token.
+    /// </summary>
+    /// <param name="projectName">The name of the project to create a client for.</param>
+    /// <returns>An authenticated HTTP client for making requests to the project.</returns>
     public HttpClient CreateAuthenticatedClient(string projectName)
     {
         var token = GetAdminToken();

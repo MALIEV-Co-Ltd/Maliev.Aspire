@@ -6,12 +6,22 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Foundation;
 
+/// <summary>
+/// Integration tests for identity management.
+/// </summary>
 public class IdentityTests : MalievTestBase
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IdentityTests"/> class.
+    /// </summary>
+    /// <param name="output">The test output helper.</param>
     public IdentityTests(ITestOutputHelper output) : base(output)
     {
     }
 
+    /// <summary>
+    /// Tests that login with a new email triggers automatic employee provisioning.
+    /// </summary>
     [Fact]
     public async Task Login_WithNewEmail_TriggersAutoProvisioning()
     {

@@ -7,8 +7,14 @@ using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Financial;
 
+/// <summary>
+/// Integration tests for the invoice workflow.
+/// </summary>
 public class InvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
 {
+    /// <summary>
+    /// Tests the invoice lifecycle including creation and splitting.
+    /// </summary>
     [Fact]
     public async Task Invoice_Lifecycle_And_Splitting_Succeeds()
     {
@@ -67,6 +73,9 @@ public class InvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(out
         Output.WriteLine("✓ Parent invoice status updated to 'Split' and children linked");
     }
 
+    /// <summary>
+    /// Tests the billing note lifecycle.
+    /// </summary>
     [Fact]
     public async Task BillingNote_Lifecycle_Succeeds()
     {
