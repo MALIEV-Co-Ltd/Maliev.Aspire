@@ -741,6 +741,8 @@ static partial class Program
 
         var intranetBff = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(authService)
                 .WithReference(customerService)
                 .WithReference(orderService)
@@ -838,8 +840,15 @@ static partial class Program
         var geometryService = builder.AddPythonApp("maliev-geometryservice", "../../Maliev.GeometryService", "src/main.py")
             .WithReference(infrastructure.RabbitMQ)
             .WaitFor(infrastructure.RabbitMQ)
+            .WithReference(uploadService)
+            .WaitFor(uploadService)
             .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ)
-            .WithHttpEndpoint(targetPort: 8080, name: "http")
+            .WithEnvironment("UPLOAD_SERVICE_URL", uploadService.GetEndpoint("http"))
+            .WithEnvironment("JWT_PRIVATE_KEY", config.JwtPrivateKey)
+            .WithEnvironment("JWT_SECURITY_KEY", config.JwtSecurityKey)
+            .WithEnvironment("JWT_ISSUER", config.JwtIssuer)
+            .WithEnvironment("JWT_AUDIENCE", config.JwtAudience)
+            .WithHttpEndpoint(targetPort: 8081, name: "http")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
             .WithHttpHealthCheck("/geometry/aspire-liveness")
             .WithVirtualEnvironment(".venv");

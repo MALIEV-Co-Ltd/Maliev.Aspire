@@ -114,9 +114,9 @@ public class SeederRunner
     private class SeederCurrentUserService : Maliev.EmployeeService.Application.Interfaces.ICurrentUserService
     {
         public Guid? PrincipalId => Guid.Parse("00000000-0000-0000-0000-000000000001"); // IAMDbContext.SystemPrincipalId
-        public string? PrincipalIdentifier => "system@maliev.internal";
+        public string? PrincipalIdentifier => "system@maliev.com";
         public Task<Guid?> GetEmployeeIdAsync(CancellationToken cancellationToken = default) => Task.FromResult<Guid?>(null);
-        public string? Email => "system@maliev.internal";
+        public string? Email => "system@maliev.com";
         public bool IsAuthenticated => true;
         public bool HasPermission(string permission) => true;
     }

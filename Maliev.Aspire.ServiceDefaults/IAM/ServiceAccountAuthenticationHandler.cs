@@ -4,7 +4,10 @@ using System.Net.Http.Headers;
 namespace Maliev.Aspire.ServiceDefaults.IAM;
 
 /// <summary>
-/// HTTP message handler that adds service account JWT token to outgoing IAM requests.
+/// HTTP message handler that adds a service account JWT token to every outgoing request.
+/// This handler always generates a service account token. Callers that need to forward
+/// the authenticated user's token should use <c>UserContextHandler</c> or
+/// <c>CookieForwardingHandler</c> instead.
 /// </summary>
 public class ServiceAccountAuthenticationHandler : DelegatingHandler
 {
@@ -44,9 +47,11 @@ public class ServiceAccountAuthenticationHandler : DelegatingHandler
             throw new InvalidOperationException(error);
         }
 
+        // Always generate a service account token. Callers that need to forward
+        // the end-user's token should use UserContextHandler / CookieForwardingHandler
+        // instead of this handler — mixing both would be incorrect.
         try
         {
-            // Get fresh token for each request
             var token = _tokenProvider.GetToken();
             _logger.LogDebug("Generated fresh service account token for request to {Uri}", request.RequestUri);
 
