@@ -1,7 +1,6 @@
 using Maliev.MessagingContracts.Contracts.Iam;
 using Maliev.MessagingContracts.Contracts.Shared;
 using MassTransit;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,8 +20,6 @@ public class BackgroundIAMRegistrationService : BackgroundService
     private readonly IAMRegistrationStatusTracker _statusTracker;
     private readonly IHostApplicationLifetime _applicationLifetime;
 
-    private readonly IConfiguration _configuration;
-
     /// <summary>
     /// Initializes a new instance of the BackgroundIAMRegistrationService.
     /// </summary>
@@ -31,21 +28,18 @@ public class BackgroundIAMRegistrationService : BackgroundService
     /// <param name="logger">Logger instance.</param>
     /// <param name="statusTracker">Tracks registration status for health checks.</param>
     /// <param name="applicationLifetime">Host application lifetime for waiting until app is started.</param>
-    /// <param name="configuration">The application configuration.</param>
     public BackgroundIAMRegistrationService(
         IEnumerable<IAMRegistrationService> registrationServices,
         IServiceProvider serviceProvider,
         ILogger<BackgroundIAMRegistrationService> logger,
         IAMRegistrationStatusTracker statusTracker,
-        IHostApplicationLifetime applicationLifetime,
-        IConfiguration configuration)
+        IHostApplicationLifetime applicationLifetime)
     {
         _registrationServices = registrationServices ?? throw new ArgumentNullException(nameof(registrationServices));
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _statusTracker = statusTracker ?? throw new ArgumentNullException(nameof(statusTracker));
         _applicationLifetime = applicationLifetime ?? throw new ArgumentNullException(nameof(applicationLifetime));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
 
     /// <summary>
@@ -67,12 +61,8 @@ public class BackgroundIAMRegistrationService : BackgroundService
         try
         {
             // Wait for the application to be fully started (MassTransit bus will be ready at this point)
-            // Use a short initial delay to allow the thundering herd of migrations to subside
-            var delaySeconds = _configuration.GetValue<int>("IAM:RegistrationDelaySeconds", 15);
-            if (delaySeconds > 0)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
-            }
+            // No artificial delay needed here — RabbitMQ reliably delivers messages when IAM service is ready,
+            // and MassTransit's built-in retry with exponential backoff and jitter handles any startup races.
             await WaitForApplicationStartAsync(stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

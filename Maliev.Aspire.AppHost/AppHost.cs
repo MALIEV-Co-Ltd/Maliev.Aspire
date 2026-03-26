@@ -771,6 +771,7 @@ static partial class Program
                 .WithReference(notificationService)
                 .WithReference(facilityService)
                 .WithReference(projectService)
+                .WithReference(currencyService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
                 .WithHttpHealthCheck("/intranet/aspire-liveness")

@@ -64,8 +64,8 @@ public class BackgroundIAMRegistrationServiceTests
     private readonly Mock<ILogger<BackgroundIAMRegistrationService>> _loggerMock;
     private readonly Mock<ILogger> _serviceLoggerMock;
     private readonly Mock<IHostApplicationLifetime> _lifetimeMock;
-    private readonly IAMRegistrationStatusTracker _statusTracker;
     private readonly Mock<IConfiguration> _configMock;
+    private readonly IAMRegistrationStatusTracker _statusTracker;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BackgroundIAMRegistrationServiceTests"/> class.
@@ -79,8 +79,8 @@ public class BackgroundIAMRegistrationServiceTests
         _loggerMock = new Mock<ILogger<BackgroundIAMRegistrationService>>();
         _serviceLoggerMock = new Mock<ILogger>();
         _lifetimeMock = new Mock<IHostApplicationLifetime>();
-        _statusTracker = new IAMRegistrationStatusTracker();
         _configMock = new Mock<IConfiguration>();
+        _statusTracker = new IAMRegistrationStatusTracker();
 
         // Setup Service Scope (for resolving IPublishEndpoint)
         _serviceProviderMock
@@ -121,8 +121,7 @@ public class BackgroundIAMRegistrationServiceTests
             _serviceProviderMock.Object,
             _loggerMock.Object,
             _statusTracker,
-            _lifetimeMock.Object,
-            _configMock.Object
+            _lifetimeMock.Object
         );
 
         // Act
@@ -164,8 +163,7 @@ public class BackgroundIAMRegistrationServiceTests
             _serviceProviderMock.Object,
             _loggerMock.Object,
             _statusTracker,
-            _lifetimeMock.Object,
-            _configMock.Object
+            _lifetimeMock.Object
         );
 
         // Act
@@ -210,8 +208,7 @@ public class BackgroundIAMRegistrationServiceTests
             _serviceProviderMock.Object,
             _loggerMock.Object,
             _statusTracker,
-            _lifetimeMock.Object,
-            _configMock.Object
+            _lifetimeMock.Object
         );
 
         // Act

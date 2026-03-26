@@ -3,6 +3,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using StackExchange.Redis;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -31,11 +32,9 @@ public static class CachingExtensions
         {
             try
             {
-                // Register Redis connection multiplexer
-                builder.Services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(sp =>
-                {
-                    return StackExchange.Redis.ConnectionMultiplexer.Connect(redisConnectionString);
-                });
+                // Register Redis connection multiplexer - connect eagerly so we fail fast if Redis is misconfigured
+                var connection = StackExchange.Redis.ConnectionMultiplexer.Connect(redisConnectionString);
+                builder.Services.AddSingleton<IConnectionMultiplexer>(connection);
 
                 // Add Redis distributed cache
                 builder.Services.AddStackExchangeRedisCache(options =>
@@ -48,15 +47,25 @@ public static class CachingExtensions
                 builder.Services.AddScoped<ICacheService, RedisCacheService>();
 
                 // Log successful Redis configuration
+                builder.Services.AddSingleton<ILogger<IDistributedCache>>(sp =>
+                    sp.GetRequiredService<ILoggerFactory>().CreateLogger<IDistributedCache>());
                 var logger = builder.Services.BuildServiceProvider()
                     .GetRequiredService<ILogger<IDistributedCache>>();
-                logger.LogInformation("Redis cache configured: {InstanceName} (limited to 100MB)", instanceName);
+                logger.LogInformation("Redis cache configured: {InstanceName}", instanceName);
             }
             catch (Exception ex)
             {
-                var logger = builder.Services.BuildServiceProvider()
-                    .GetRequiredService<ILogger<IDistributedCache>>();
-                logger.LogWarning(ex, "Redis unavailable, using in-memory cache (limited to 50MB)");
+                ILogger<IDistributedCache>? logger = null;
+                try
+                {
+                    logger = builder.Services.BuildServiceProvider()
+                        .GetRequiredService<ILogger<IDistributedCache>>();
+                }
+                catch { /* logger not available yet */ }
+                if (logger != null)
+                    logger.LogWarning(ex, "Redis unavailable, using in-memory cache (limited to 50MB)");
+                else
+                    Console.WriteLine($"[WARNING] Redis unavailable: {ex.Message}. Falling back to in-memory cache.");
 
                 // Fallback to in-memory cache
                 builder.Services.AddDistributedMemoryCache(options =>
