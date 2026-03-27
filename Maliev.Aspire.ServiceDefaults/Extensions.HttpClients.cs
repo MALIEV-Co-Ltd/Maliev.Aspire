@@ -2,6 +2,7 @@ using Maliev.Aspire.ServiceDefaults;
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -109,15 +110,14 @@ public static class HttpClientExtensions
         where TInterface : class
         where TImplementation : class, TInterface
     {
-        // 1. Add standard service account auth handler to the service collection
-        var finalSourceServiceName = sourceServiceName
-            ?? builder.Configuration["ServiceName"]
-            ?? throw new InvalidOperationException("ServiceName must be configured in appsettings.json or passed as 'sourceServiceName' parameter to use AddAuthenticatedServiceClient.");
+        // Ensure ServiceAccountAuthenticationHandler is registered (idempotent - TryAdd)
+        builder.Services.TryAddTransient<ServiceAccountAuthenticationHandler>();
 
-        // This configures the named client "IAMService" (used as a template)
-        builder.Services.AddIAMClient(builder.Configuration, finalSourceServiceName);
-
-        // 2. Register the typed client using the named configuration
+        // Register the typed client using the named configuration
+        // Note: We do NOT call AddIAMClient here because that would overwrite the "IAMService"
+        // named client registration if AddIAMServiceClient was already called.
+        // The IAMService named client (base address, auth handler chain) is shared across all
+        // authenticated service clients and is only registered once via AddIAMServiceClient.
         return builder.Services.AddHttpClient<TInterface, TImplementation>(serviceName, (sp, client) =>
         {
             // Check if there's an explicit URL configured (for GKE deployment)

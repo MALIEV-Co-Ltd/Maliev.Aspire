@@ -51,7 +51,7 @@ public static class IAMExtensions
             {
                 // Use service name for Aspire service discovery
                 // Service discovery will resolve "http://IAMService" to actual endpoint
-                logger.LogInformation("[IAM Client Config] Using service discovery with service name: http://IAMService");
+                logger.LogDebug("[IAM Client Config] Using service discovery with service name: http://IAMService");
                 client.BaseAddress = new Uri("http://IAMService");
             }
 
