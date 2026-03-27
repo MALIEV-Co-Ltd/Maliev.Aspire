@@ -52,6 +52,27 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         AuthorizationHandlerContext context,
         PermissionRequirement requirement)
     {
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext != null)
+        {
+            // Short-circuit if this permission was already evaluated for this request
+            // (prevents double-check when both UseAuthorization() middleware and the
+            // MVC AuthorizeFilter both run the same policy on the same request).
+            var principalId = context.User.FindFirst("user_id")?.Value
+                ?? context.User.FindFirst("sub")?.Value
+                ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            if (!string.IsNullOrEmpty(principalId))
+            {
+                var cacheKey = $"perm:{principalId}:{requirement.Permission}";
+                if (httpContext.Items.TryGetValue(cacheKey, out var cached))
+                {
+                    if (cached is true) context.Succeed(requirement);
+                    return;
+                }
+            }
+        }
+
         try
         {
             if (await CheckRequirementAsync(
@@ -145,6 +166,9 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
                 hasPermission = true;
             }
         }
+
+        // Cache result for the remainder of this request to prevent double evaluation
+        httpContext.Items[$"perm:{principalId}:{permission}"] = hasPermission;
 
         if (hasPermission)
         {
