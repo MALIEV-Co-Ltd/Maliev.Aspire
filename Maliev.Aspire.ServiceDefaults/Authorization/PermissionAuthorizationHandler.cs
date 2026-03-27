@@ -181,7 +181,19 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            // If user has wildcard permission in JWT, always allow
+            // If user has wildcard permission in JWT, always allow.
+            //
+            // SECURITY NOTE: The wildcard "*" is intentionally allowed here.
+            // This code path is reached only when the IAM live-check fails or is unavailable
+            // AND the JWT contains "*". For user-facing calls (BFF -> downstream services via
+            // UserContextHandler), the JWT carries the end-user's real IAM-resolved permissions
+            // (not "*"). The service-account JWT (which carries "*") is used only for
+            // machine-to-machine bootstrap/seed operations (e.g. SeedCustomerClient), NOT for
+            // user-impersonated downstream calls. Downstream services receive the user's
+            // platform JWT via UserContextHandler; the JWT 'sub' claim contains the real user
+            // GUID, not the service identity. The 'X-User-Id' header (forwarded by
+            // UserContextHandler) carries the same user ID for audit purposes only and is not
+            // used for authorization decisions. See Maliev.Intranet.Bff/UserContextHandler.cs.
             if (userPermissions.Contains("*"))
             {
                 _logger.LogInformation("JWT contains wildcard permission - granting access for {Permission}", permission);
