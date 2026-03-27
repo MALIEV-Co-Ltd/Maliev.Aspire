@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -20,6 +21,15 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
     private readonly IIamServiceClient? _iamClient;
     private readonly ILogger<PermissionAuthorizationHandler> _logger;
     private readonly IAuthMetrics? _authMetrics;
+
+    /// <summary>
+    /// Per-requirement semaphores to serialize concurrent IAM calls for the same permission
+    /// within a request scope. Prevents duplicate IAM HTTP requests when multiple authorization
+    /// policy evaluations for the same (principal, permission, resource) run concurrently.
+    /// SemaphoreSlim instances are created on demand and held briefly — one per unique
+    /// (principalId, permission, resourcePath) combination.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _permissionSemaphores = new();
 
     /// <summary>
     /// Initializes a new instance of the PermissionAuthorizationHandler with the specified dependencies.
@@ -53,32 +63,59 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         PermissionRequirement requirement)
     {
         var httpContext = _httpContextAccessor.HttpContext;
-        if (httpContext != null)
+
+        var principalId = context.User.FindFirst("user_id")?.Value
+            ?? context.User.FindFirst("sub")?.Value
+            ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        // Resolve resource path from template if resource-scoped auth is enabled
+        var resourcePath = "global";
+        if (!string.IsNullOrEmpty(requirement.ResourcePathTemplate))
+        {
+            var config = _serviceProvider.GetService<IConfiguration>();
+            var resourceScopedEnabled = config?.GetValue<bool>("Features:ResourceScopedAuthEnabled", false) ?? false;
+            if (resourceScopedEnabled)
+            {
+                resourcePath = ResolveResourcePath(requirement.ResourcePathTemplate, httpContext?.GetRouteData().Values ?? new RouteValueDictionary());
+            }
+        }
+        var cacheKey = $"perm:{principalId}:{requirement.Permission}:{resourcePath}";
+
+        if (httpContext != null && !string.IsNullOrEmpty(principalId))
         {
             // Short-circuit if this permission was already evaluated for this request
             // (prevents double-check when both UseAuthorization() middleware and the
             // MVC AuthorizeFilter both run the same policy on the same request).
-            var principalId = context.User.FindFirst("user_id")?.Value
-                ?? context.User.FindFirst("sub")?.Value
-                ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-
-            if (!string.IsNullOrEmpty(principalId))
+            if (httpContext.Items.TryGetValue(cacheKey, out var cached))
             {
-                var cacheKey = $"perm:{principalId}:{requirement.Permission}";
+                if (cached is true) context.Succeed(requirement);
+                return;
+            }
+        }
+
+        // Serialize concurrent calls for the same (principal, permission, resource) so that
+        // only one IAM HTTP request is made and subsequent callers reuse the result.
+        var semKey = $"{principalId}:{requirement.Permission}:{resourcePath}";
+        var sem = _permissionSemaphores.GetOrAdd(semKey, _ => new SemaphoreSlim(1, 1));
+
+        await sem.WaitAsync();
+        try
+        {
+            // Re-check cache after acquiring semaphore — another caller may have populated it
+            // while we were waiting.
+            if (httpContext != null && !string.IsNullOrEmpty(principalId))
+            {
                 if (httpContext.Items.TryGetValue(cacheKey, out var cached))
                 {
                     if (cached is true) context.Succeed(requirement);
                     return;
                 }
             }
-        }
 
-        try
-        {
             if (await CheckRequirementAsync(
                 context,
                 requirement.Permission,
-                requirement.ResourcePathTemplate,
+                resourcePath,
                 requirement.AuditPurpose))
             {
                 context.Succeed(requirement);
@@ -88,12 +125,16 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         {
             _logger.LogError(ex, "Unhandled exception in PermissionAuthorizationHandler");
         }
+        finally
+        {
+            sem.Release();
+        }
     }
 
     private async Task<bool> CheckRequirementAsync(
         AuthorizationHandlerContext context,
         string permission,
-        string? resourcePathTemplate,
+        string resourcePath,
         string? auditPurpose)
     {
         var httpContext = _httpContextAccessor.HttpContext;
@@ -109,24 +150,13 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         if (string.IsNullOrEmpty(principalId)) return false;
 
         _logger.LogInformation("Checking permission {Permission} for Principal {PrincipalId} on Resource {ResourcePath}",
-            permission, principalId, resourcePathTemplate ?? "global");
+            permission, principalId, resourcePath);
 
         bool hasPermission = false;
-        string? resourcePath = null;
 
         // Try IAM live check first if client is available
         if (_iamClient != null)
         {
-            if (!string.IsNullOrEmpty(resourcePathTemplate))
-            {
-                var config = _serviceProvider.GetService<IConfiguration>();
-                var resourceScopedEnabled = config?.GetValue<bool>("Features:ResourceScopedAuthEnabled", false) ?? false;
-                if (resourceScopedEnabled)
-                {
-                    resourcePath = ResolveResourcePath(resourcePathTemplate, httpContext.GetRouteData().Values);
-                }
-            }
-
             try
             {
                 hasPermission = await _iamClient.CheckPermissionAsync(principalId, permission, resourcePath);
@@ -167,8 +197,10 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             }
         }
 
-        // Cache result for the remainder of this request to prevent double evaluation
-        httpContext.Items[$"perm:{principalId}:{permission}"] = hasPermission;
+        // Cache result for the remainder of this request to prevent double evaluation.
+        // Use the same cache key format as HandleRequirementAsync for consistency.
+        var cacheKey = $"perm:{principalId}:{permission}:{resourcePath}";
+        httpContext.Items[cacheKey] = hasPermission;
 
         if (hasPermission)
         {
