@@ -9,19 +9,23 @@ namespace Maliev.Aspire.Tests.Domain.Commercial;
 /// <summary>
 /// Integration tests for the commercial workflow from quotation to order to invoice.
 /// </summary>
-public class QuotationToInvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class QuotationToInvoiceWorkflowTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests the full commercial workflow: quotation creation, order from quotation, and invoice generation.
     /// </summary>
     [Fact]
     public async Task FullCommercialWorkflow_QuotationToOrderToInvoice()
     {
-        var customerClient = await CreateAuthenticatedClient("CustomerService");
-        var materialClient = await CreateAuthenticatedClient("MaterialService");
-        var quotationClient = await CreateAuthenticatedClient("QuotationService");
-        var orderClient = await CreateAuthenticatedClient("OrderService");
-        var invoiceClient = await CreateAuthenticatedClient("InvoiceService");
+        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
+        var materialClient = _fixture.CreateAuthenticatedClient("MaterialService");
+        var quotationClient = _fixture.CreateAuthenticatedClient("QuotationService");
+        var orderClient = _fixture.CreateAuthenticatedClient("OrderService");
+        var invoiceClient = _fixture.CreateAuthenticatedClient("InvoiceService");
 
         // 1. Create Customer
         var createCustomerRequest = new
@@ -38,7 +42,7 @@ public class QuotationToInvoiceWorkflowTests(ITestOutputHelper output) : MalievT
         var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
         var customerId = customer.GetProperty("id").GetGuid();
         var customerName = customer.GetProperty("name").GetString();
-        Output.WriteLine($"Customer created: {customerName} ({customerId})");
+        _output.WriteLine($"Customer created: {customerName} ({customerId})");
 
         // 2. Get a Material
         var matResponse = await materialClient.GetAsync("/material/v1/materials?pageSize=1");
@@ -49,7 +53,7 @@ public class QuotationToInvoiceWorkflowTests(ITestOutputHelper output) : MalievT
         var material = materials[0];
         var materialId = material.GetProperty("id").GetGuid();
         var materialPrice = material.GetProperty("unitPrice").GetDecimal();
-        Output.WriteLine($"Using material: {material.GetProperty("code").GetString()} @ {materialPrice}");
+        _output.WriteLine($"Using material: {material.GetProperty("code").GetString()} @ {materialPrice}");
 
         // 3. Create Quotation
         var createQuotationRequest = new
@@ -74,7 +78,7 @@ public class QuotationToInvoiceWorkflowTests(ITestOutputHelper output) : MalievT
         Assert.Equal(HttpStatusCode.Created, quotResponse.StatusCode);
         var quotation = await quotResponse.Content.ReadFromJsonAsync<JsonElement>();
         var quotationId = quotation.GetProperty("id").GetGuid();
-        Output.WriteLine($"Quotation created: {quotationId}");
+        _output.WriteLine($"Quotation created: {quotationId}");
 
         // 4. Create Order from Quotation
         var createOrderRequest = new
@@ -91,7 +95,7 @@ public class QuotationToInvoiceWorkflowTests(ITestOutputHelper output) : MalievT
         Assert.Equal(HttpStatusCode.Created, orderResponse.StatusCode);
         var order = await orderResponse.Content.ReadFromJsonAsync<JsonElement>();
         var orderId = order.GetProperty("orderId").GetString();
-        Output.WriteLine($"Order created: {orderId}");
+        _output.WriteLine($"Order created: {orderId}");
 
         // 5. Create Invoice from Order
         var createInvoiceRequest = new
@@ -122,7 +126,7 @@ public class QuotationToInvoiceWorkflowTests(ITestOutputHelper output) : MalievT
         Assert.Equal(HttpStatusCode.Created, invResponse.StatusCode);
         var invoice = await invResponse.Content.ReadFromJsonAsync<JsonElement>();
         var invoiceId = invoice.GetProperty("id").GetGuid();
-        Output.WriteLine($"Invoice created: {invoiceId}");
+        _output.WriteLine($"Invoice created: {invoiceId}");
 
         Assert.NotEqual(Guid.Empty, customerId);
         Assert.NotEqual(Guid.Empty, quotationId);

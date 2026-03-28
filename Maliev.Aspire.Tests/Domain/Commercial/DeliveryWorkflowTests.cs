@@ -9,16 +9,20 @@ namespace Maliev.Aspire.Tests.Domain.Commercial;
 /// <summary>
 /// Integration tests for delivery workflow.
 /// </summary>
-public class DeliveryWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class DeliveryWorkflowTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests the full delivery workflow from creation to delivery completion.
     /// </summary>
     [Fact]
     public async Task FullDeliveryWorkflow_CreateAndUpdateStatus()
     {
-        var customerClient = await CreateAuthenticatedClient("CustomerService");
-        var deliveryClient = await CreateAuthenticatedClient("DeliveryService");
+        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
+        var deliveryClient = _fixture.CreateAuthenticatedClient("DeliveryService");
 
         // 1. Create Customer
         var createCustomerRequest = new
@@ -57,7 +61,7 @@ public class DeliveryWorkflowTests(ITestOutputHelper output) : MalievTestBase(ou
 
         var dn = await response.Content.ReadFromJsonAsync<JsonElement>();
         var dnId = dn.GetProperty("deliveryNoteId").GetString();
-        Output.WriteLine($"Delivery Note created: {dnId}");
+        _output.WriteLine($"Delivery Note created: {dnId}");
 
         // 3. Update status to InTransit
         var transitRequest = new { NewStatus = "InTransit" };

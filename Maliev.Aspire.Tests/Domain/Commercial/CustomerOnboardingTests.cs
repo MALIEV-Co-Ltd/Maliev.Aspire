@@ -10,15 +10,11 @@ namespace Maliev.Aspire.Tests.Domain.Commercial;
 /// <summary>
 /// Integration tests for customer onboarding workflow.
 /// </summary>
-public class CustomerOnboardingTests : MalievTestBase
+[Collection("AspireDomainTests")]
+public class CustomerOnboardingTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="CustomerOnboardingTests"/> class.
-    /// </summary>
-    /// <param name="output">The test output helper.</param>
-    public CustomerOnboardingTests(ITestOutputHelper output) : base(output)
-    {
-    }
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
 
     /// <summary>
     /// Tests that an admin can successfully onboard a new customer with company and addresses.
@@ -26,16 +22,16 @@ public class CustomerOnboardingTests : MalievTestBase
     [Fact]
     public async Task OnboardCustomer_AsAdmin_Succeeds()
     {
-        Output.WriteLine("=== Customer Onboarding Integration Test Starting ===");
+        _output.WriteLine("=== Customer Onboarding Integration Test Starting ===");
 
         // Step 1: Ensure Country Exists
         // Using Admin Token from Base
         var country = await EnsureCountryExistsAsync("TH", "Thailand");
         Assert.NotNull(country);
-        Output.WriteLine($"✓ Using Country: {country.Name} ({country.Id})");
+        _output.WriteLine($"✓ Using Country: {country.Name} ({country.Id})");
 
         // Step 2: Create Customer via BFF
-        var bffClient = await CreateAuthenticatedClient("IntranetBff");
+        var bffClient = _fixture.CreateAuthenticatedClient("IntranetBff");
         var testId = Guid.NewGuid().ToString("N")[..8];
 
         var request = new CustomerOnboardingRequest
@@ -71,7 +67,7 @@ public class CustomerOnboardingTests : MalievTestBase
             }
         };
 
-        Output.WriteLine($"\n[Step 2] Sending onboarding request via BFF...");
+        _output.WriteLine($"\n[Step 2] Sending onboarding request via BFF...");
         var response = await bffClient.PostAsJsonAsync("/api/customers/onboard", request);
 
         var content = await response.Content.ReadAsStringAsync();
@@ -80,11 +76,11 @@ public class CustomerOnboardingTests : MalievTestBase
 
         var createdCustomer = await response.Content.ReadFromJsonAsync<CustomerResponse>();
         Assert.NotNull(createdCustomer);
-        Output.WriteLine($"✓ Customer created with ID: {createdCustomer.Id}");
+        _output.WriteLine($"✓ Customer created with ID: {createdCustomer.Id}");
 
         // Step 3: Verify Addresses via Customer Service
-        Output.WriteLine("\n[Step 3] Verifying addresses in Customer Service...");
-        var customerServiceClient = await CreateAuthenticatedClient("CustomerService");
+        _output.WriteLine("\n[Step 3] Verifying addresses in Customer Service...");
+        var customerServiceClient = _fixture.CreateAuthenticatedClient("CustomerService");
 
         var addressResponse = await customerServiceClient.GetAsync($"/customer/v1/addresses?ownerType=Customer&ownerId={createdCustomer.Id}");
         addressResponse.EnsureSuccessStatusCode();
@@ -94,12 +90,12 @@ public class CustomerOnboardingTests : MalievTestBase
         Assert.NotEmpty(addresses);
         Assert.Equal(request.Addresses[0].AddressLine1, addresses[0].AddressLine1);
 
-        Output.WriteLine("✓ Address verification successful");
+        _output.WriteLine("✓ Address verification successful");
     }
 
     private async Task<CountryDto> EnsureCountryExistsAsync(string iso2, string name)
     {
-        var countryClient = await CreateAuthenticatedClient("CountryService");
+        var countryClient = _fixture.CreateAuthenticatedClient("CountryService");
 
         // Check if exists
         var existing = await countryClient.GetFromJsonAsync<PagedResponse<CountryDto>>($"/country/v1/countries/search?query={iso2}");

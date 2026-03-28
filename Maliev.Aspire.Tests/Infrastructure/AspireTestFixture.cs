@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Aspire.Hosting.Testing;
 using Maliev.Aspire.ServiceDefaults.Testing;
 using Xunit;
@@ -21,11 +22,19 @@ public class AspireTestFixture : IAsyncLifetime
     public string? AdminToken { get; private set; }
 
     /// <summary>
+    /// How long the AppHost took to start, for diagnostics.
+    /// </summary>
+    public TimeSpan StartupDuration { get; private set; }
+
+    /// <summary>
     /// Initializes the test fixture by starting the Aspire application.
     /// </summary>
     /// <returns>A task representing the asynchronous initialization.</returns>
     public async Task InitializeAsync()
     {
+        Console.WriteLine("[AspireTestFixture] Starting AppHost in Testing environment...");
+        var sw = Stopwatch.StartNew();
+
         var appHostAssembly = typeof(Projects.Maliev_Aspire_AppHost).Assembly;
 
         AppFactory = new DistributedApplicationFactory(
@@ -33,6 +42,10 @@ public class AspireTestFixture : IAsyncLifetime
             ["--environment", "Testing"]);
 
         await AppFactory.StartAsync();
+
+        sw.Stop();
+        StartupDuration = sw.Elapsed;
+        Console.WriteLine($"[AspireTestFixture] AppHost started in {sw.Elapsed.TotalSeconds:F1}s");
     }
 
     /// <summary>

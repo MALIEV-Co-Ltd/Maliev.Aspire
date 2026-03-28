@@ -9,15 +9,18 @@ namespace Maliev.Aspire.Tests.Domain.Financial;
 /// <summary>
 /// Integration tests for the currency service.
 /// </summary>
-public class CurrencyServiceTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class CurrencyServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
     /// <summary>
     /// Tests that the currencies endpoint returns the seeded currency list.
     /// </summary>
     [Fact]
     public async Task GetCurrencies_ReturnsSeededList()
     {
-        var client = await CreateAuthenticatedClient("CurrencyService");
+        var client = _fixture.CreateAuthenticatedClient("CurrencyService");
 
         var response = await client.GetAsync("/currency/v1/currencies");
 
@@ -30,7 +33,7 @@ public class CurrencyServiceTests(ITestOutputHelper output) : MalievTestBase(out
 
         Assert.True(items.Any(c => c.GetProperty("code").GetString() == "THB"), "THB should exist in seeded data.");
         Assert.True(items.Any(c => c.GetProperty("code").GetString() == "USD"), "USD should exist in seeded data.");
-        Output.WriteLine("Verified THB and USD exist in currency list.");
+        _output.WriteLine("Verified THB and USD exist in currency list.");
     }
 
     /// <summary>
@@ -39,7 +42,7 @@ public class CurrencyServiceTests(ITestOutputHelper output) : MalievTestBase(out
     [Fact]
     public async Task GetCurrencyByCountry_ReturnsCorrectCurrency()
     {
-        var client = await CreateAuthenticatedClient("CurrencyService");
+        var client = _fixture.CreateAuthenticatedClient("CurrencyService");
 
         // Resolve for Thailand (TH)
         var response = await client.GetAsync("/currency/v1/currencies/by-country?iso=TH");
@@ -47,6 +50,6 @@ public class CurrencyServiceTests(ITestOutputHelper output) : MalievTestBase(out
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("THB", result.GetProperty("code").GetString());
-        Output.WriteLine("Verified TH country resolves to THB currency.");
+        _output.WriteLine("Verified TH country resolves to THB currency.");
     }
 }

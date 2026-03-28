@@ -9,15 +9,19 @@ namespace Maliev.Aspire.Tests.Domain.Communication;
 /// <summary>
 /// Integration tests for the notification service.
 /// </summary>
-public class NotificationServiceTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class NotificationServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests that an admin can retrieve notification templates.
     /// </summary>
     [Fact]
     public async Task GetTemplates_AsAdmin_ReturnsOk()
     {
-        var client = await CreateAuthenticatedClient("NotificationService");
+        var client = _fixture.CreateAuthenticatedClient("NotificationService");
 
         var response = await client.GetAsync("/notification/v1/templates");
 
@@ -32,7 +36,7 @@ public class NotificationServiceTests(ITestOutputHelper output) : MalievTestBase
     [Fact]
     public async Task CreateTemplate_AsAdmin_Succeeds()
     {
-        var client = await CreateAuthenticatedClient("NotificationService");
+        var client = _fixture.CreateAuthenticatedClient("NotificationService");
 
         var request = new
         {

@@ -9,15 +9,18 @@ namespace Maliev.Aspire.Tests.Domain.Financial;
 /// <summary>
 /// Integration tests for the accounting workflow.
 /// </summary>
-public class AccountingWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class AccountingWorkflowTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
     /// <summary>
     /// Tests that the chart of accounts returns seeded data.
     /// </summary>
     [Fact]
     public async Task GetChartOfAccounts_ReturnsSeededData()
     {
-        var client = await CreateAuthenticatedClient("AccountingService");
+        var client = _fixture.CreateAuthenticatedClient("AccountingService");
 
         var response = await client.GetAsync("/accounting/v1/chart-of-accounts");
 
@@ -25,7 +28,7 @@ public class AccountingWorkflowTests(ITestOutputHelper output) : MalievTestBase(
         var result = await response.Content.ReadFromJsonAsync<List<JsonElement>>();
         Assert.NotNull(result);
         Assert.True(result.Count > 0, "Chart of accounts should be seeded.");
-        Output.WriteLine($"Found {result.Count} accounts in CoA.");
+        _output.WriteLine($"Found {result.Count} accounts in CoA.");
     }
 
     /// <summary>
@@ -34,7 +37,7 @@ public class AccountingWorkflowTests(ITestOutputHelper output) : MalievTestBase(
     [Fact]
     public async Task CreateJournalEntry_WithBalancedLines_Succeeds()
     {
-        var client = await CreateAuthenticatedClient("AccountingService");
+        var client = _fixture.CreateAuthenticatedClient("AccountingService");
 
         // 1. Get two accounts to use
         var coaResponse = await client.GetAsync("/accounting/v1/chart-of-accounts");

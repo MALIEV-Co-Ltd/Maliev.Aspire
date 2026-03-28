@@ -9,15 +9,19 @@ namespace Maliev.Aspire.Tests.Domain.Foundation;
 /// <summary>
 /// Integration tests for the country service.
 /// </summary>
-public class CountryServiceTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class CountryServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests that the countries endpoint returns a non-empty list.
     /// </summary>
     [Fact]
     public async Task GetCountries_ReturnsNonEmptyList()
     {
-        var client = await CreateAuthenticatedClient("CountryService");
+        var client = _fixture.CreateAuthenticatedClient("CountryService");
 
         var response = await client.GetAsync("/country/v1/countries");
 
@@ -35,7 +39,7 @@ public class CountryServiceTests(ITestOutputHelper output) : MalievTestBase(outp
     [Fact]
     public async Task GetCountryById_ReturnsCorrectCountry()
     {
-        var client = await CreateAuthenticatedClient("CountryService");
+        var client = _fixture.CreateAuthenticatedClient("CountryService");
 
         // 1. Get a country to find its ID
         var listResponse = await client.GetAsync("/country/v1/countries");
@@ -59,7 +63,7 @@ public class CountryServiceTests(ITestOutputHelper output) : MalievTestBase(outp
     [Fact]
     public async Task GetByIso2_ReturnsCorrectCountry()
     {
-        var client = await CreateAuthenticatedClient("CountryService");
+        var client = _fixture.CreateAuthenticatedClient("CountryService");
 
         // Thailand ISO2 is TH
         var response = await client.GetAsync("/country/v1/countries/iso2/TH");

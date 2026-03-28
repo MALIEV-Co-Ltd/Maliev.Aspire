@@ -1,4 +1,5 @@
 using Aspire.Hosting.Testing;
+using Maliev.Aspire.Tests.Infrastructure;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -181,31 +182,33 @@ public class ServiceDiscoveryTests
         var client = _fixture.AppFactory.CreateHttpClient(resourceName);
         client.Timeout = TimeSpan.FromSeconds(30);
 
-        HttpResponseMessage response = null!;
-        string content = string.Empty;
-        const int maxRetries = 20;
-        for (int attempt = 1; attempt <= maxRetries; attempt++)
-        {
-            response = await client.GetAsync(readinessPath);
-            content = await response.Content.ReadAsStringAsync();
+        var response = await TestHelpers.WaitForAsync(
+            async () =>
+            {
+                var r = await client.GetAsync(readinessPath);
+                var c = await r.Content.ReadAsStringAsync();
+                return (Response: r, Content: c);
+            },
+            until: result =>
+            {
+                if (result.Response.IsSuccessStatusCode)
+                    return true;
+                // Only retry for IAM registration pending — other failures are real errors
+                if (!result.Content.Contains("IAM registration pending"))
+                    return true; // Stop polling, let assertion below handle failure
+                _output.WriteLine($"  {resourceName}: IAM registration pending, retrying...");
+                return false;
+            },
+            timeout: TimeSpan.FromSeconds(100),
+            interval: TimeSpan.FromSeconds(5),
+            message: $"{resourceName} readiness check did not complete within timeout");
 
-            if (response.IsSuccessStatusCode)
-                break;
+        _output.WriteLine($"  {resourceName}: {response.Response.StatusCode}");
+        if (!response.Response.IsSuccessStatusCode)
+            _output.WriteLine($"  Body: {response.Content}");
 
-            // Only retry for IAM registration pending — other failures are real errors
-            if (!content.Contains("IAM registration pending"))
-                break;
-
-            _output.WriteLine($"  {resourceName}: IAM registration pending (attempt {attempt}/{maxRetries}), retrying in 5s...");
-            await Task.Delay(5000);
-        }
-
-        _output.WriteLine($"  {resourceName}: {response.StatusCode}");
-        if (!response.IsSuccessStatusCode)
-            _output.WriteLine($"  Body: {content}");
-
-        Assert.True(response.IsSuccessStatusCode,
-            $"{resourceName} readiness failed with {response.StatusCode}: {content}");
+        Assert.True(response.Response.IsSuccessStatusCode,
+            $"{resourceName} readiness failed with {response.Response.StatusCode}: {response.Content}");
     }
 
     /// <summary>

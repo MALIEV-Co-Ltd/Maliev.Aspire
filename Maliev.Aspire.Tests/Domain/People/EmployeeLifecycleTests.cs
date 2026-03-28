@@ -10,8 +10,12 @@ namespace Maliev.Aspire.Tests.Domain.People;
 /// <summary>
 /// Integration tests for the employee lifecycle.
 /// </summary>
-public class EmployeeLifecycleTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class EmployeeLifecycleTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests the employee onboarding workflow and preferences.
     /// </summary>
@@ -19,11 +23,11 @@ public class EmployeeLifecycleTests(ITestOutputHelper output) : MalievTestBase(o
     public async Task Employee_Onboarding_And_Preferences_Succeed()
     {
         // 1. Setup Clients
-        var employeeClient = await CreateAuthenticatedClient("EmployeeService");
-        var lifecycleClient = await CreateAuthenticatedClient("LifecycleService");
+        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
+        var lifecycleClient = _fixture.CreateAuthenticatedClient("LifecycleService");
 
         // 2. Hire Employee
-        Output.WriteLine("Scenario: Hire Employee");
+        _output.WriteLine("Scenario: Hire Employee");
         var hireRequest = new CreateEmployeeRequest
         {
             FirstName = "Somchai",
@@ -38,19 +42,19 @@ public class EmployeeLifecycleTests(ITestOutputHelper output) : MalievTestBase(o
         Assert.Equal(HttpStatusCode.Created, hireResponse.StatusCode);
         var employee = await hireResponse.Content.ReadFromJsonAsync<EmployeeSummaryDto>();
         Assert.NotNull(employee);
-        Output.WriteLine($"✓ Employee hired: {employee.Name}");
+        _output.WriteLine($"✓ Employee hired: {employee.Name}");
 
         // 3. Verify Onboarding Triggered
-        Output.WriteLine("Scenario: Verify Onboarding Checklist");
+        _output.WriteLine("Scenario: Verify Onboarding Checklist");
         // We might need a small delay for event-driven onboarding creation, 
         // but since we're in integration test, we can poll or expect synchronous if designed so.
         var checklist = await lifecycleClient.GetFromJsonAsync<OnboardingChecklistDto>($"/lifecycle/v1/onboarding/{employee.Id}/checklist");
         Assert.NotNull(checklist);
         Assert.NotEmpty(checklist.Tasks);
-        Output.WriteLine($"✓ Onboarding checklist found with {checklist.Tasks.Count} tasks");
+        _output.WriteLine($"✓ Onboarding checklist found with {checklist.Tasks.Count} tasks");
 
         // 4. Set User Preferences
-        Output.WriteLine("Scenario: Set Dashboard Preferences");
+        _output.WriteLine("Scenario: Set Dashboard Preferences");
         var prefRequest = new UpsertPreferenceRequest
         {
             PreferenceData = new Dictionary<string, object>
@@ -63,6 +67,6 @@ public class EmployeeLifecycleTests(ITestOutputHelper output) : MalievTestBase(o
 
         var prefResponse = await employeeClient.PutAsJsonAsync($"/employee/v1/preferences/dashboard", prefRequest);
         Assert.Equal(HttpStatusCode.OK, prefResponse.StatusCode);
-        Output.WriteLine("✓ User preferences stored");
+        _output.WriteLine("✓ User preferences stored");
     }
 }

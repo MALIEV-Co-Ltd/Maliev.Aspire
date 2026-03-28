@@ -67,11 +67,83 @@ dotnet test --filter "FullyQualifiedName~Maliev.Aspire.Tests.MessagingTests"
 - **Health Checks**: Always configure `WithHttpHealthCheck`.
 - **Secrets**: Use `AddParameterFromConfig` with `secret: true` for sensitive data.
 
-### Testing (`Maliev.Aspire.Tests`)
-- **Framework**: xUnit + `Aspire.Hosting.Testing`.
-- **Integration Tests**: Tests spin up the full Aspire AppHost.
-- **Logging**: Inject `ITestOutputHelper` and use `_output.WriteLine` for test logs.
-- **Assertions**: Use strict xUnit `Assert` (e.g., `Assert.NotNull`, `Assert.Equal`).
+### Testing (`Maliev.Aspire.Tests`) — System Integration (Tier 3)
+
+This project contains **system integration tests** that verify cross-service workflows against the full Aspire AppHost (all 34 services + Postgres + RabbitMQ + Redis). These are **Tier 3** in the Maliev testing pyramid.
+
+> Full test strategy, coverage matrix, and governance: `Maliev.Aspire.Tests/TEST_PLAN.md`
+
+#### Shared Fixture Pattern (Mandatory)
+
+All tests MUST use the shared `AspireTestFixture` via `[Collection("AspireDomainTests")]`. This starts the AppHost **once** and shares it across all test classes. **Never** create a new `DistributedApplicationFactory` per test class.
+
+```csharp
+[Collection("AspireDomainTests")]
+public class MyWorkflowTests(AspireTestFixture fixture, ITestOutputHelper output)
+{
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
+    [Fact]
+    public async Task MyTest()
+    {
+        var client = _fixture.CreateAuthenticatedClient("ServiceName");
+        var response = await client.GetAsync("/service/v1/endpoint");
+        response.EnsureSuccessStatusCode();
+    }
+}
+```
+
+#### Eventual Consistency (Never Use Task.Delay)
+
+For async operations (e.g., waiting for a RabbitMQ consumer to process an event), use `TestHelpers.WaitForAsync`:
+
+```csharp
+// GOOD: Poll until condition met
+var response = await TestHelpers.WaitForSuccessAsync(
+    () => client.GetAsync($"/notification/v1/delivery-logs?userId={orderId}"),
+    timeout: TimeSpan.FromSeconds(30),
+    message: "Notification delivery log not created within timeout");
+
+// BAD: Never do this
+await Task.Delay(5000);
+```
+
+#### Test Organization
+
+```
+Maliev.Aspire.Tests/
+├── Infrastructure/         # AspireTestFixture, TestHelpers (DO NOT ADD test classes here)
+├── Domain/                 # Per-domain workflow tests
+│   ├── Commercial/         # Customer, Order, Invoice, Payment, Delivery
+│   ├── Communication/      # Notification, PDF
+│   ├── Financial/          # Accounting, Currency
+│   ├── Foundation/         # Auth, IAM, Country, Registry
+│   ├── HR/                 # Career, Compensation, Leave, Lifecycle, Performance
+│   ├── People/             # Employee lifecycle
+│   ├── SupplyChain/        # Pricing, Supplier, Material, PurchaseOrder
+│   └── Workflows/          # Cross-domain multi-service workflows
+├── Integration/            # ServiceDiscoveryTests, EventChainTests, ErrorScenarioTests
+├── specs/                  # Test specification documents (markdown)
+└── TEST_PLAN.md            # Master test strategy document
+```
+
+#### What to Test Here (and What NOT to)
+
+**DO test at this level:**
+- Cross-service data flows (Order → Payment → Notification)
+- Event chains spanning multiple RabbitMQ consumers
+- Service discovery and health checks
+- End-to-end authentication flows
+
+**DO NOT duplicate at this level:**
+- Individual endpoint CRUD operations (covered by per-service `BaseIntegrationTestFactory` tests)
+- Single-service business logic (covered by per-service unit tests)
+- Permission enforcement per endpoint (covered by per-service contract tests)
+
+#### Assertions & Logging
+- **Assertions**: Use strict xUnit `Assert` (e.g., `Assert.NotNull`, `Assert.Equal`). FluentAssertions is banned.
+- **Logging**: Use `_output.WriteLine` for test diagnostics (injected via `ITestOutputHelper`).
 
 ## 5. Development Workflow
 1. **Analyze**: Read `Directory.Build.props` to understand global constraints.

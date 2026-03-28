@@ -9,15 +9,19 @@ namespace Maliev.Aspire.Tests.Domain.HR;
 /// <summary>
 /// Integration tests for the career service.
 /// </summary>
-public class CareerServiceTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class CareerServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests that a job posting can be created successfully.
     /// </summary>
     [Fact]
     public async Task CreateJobPosting_Succeeds()
     {
-        var client = await CreateAuthenticatedClient("CareerService");
+        var client = _fixture.CreateAuthenticatedClient("CareerService");
 
         var request = new
         {
@@ -46,7 +50,7 @@ public class CareerServiceTests(ITestOutputHelper output) : MalievTestBase(outpu
     [Fact]
     public async Task SubmitApplication_ForOpenJob_Succeeds_Or_FailsWithFileError()
     {
-        var client = await CreateAuthenticatedClient("CareerService");
+        var client = _fixture.CreateAuthenticatedClient("CareerService");
 
         // 1. Get an active job posting
         var postingsResponse = await client.GetAsync("/career/v1/job-postings");
@@ -70,13 +74,13 @@ public class CareerServiceTests(ITestOutputHelper output) : MalievTestBase(outpu
 
         // We expect either Created (if validation skipped/dummy found) or BadRequest (if file not found)
         // Given ApplicationService.cs, it should be BadRequest (400) because ResumeFileId is random.
-        Output.WriteLine($"Submit Application Status: {response.StatusCode}");
+        _output.WriteLine($"Submit Application Status: {response.StatusCode}");
 
         if (response.StatusCode == HttpStatusCode.BadRequest)
         {
             var error = await response.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Contains("not found", error.GetProperty("error").GetString());
-            Output.WriteLine("Verified: CareerService correctly validated file existence (expected failure).");
+            _output.WriteLine("Verified: CareerService correctly validated file existence (expected failure).");
         }
         else
         {

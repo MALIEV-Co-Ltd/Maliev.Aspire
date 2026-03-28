@@ -9,16 +9,20 @@ namespace Maliev.Aspire.Tests.Domain.HR;
 /// <summary>
 /// Integration tests for the performance service.
 /// </summary>
-public class PerformanceServiceTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class PerformanceServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests that an admin can create a performance review.
     /// </summary>
     [Fact]
     public async Task CreateReview_AsAdmin_Succeeds()
     {
-        var employeeClient = await CreateAuthenticatedClient("EmployeeService");
-        var perfClient = await CreateAuthenticatedClient("PerformanceService");
+        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
+        var perfClient = _fixture.CreateAuthenticatedClient("PerformanceService");
 
         // 1. Get an employee
         var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
@@ -48,8 +52,8 @@ public class PerformanceServiceTests(ITestOutputHelper output) : MalievTestBase(
     [Fact]
     public async Task GetReviews_ReturnsData()
     {
-        var employeeClient = await CreateAuthenticatedClient("EmployeeService");
-        var perfClient = await CreateAuthenticatedClient("PerformanceService");
+        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
+        var perfClient = _fixture.CreateAuthenticatedClient("PerformanceService");
 
         // 1. Get an employee
         var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
@@ -63,6 +67,6 @@ public class PerformanceServiceTests(ITestOutputHelper output) : MalievTestBase(
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<List<JsonElement>>();
         Assert.NotNull(result);
-        Output.WriteLine($"Found {result.Count} reviews for employee {employeeId}");
+        _output.WriteLine($"Found {result.Count} reviews for employee {employeeId}");
     }
 }

@@ -9,18 +9,22 @@ namespace Maliev.Aspire.Tests.Domain.Commercial;
 /// <summary>
 /// Integration tests for payment and receipt workflow.
 /// </summary>
-public class PaymentReceiptWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class PaymentReceiptWorkflowTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests the full payment workflow from invoice creation through payment to receipt generation.
     /// </summary>
     [Fact]
     public async Task FullPaymentWorkflow_InvoiceToPaymentToReceipt()
     {
-        var customerClient = await CreateAuthenticatedClient("CustomerService");
-        var invoiceClient = await CreateAuthenticatedClient("InvoiceService");
-        var paymentClient = await CreateAuthenticatedClient("PaymentService");
-        var receiptClient = await CreateAuthenticatedClient("ReceiptService");
+        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
+        var invoiceClient = _fixture.CreateAuthenticatedClient("InvoiceService");
+        var paymentClient = _fixture.CreateAuthenticatedClient("PaymentService");
+        var receiptClient = _fixture.CreateAuthenticatedClient("ReceiptService");
 
         // 1. Create Customer
         var createCustomerRequest = new
@@ -66,7 +70,7 @@ public class PaymentReceiptWorkflowTests(ITestOutputHelper output) : MalievTestB
         var invoice = await invResponse.Content.ReadFromJsonAsync<JsonElement>();
         var invoiceId = invoice.GetProperty("id").GetGuid();
         var totalAmount = invoice.GetProperty("totalAmount").GetDecimal();
-        Output.WriteLine($"Invoice created: {invoiceId} for {totalAmount} THB");
+        _output.WriteLine($"Invoice created: {invoiceId} for {totalAmount} THB");
 
         // 3. Create Payment
         var paymentIdempotencyKey = Guid.NewGuid().ToString();
@@ -89,7 +93,7 @@ public class PaymentReceiptWorkflowTests(ITestOutputHelper output) : MalievTestB
         Assert.Equal(HttpStatusCode.Created, payResponse.StatusCode);
         var payment = await payResponse.Content.ReadFromJsonAsync<JsonElement>();
         var transactionId = payment.GetProperty("transactionId").GetGuid();
-        Output.WriteLine($"Payment processed: {transactionId}");
+        _output.WriteLine($"Payment processed: {transactionId}");
 
         // 4. Create Receipt
         var createReceiptRequest = new
@@ -105,7 +109,7 @@ public class PaymentReceiptWorkflowTests(ITestOutputHelper output) : MalievTestB
         Assert.Equal(HttpStatusCode.Created, receiptResponse.StatusCode);
         var receipt = await receiptResponse.Content.ReadFromJsonAsync<JsonElement>();
         var receiptId = receipt.GetProperty("id").GetGuid();
-        Output.WriteLine($"Receipt created: {receiptId}");
+        _output.WriteLine($"Receipt created: {receiptId}");
 
         Assert.Equal(totalAmount, receipt.GetProperty("totalAmount").GetDecimal());
     }

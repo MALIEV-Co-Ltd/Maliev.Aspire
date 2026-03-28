@@ -9,15 +9,18 @@ namespace Maliev.Aspire.Tests.Domain.Communication;
 /// <summary>
 /// Integration tests for the PDF service.
 /// </summary>
-public class PdfServiceTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class PdfServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
     /// <summary>
     /// Tests that the PDF service can generate an invoice PDF and return a storage URL.
     /// </summary>
     [Fact]
     public async Task GenerateInvoicePdf_ReturnsStorageUrl()
     {
-        var client = await CreateAuthenticatedClient("PdfService");
+        var client = _fixture.CreateAuthenticatedClient("PdfService");
 
         // 1. Get available templates
         var templatesResponse = await client.GetAsync("/pdf/v1/templates");
@@ -28,7 +31,7 @@ public class PdfServiceTests(ITestOutputHelper output) : MalievTestBase(output)
             "No PDF templates found — ensure the database seeder has run before executing integration tests.");
 
         var templateCode = templates[0].GetProperty("code").GetString()!;
-        Output.WriteLine($"Using template: {templateCode}");
+        _output.WriteLine($"Using template: {templateCode}");
 
         // 2. Request PDF generation
         var request = new
@@ -53,13 +56,13 @@ public class PdfServiceTests(ITestOutputHelper output) : MalievTestBase(output)
 
         // It might return 500 if dependencies (UploadService) are not fully ready in test environment
         // But we expect 200 OK if everything is fine.
-        Output.WriteLine($"Generation Response: {response.StatusCode}");
+        _output.WriteLine($"Generation Response: {response.StatusCode}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(result.TryGetProperty("storageUrl", out _), "Response missing 'storageUrl' property");
         var url = result.GetProperty("storageUrl").GetString();
         Assert.False(string.IsNullOrEmpty(url), "storageUrl must not be empty");
-        Output.WriteLine($"PDF Generated at: {url}");
+        _output.WriteLine($"PDF Generated at: {url}");
     }
 }

@@ -9,16 +9,20 @@ namespace Maliev.Aspire.Tests.Domain.HR;
 /// <summary>
 /// Integration tests for the compensation service.
 /// </summary>
-public class CompensationServiceTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class CompensationServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests that an admin can retrieve compensation data.
     /// </summary>
     [Fact]
     public async Task GetCompensationData_AsAdmin_ReturnsOk()
     {
-        var employeeClient = await CreateAuthenticatedClient("EmployeeService");
-        var compClient = await CreateAuthenticatedClient("CompensationService");
+        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
+        var compClient = _fixture.CreateAuthenticatedClient("CompensationService");
 
         // 1. Get an employee
         var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
@@ -32,7 +36,7 @@ public class CompensationServiceTests(ITestOutputHelper output) : MalievTestBase
         // It should be OK (200) or NotFound (404) if no record exists yet.
         // Based on controller logic, it returns NotFound if result == null.
         // We'll assert OK or NotFound to verify service reachability and IAM.
-        Output.WriteLine($"Compensation status for {employeeId}: {response.StatusCode}");
+        _output.WriteLine($"Compensation status for {employeeId}: {response.StatusCode}");
         Assert.True(response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.NotFound);
     }
 }

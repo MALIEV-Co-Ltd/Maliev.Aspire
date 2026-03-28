@@ -10,8 +10,11 @@ namespace Maliev.Aspire.Tests.Domain.Financial;
 /// <summary>
 /// Integration tests for the invoice workflow.
 /// </summary>
-public class InvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class InvoiceWorkflowTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
     /// <summary>
     /// Tests the invoice lifecycle including creation and splitting.
     /// </summary>
@@ -19,11 +22,11 @@ public class InvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(out
     public async Task Invoice_Lifecycle_And_Splitting_Succeeds()
     {
         // 1. Setup Clients
-        var invoiceClient = await CreateAuthenticatedClient("InvoiceService");
+        var invoiceClient = _fixture.CreateAuthenticatedClient("InvoiceService");
         var customerId = Guid.NewGuid(); // Simplified for test scope
 
         // 2. Create Draft Invoice
-        Output.WriteLine("Scenario: Create Draft Invoice");
+        _output.WriteLine("Scenario: Create Draft Invoice");
         var createRequest = new CreateInvoiceRequest
         {
             CustomerId = customerId,
@@ -47,10 +50,10 @@ public class InvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(out
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var invoice = await response.Content.ReadFromJsonAsync<InvoiceSummaryDto>();
         Assert.NotNull(invoice);
-        Output.WriteLine($"✓ Invoice created: {invoice.InvoiceNumber} (Status: {invoice.Status})");
+        _output.WriteLine($"✓ Invoice created: {invoice.InvoiceNumber} (Status: {invoice.Status})");
 
         // 3. Split Invoice
-        Output.WriteLine("Scenario: Split Invoice");
+        _output.WriteLine("Scenario: Split Invoice");
         var splitRequest = new SplitInvoiceRequest
         {
             Reason = "Customer requested payment plan",
@@ -63,14 +66,14 @@ public class InvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(out
 
         var splitResponse = await invoiceClient.PostAsJsonAsync($"/invoice/v1/invoices/{invoice.Id}/split", splitRequest);
         Assert.Equal(HttpStatusCode.OK, splitResponse.StatusCode);
-        Output.WriteLine("✓ Invoice split successfully");
+        _output.WriteLine("✓ Invoice split successfully");
 
         // 4. Verify Parent Status
         var updatedInvoice = await invoiceClient.GetFromJsonAsync<InvoiceDetailDto>($"/invoice/v1/invoices/{invoice.Id}");
         Assert.NotNull(updatedInvoice);
         Assert.Equal("Split", updatedInvoice.Status);
         Assert.Equal(2, updatedInvoice.ChildInvoices.Count);
-        Output.WriteLine("✓ Parent invoice status updated to 'Split' and children linked");
+        _output.WriteLine("✓ Parent invoice status updated to 'Split' and children linked");
     }
 
     /// <summary>
@@ -79,7 +82,7 @@ public class InvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(out
     [Fact]
     public async Task BillingNote_Lifecycle_Succeeds()
     {
-        var invoiceClient = await CreateAuthenticatedClient("InvoiceService");
+        var invoiceClient = _fixture.CreateAuthenticatedClient("InvoiceService");
         var customerId = Guid.NewGuid();
 
         // 1. Create 2 Invoices
@@ -87,7 +90,7 @@ public class InvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(out
         var inv2 = await CreateTestInvoice(invoiceClient, customerId);
 
         // 2. Create Billing Note
-        Output.WriteLine("Scenario: Create Billing Note");
+        _output.WriteLine("Scenario: Create Billing Note");
         var createBnRequest = new
         {
             customerId = customerId,
@@ -99,7 +102,7 @@ public class InvoiceWorkflowTests(ITestOutputHelper output) : MalievTestBase(out
 
         var response = await invoiceClient.PostAsJsonAsync("/invoice/v1/billing-notes", createBnRequest);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        Output.WriteLine("✓ Billing Note created for multiple invoices");
+        _output.WriteLine("✓ Billing Note created for multiple invoices");
     }
 
     private async Task<InvoiceSummaryDto> CreateTestInvoice(HttpClient client, Guid customerId)

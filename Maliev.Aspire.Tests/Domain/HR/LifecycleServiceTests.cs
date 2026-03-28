@@ -9,16 +9,20 @@ namespace Maliev.Aspire.Tests.Domain.HR;
 /// <summary>
 /// Integration tests for the lifecycle service.
 /// </summary>
-public class LifecycleServiceTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class LifecycleServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests that the onboarding checklist can be retrieved for a new employee.
     /// </summary>
     [Fact]
     public async Task GetOnboardingChecklist_ForNewEmployee_ReturnsChecklist()
     {
-        var employeeClient = await CreateAuthenticatedClient("EmployeeService");
-        var lifecycleClient = await CreateAuthenticatedClient("LifecycleService");
+        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
+        var lifecycleClient = _fixture.CreateAuthenticatedClient("LifecycleService");
 
         // 1. Get an employee
         var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
@@ -26,26 +30,20 @@ public class LifecycleServiceTests(ITestOutputHelper output) : MalievTestBase(ou
         var employee = empResult.GetProperty("data")[0];
         var employeeId = employee.GetProperty("id").GetGuid();
 
-        // 2. Poll lifecycle endpoint for status
-        // Hire employee might trigger event, so we poll with retries
-        for (int i = 0; i < 5; i++)
-        {
-            var response = await lifecycleClient.GetAsync($"/lifecycle/v1/employees/{employeeId}/onboarding/status");
-            Output.WriteLine($"Polling onboarding status for {employeeId} (Attempt {i + 1}): {response.StatusCode}");
-
-            if (response.StatusCode == HttpStatusCode.OK)
+        // 2. Poll lifecycle endpoint for status (onboarding may be triggered by event)
+        var lastResponse = await TestHelpers.WaitForAsync(
+            () => lifecycleClient.GetAsync($"/lifecycle/v1/employees/{employeeId}/onboarding/status"),
+            until: r =>
             {
-                break;
-            }
+                _output.WriteLine($"Polling onboarding status for {employeeId}: {r.StatusCode}");
+                return r.StatusCode == HttpStatusCode.OK || r.StatusCode == HttpStatusCode.NotFound;
+            },
+            timeout: TimeSpan.FromSeconds(30),
+            interval: TimeSpan.FromSeconds(2),
+            message: $"Lifecycle onboarding endpoint did not respond for employee {employeeId}");
 
-            await Task.Delay(2000);
-        }
-
-        // We verify that the service is reachable and responds. 
-        // If no onboarding exists for the seeded employees, it might return 404, 
-        // but we at least verified the endpoint is alive and auth works.
-        // In a real scenario, we would 'hire' a new employee via EmployeeService first.
-        var lastResponse = await lifecycleClient.GetAsync($"/lifecycle/v1/employees/{employeeId}/onboarding/status");
+        // Verify the service is reachable. If no onboarding exists for seeded employees,
+        // 404 is acceptable — we verified the endpoint is alive and auth works.
         Assert.True(lastResponse.StatusCode == HttpStatusCode.OK || lastResponse.StatusCode == HttpStatusCode.NotFound);
     }
 }

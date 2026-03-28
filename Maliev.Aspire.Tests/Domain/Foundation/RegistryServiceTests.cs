@@ -9,15 +9,19 @@ namespace Maliev.Aspire.Tests.Domain.Foundation;
 /// <summary>
 /// Integration tests for the registry service.
 /// </summary>
-public class RegistryServiceTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class RegistryServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests that Thai locations autocomplete returns results.
     /// </summary>
     [Fact]
     public async Task ThaiLocations_Autocomplete_ReturnsResults()
     {
-        var client = await CreateAuthenticatedClient("RegistryService");
+        var client = _fixture.CreateAuthenticatedClient("RegistryService");
 
         // Search for a common area in Bangkok
         var response = await client.GetAsync("/registry/v1/thai/addresses/autocomplete?query=Bangkok&limit=5");
@@ -36,7 +40,7 @@ public class RegistryServiceTests(ITestOutputHelper output) : MalievTestBase(out
     [Fact]
     public async Task ThaiLocations_ByPostalCode_ReturnsResults()
     {
-        var client = await CreateAuthenticatedClient("RegistryService");
+        var client = _fixture.CreateAuthenticatedClient("RegistryService");
 
         // 10110 is Sukhumvit area, Bangkok
         var response = await client.GetAsync("/registry/v1/thai/addresses/autocomplete-multi?postalCode=10110");

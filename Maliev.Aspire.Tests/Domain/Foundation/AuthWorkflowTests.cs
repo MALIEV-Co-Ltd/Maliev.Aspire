@@ -9,16 +9,20 @@ namespace Maliev.Aspire.Tests.Domain.Foundation;
 /// <summary>
 /// Integration tests for the authentication workflow.
 /// </summary>
-public class AuthWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class AuthWorkflowTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests that a valid @maliev.com email can exchange for an access token.
     /// </summary>
     [Fact]
     public async Task GoogleExchange_WithValidEmail_ReturnsAccessToken()
     {
-        Output.WriteLine("Testing Google Exchange with valid @maliev.com email...");
-        var client = CreateClient("AuthService");
+        _output.WriteLine("Testing Google Exchange with valid @maliev.com email...");
+        var client = _fixture.CreateClient("AuthService");
 
         var request = new
         {
@@ -28,7 +32,7 @@ public class AuthWorkflowTests(ITestOutputHelper output) : MalievTestBase(output
 
         var response = await client.PostAsJsonAsync("/auth/v1/exchange/google", request);
 
-        Output.WriteLine($"Response: {response.StatusCode}");
+        _output.WriteLine($"Response: {response.StatusCode}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -41,8 +45,8 @@ public class AuthWorkflowTests(ITestOutputHelper output) : MalievTestBase(output
     [Fact]
     public async Task GoogleExchange_WithNonCompanyEmail_ReturnsForbidden()
     {
-        Output.WriteLine("Testing Google Exchange with invalid domain email...");
-        var client = CreateClient("AuthService");
+        _output.WriteLine("Testing Google Exchange with invalid domain email...");
+        var client = _fixture.CreateClient("AuthService");
 
         var request = new
         {
@@ -52,7 +56,7 @@ public class AuthWorkflowTests(ITestOutputHelper output) : MalievTestBase(output
 
         var response = await client.PostAsJsonAsync("/auth/v1/exchange/google", request);
 
-        Output.WriteLine($"Response: {response.StatusCode}");
+        _output.WriteLine($"Response: {response.StatusCode}");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 }

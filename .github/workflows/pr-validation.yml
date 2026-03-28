@@ -57,6 +57,85 @@ jobs:
       - name: Build ServiceDefaults
         run: dotnet build ${{ env.SERVICE_DEFAULTS_PATH }} --configuration Release --no-restore /p:TreatWarningsAsErrors=true /p:SharedLibraryVersion=${{ needs.prep.outputs.version_format }}
 
+  system-integration-tests:
+    name: System Integration Tests
+    needs: [prep, build-and-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Create test secrets
+        run: |
+          cat > sharedsecrets.json << 'SECRETS_EOF'
+          {
+            "Jwt": {
+              "SecurityKey": "test-secret-key-at-least-32-characters-long-for-ci",
+              "PrivateKey": "",
+              "PublicKey": "",
+              "Issuer": "test-issuer",
+              "Audience": "test-audience"
+            },
+            "RabbitMQ": {
+              "Username": "guest",
+              "Password": "guest",
+              "ErlangCookie": "test-cookie"
+            },
+            "Authentication": {
+              "Google": {
+                "ClientId": "test-google-id",
+                "ClientSecret": "test-google-secret"
+              }
+            },
+            "CORS": {
+              "AllowedOrigins": ["http://localhost"]
+            },
+            "GCP": {
+              "ProjectId": "test-project",
+              "ServiceAccountKeyBase64": ""
+            }
+          }
+          SECRETS_EOF
+
+      - name: Run System Integration Tests
+        run: |
+          dotnet test Maliev.Aspire.Tests/Maliev.Aspire.Tests.csproj \
+            --configuration Release \
+            --logger "trx;LogFileName=test-results.trx" \
+            --results-directory ./TestResults \
+            --collect:"XPlat Code Coverage"
+        timeout-minutes: 15
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ./TestResults/
+
+      - name: Generate Coverage Report
+        if: success()
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool || true
+          reportgenerator \
+            -reports:"./TestResults/**/coverage.cobertura.xml" \
+            -targetdir:./CoverageReport \
+            -reporttypes:Html || true
+
+      - name: Upload Coverage Report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ./CoverageReport/
+
   publish-validation:
     name: Validate NuGet Package
     runs-on: ubuntu-latest

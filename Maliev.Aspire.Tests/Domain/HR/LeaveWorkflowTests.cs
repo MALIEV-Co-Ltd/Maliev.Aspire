@@ -10,16 +10,20 @@ namespace Maliev.Aspire.Tests.Domain.HR;
 /// <summary>
 /// Integration tests for the leave workflow.
 /// </summary>
-public class LeaveWorkflowTests(ITestOutputHelper output) : MalievTestBase(output)
+[Collection("AspireDomainTests")]
+public class LeaveWorkflowTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
     /// <summary>
     /// Tests the full leave workflow from submission to approval.
     /// </summary>
     [Fact]
     public async Task FullLeaveWorkflow_SubmitAndApprove()
     {
-        var employeeClient = await CreateAuthenticatedClient("EmployeeService");
-        var leaveClient = await CreateAuthenticatedClient("LeaveService");
+        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
+        var leaveClient = _fixture.CreateAuthenticatedClient("LeaveService");
 
         // 1. Get an employee
         var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
@@ -27,7 +31,7 @@ public class LeaveWorkflowTests(ITestOutputHelper output) : MalievTestBase(outpu
         var employee = empResult.GetProperty("data")[0];
         var employeeId = employee.GetProperty("id").GetGuid();
         var employeeName = employee.GetProperty("name").GetString();
-        Output.WriteLine($"Working with employee: {employeeName} ({employeeId})");
+        _output.WriteLine($"Working with employee: {employeeName} ({employeeId})");
 
         // 2. Submit Leave Request
         var submitRequest = new
@@ -44,7 +48,7 @@ public class LeaveWorkflowTests(ITestOutputHelper output) : MalievTestBase(outpu
 
         var submittedResult = await submitResponse.Content.ReadFromJsonAsync<JsonElement>();
         var requestId = submittedResult.GetProperty("id").GetGuid();
-        Output.WriteLine($"Leave request submitted: {requestId}");
+        _output.WriteLine($"Leave request submitted: {requestId}");
 
         // 3. Verify it appears in requests list
         var listResponse = await leaveClient.GetAsync($"/leave/v1/LeaveRequests/employee/{employeeId}");
@@ -54,7 +58,7 @@ public class LeaveWorkflowTests(ITestOutputHelper output) : MalievTestBase(outpu
         Assert.Contains(requests, r => r.GetProperty("id").GetGuid() == requestId);
 
         // 4. Approve the request
-        var adminToken = await GetAdminTokenAsync();
+        var adminToken = _fixture.GetAdminToken();
         var handler = new JwtSecurityTokenHandler();
         var jwtToken = handler.ReadJwtToken(adminToken);
         var adminId = Guid.Parse(jwtToken.Subject);

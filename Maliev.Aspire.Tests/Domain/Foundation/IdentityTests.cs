@@ -9,15 +9,11 @@ namespace Maliev.Aspire.Tests.Domain.Foundation;
 /// <summary>
 /// Integration tests for identity management.
 /// </summary>
-public class IdentityTests : MalievTestBase
+[Collection("AspireDomainTests")]
+public class IdentityTests(AspireTestFixture fixture, ITestOutputHelper output)
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="IdentityTests"/> class.
-    /// </summary>
-    /// <param name="output">The test output helper.</param>
-    public IdentityTests(ITestOutputHelper output) : base(output)
-    {
-    }
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
 
     /// <summary>
     /// Tests that login with a new email triggers automatic employee provisioning.
@@ -26,7 +22,7 @@ public class IdentityTests : MalievTestBase
     public async Task Login_WithNewEmail_TriggersAutoProvisioning()
     {
         // Arrange
-        Output.WriteLine("=== Login Auto-Provisioning Integration Test Starting ===");
+        _output.WriteLine("=== Login Auto-Provisioning Integration Test Starting ===");
 
         var testEmail = $"new.employee.{Guid.NewGuid().ToString("N")[..8]}@maliev.com";
         var googleUserId = "google-" + Guid.NewGuid().ToString("N");
@@ -39,8 +35,8 @@ public class IdentityTests : MalievTestBase
         };
 
         // Act - Step 1: Login (Auth Service)
-        var authApiClient = CreateClient("AuthService");
-        Output.WriteLine($"[Step 1] Attempting Google exchange for {testEmail}...");
+        var authApiClient = _fixture.CreateClient("AuthService");
+        _output.WriteLine($"[Step 1] Attempting Google exchange for {testEmail}...");
 
         var response = await authApiClient.PostAsJsonAsync("/auth/v1/exchange/google", googleExchangeRequest);
         var content = await response.Content.ReadAsStringAsync();
@@ -50,32 +46,25 @@ public class IdentityTests : MalievTestBase
         using var doc = JsonDocument.Parse(content);
         var accessToken = doc.RootElement.GetProperty("access_token").GetString();
         Assert.NotNull(accessToken);
-        Output.WriteLine("✓ Login successful, received Access Token");
+        _output.WriteLine("✓ Login successful, received Access Token");
 
         // Act - Step 2: Verify Employee (Employee Service)
         // Note: Eventual consistency check needed as Auth publishes event -> Employee consumes
-        Output.WriteLine("\n[Step 2] Verifying employee record in Employee Service...");
-        var employeeApiClient = CreateClient("EmployeeService");
+        _output.WriteLine("\n[Step 2] Verifying employee record in Employee Service...");
+        var employeeApiClient = _fixture.CreateClient("EmployeeService");
         employeeApiClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-        HttpResponseMessage? empResponse = null;
-        for (int i = 0; i < 5; i++)
-        {
-            empResponse = await employeeApiClient.GetAsync($"/employee/v1/employees/by-email/{testEmail}");
-            if (empResponse.IsSuccessStatusCode) break;
-
-            Output.WriteLine($"! Employee not found yet (Attempt {i + 1}/5). Waiting 2s...");
-            await Task.Delay(2000);
-        }
-
-        Assert.NotNull(empResponse);
-        empResponse!.EnsureSuccessStatusCode();
+        var empResponse = await TestHelpers.WaitForSuccessAsync(
+            () => employeeApiClient.GetAsync($"/employee/v1/employees/by-email/{testEmail}"),
+            timeout: TimeSpan.FromSeconds(30),
+            interval: TimeSpan.FromSeconds(2),
+            message: $"Employee record for {testEmail} was not provisioned within timeout");
 
         var employee = await empResponse.Content.ReadFromJsonAsync<EmployeeResponse>();
         Assert.NotNull(employee);
         Assert.Equal(testEmail, employee.Email);
 
-        Output.WriteLine($"✓ Employee record verified: ID={employee.Id}");
+        _output.WriteLine($"✓ Employee record verified: ID={employee.Id}");
     }
 
     private class EmployeeResponse
