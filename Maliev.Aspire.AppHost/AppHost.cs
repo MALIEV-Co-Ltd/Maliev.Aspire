@@ -838,7 +838,7 @@ static partial class Program
             environmentName);
 
         // --- Python Services ---
-        var geometryService = builder.AddPythonApp("maliev-geometryservice", "../../Maliev.GeometryService", "src/main.py")
+        var geometryService = builder.AddPythonApp("GeometryService", "../../Maliev.GeometryService", "src/main.py")
             .WithReference(infrastructure.RabbitMQ)
             .WaitFor(infrastructure.RabbitMQ)
             .WithReference(uploadService)
