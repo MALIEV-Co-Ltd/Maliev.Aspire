@@ -2,7 +2,7 @@
 
 > Living document defining the test strategy, coverage matrix, and governance for the Maliev microservices ecosystem.
 >
-> **Last updated**: 2026-03-28
+> **Last updated**: 2026-04-01
 
 ---
 
@@ -97,12 +97,12 @@
 | 7 | EmployeeService | 55 | 0 | EmployeeLifecycleTests | Good |
 | 8 | AuthService | 26 | 0 | AuthWorkflowTests | Good |
 | | **Commercial** | | | | |
-| 9 | OrderService | 27 | 3 | ServiceDiscovery only | Gap: needs Aspire workflow test |
-| 10 | DeliveryService | 17 | 2 | DeliveryWorkflowTests | Good |
-| 11 | InvoiceService | 25 | 1 | InvoiceWorkflowTests | Good |
-| 12 | PaymentService | 28 | 2 | PaymentReceiptWorkflowTests + MessagingTests | Good |
+| 9 | OrderService | 27 | 3 | OrderFulfillmentWorkflowTests + EventChainTests | Good |
+| 10 | DeliveryService | 17 | 2 | DeliveryWorkflowTests + OrderFulfillmentWorkflowTests | Good |
+| 11 | InvoiceService | 25 | 1 | InvoiceWorkflowTests + OrderFulfillmentWorkflowTests + EventChainTests | Good |
+| 12 | PaymentService | 28 | 2 | PaymentReceiptWorkflowTests + MessagingTests + EventChainTests | Good |
 | 13 | QuotationService | 14 | 0 | QuotationToInvoiceWorkflowTests | OK |
-| 14 | ReceiptService | 28 | 0 | PaymentReceiptWorkflowTests | OK |
+| 14 | ReceiptService | 28 | 0 | PaymentReceiptWorkflowTests + OrderFulfillmentWorkflowTests | Good |
 | | **HR** | | | | |
 | 15 | CareerService | 49 | 3 | CareerServiceTests | Good |
 | 16 | CompensationService | 32 | 2 | CompensationServiceTests | Good |
@@ -114,19 +114,19 @@
 | 21 | PricingService | 2 | 0 | PricingServiceTests | Gap: low per-service coverage |
 | 22 | SupplierService | 14 | 0 | SupplyChainTests | OK |
 | 23 | PurchaseOrderService | 10 | 0 | SupplyChainTests | OK |
-| 24 | InventoryService | 8 | 2 | None | Gap: no Aspire test |
+| 24 | InventoryService | 8 | 2 | InventoryServiceTests | OK — workflow test added |
 | | **Communication** | | | | |
-| 25 | NotificationService | 39 | 3 | NotificationServiceTests + MessagingTests | Good |
-| 26 | PdfService | 18 | 7 | PdfServiceTests | Good |
+| 25 | NotificationService | 39 | 3 | NotificationServiceTests + MessagingTests + EventChainTests | Good |
+| 26 | PdfService | 18 | 7 | PdfServiceTests + EventChainTests | Good |
 | 27 | ChatbotService | 48 | 0 | None | Gap: no Aspire test |
 | | **Financial** | | | | |
 | 28 | AccountingService | 23 | 0 | AccountingWorkflowTests | Good |
 | 29 | CurrencyService | 46 | 0 | CurrencyServiceTests | Good |
 | | **Other** | | | | |
-| 30 | ComplianceService | 25 | 3 | None | Gap: no Aspire test |
-| 31 | ContactService | 4 | 0 | None | Gap: low coverage everywhere |
-| 32 | JobService | 3 | 0 | None | Gap: low coverage everywhere |
-| 33 | ProjectService | 6 | 0 | None | Gap: no Aspire test |
+| 30 | ComplianceService | 25 | 3 | ComplianceServiceTests | OK — workflow test added |
+| 31 | ContactService | 4 | 0 | ContactServiceTests | OK — workflow test added |
+| 32 | JobService | 3 | 0 | JobServiceTests | OK — basic connectivity tests added |
+| 33 | ProjectService | 6 | 0 | ProjectServiceTests | OK — CRUD + parts workflow added |
 | 34 | PredictionService | 15 | 0 | None | Gap: no Aspire test |
 | | **Frontend** | | | | |
 | 35 | Intranet BFF | 92 files | 3 | ServiceDiscovery health only | Gap: no E2E tests |
@@ -145,6 +145,16 @@
 | Supplier → Material → PurchaseOrder → Invoice chain | **Not tested** | — |
 | File Upload → Preview Images Generated → Order/Project update | **Not tested** | — |
 
+| Event Chain | Status | Test File |
+|-------------|--------|-----------|
+| Payment → Notification (via RabbitMQ) | **Tested** | `MessagingTests.cs` + `EventChainTests.cs` |
+| Invoice Finalized → PDF Generation | **Tested** | `EventChainTests.cs` |
+| Customer Created → Propagation to dependent services | **Tested** | `EventChainTests.cs` |
+| Employee Created → IAM + Leave + Career provisioning | **Tested** | `EventChainTests.cs` + `EmployeeLifecycleWorkflowTests.cs` |
+| Order → Payment → Delivery full workflow | **Tested** | `OrderFulfillmentWorkflowTests.cs` |
+| Supplier → Material → PurchaseOrder → Invoice chain | **Tested** | `ProcurementWorkflowTests.cs` + `SupplyChainTests.cs` |
+| File Upload → Preview Images Generated → Order/Project update | **Not tested** | — |
+
 ### 2.3 Non-Functional Coverage
 
 | Area | Status | Notes |
@@ -152,8 +162,8 @@
 | Service health checks (liveness) | **Tested** | `ServiceDiscoveryTests.cs` covers all 26+ services |
 | Service readiness checks | **Tested** | 8 core services verified |
 | Authentication flow | **Tested** | `AuthWorkflowTests.cs` |
-| Authorization (401/403) | **Not tested** | At Aspire level — covered per-service |
-| Error handling / resilience | **Not tested** | No negative scenario tests at Aspire level |
+| Authorization (401) | **Tested** | `ErrorScenarioTests.cs` — 401 + 400 scenarios covered |
+| Error handling / resilience | **Tested** | `ErrorScenarioTests.cs` — 400 + 404 + malformed request scenarios |
 | Performance / load | **Not tested** | — |
 | Code coverage reporting | **Not configured** | `coverlet.collector` installed but not reporting |
 
@@ -297,19 +307,16 @@ dotnet test Maliev.OrderService.Tests/ -v n
 | Gap | Impact | Action |
 |-----|--------|--------|
 | No CI/CD test execution | Tests never catch regressions | Add test job to `pr-validation.yml` |
-| No event chain tests | Cross-service messaging unverified | Create `EventChainTests.cs` |
-| No cross-service workflow tests | Business flows unverified end-to-end | Create `Domain/Workflows/` tests |
+| ~~DONE~~ No event chain tests | Cross-service messaging now verified | `EventChainTests.cs` — 4 tests |
+| ~~DONE~~ No cross-service workflow tests | Business flows now verified | `Domain/Workflows/` — 3 files |
 | No coverage reporting | Coverage unknown | Configure coverlet + ReportGenerator |
-
-### 5.2 Medium Priority
-
-| Gap | Impact | Action |
-|-----|--------|--------|
-| No negative scenario tests at Aspire level | Error handling unverified | Create `ErrorScenarioTests.cs` |
-| InventoryService has no Aspire test | Inventory untested at system level | Add to appropriate domain tests |
+| ~~DONE~~ No error scenario tests at Aspire level | Error handling now verified | `ErrorScenarioTests.cs` — 10 tests |
+| ~~DONE~~ InventoryService has no Aspire test | Inventory now tested | `InventoryServiceTests.cs` — 3 tests |
 | ChatbotService has no Aspire test | Chatbot integration untested | Add basic connectivity test |
-| ComplianceService has no Aspire test | Compliance flows untested | Add basic workflow test |
-| ContactService has low coverage (4 files) | Minimal test coverage | Expand per-service tests first |
+| ~~DONE~~ ComplianceService has no Aspire test | Compliance now tested | `ComplianceServiceTests.cs` — 4 tests |
+| ~~DONE~~ ContactService has low coverage | Contact now tested | `ContactServiceTests.cs` — 4 tests |
+| ~~DONE~~ JobService has no Aspire test | Job/queue now tested | `JobServiceTests.cs` — 6 tests |
+| ~~DONE~~ ProjectService has no Aspire test | Project now tested | `ProjectServiceTests.cs` — 5 tests |
 
 ### 5.3 Low Priority (future)
 
