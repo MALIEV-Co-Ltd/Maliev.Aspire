@@ -40,10 +40,12 @@ public static class Extensions
         builder.Logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.AspNetCore.ResponseCaching", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Mvc.Infrastructure", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Mvc.ModelBinding", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Warning); // Reduce startup/shutdown noise
 
         // Health checks - Enabled for debugging
-        builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService", LogLevel.Information);
+        builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService", LogLevel.Warning);
 
         // Service discovery and resilience (temporarily verbose for debugging)
         builder.Logging.AddFilter("Microsoft.Extensions.ServiceDiscovery", LogLevel.Information);
@@ -52,11 +54,13 @@ public static class Extensions
         // Infrastructure components
         builder.Logging.AddFilter("StackExchange.Redis", LogLevel.Warning); // Redis connection noise
         builder.Logging.AddFilter("Npgsql", LogLevel.Warning); // PostgreSQL connection noise
-        // EF Core checks __EFMigrationsHistory on fresh DBs and logs a command error that is handled internally
+        // EF Core logs "Sensitive data logging is enabled" at Warning during startup.
+        // This is expected in development — the warning reminds developers that parameter
+        // values are being logged. In production, sensitive data logging should be disabled.
         builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Critical);
 
-        // MassTransit/RabbitMQ - Information level for monitoring events without debug noise
-        builder.Logging.AddFilter("MassTransit", LogLevel.Information);
+        // MassTransit/RabbitMQ - Warning level for transport; Information for message processing
+        builder.Logging.AddFilter("MassTransit", LogLevel.Warning);
         builder.Logging.AddFilter("MassTransit.Messages", LogLevel.Information);
 
         // IAM and Authorization
