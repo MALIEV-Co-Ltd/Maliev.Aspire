@@ -38,7 +38,7 @@ public static class Extensions
         // ASP.NET Core infrastructure (keep errors only)
         builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
-        builder.Logging.AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Error);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.AspNetCore.ResponseCaching", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Warning); // Reduce startup/shutdown noise
 

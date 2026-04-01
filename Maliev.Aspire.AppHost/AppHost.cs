@@ -743,6 +743,7 @@ static partial class Program
             builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
                 .WithReference(authService)
                 .WithReference(customerService)
                 .WithReference(orderService)
