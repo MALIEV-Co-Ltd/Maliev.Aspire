@@ -8,52 +8,86 @@ This document provides instructions and context for AI agents working on the Mal
 - **Language**: C# 13+
 - **Solution File**: `Maliev.Aspire.slnx` (XML-based solution format)
 
-## 2. Build & Test Commands
+## 2. Build, Test & Lint Commands
 
-### Basic Operations
-- **Restore**: `dotnet restore`
-- **Build**: `dotnet build`
-  - *Note*: `TreatWarningsAsErrors` is ENABLED. All warnings must be fixed.
-- **Test**: `dotnet test`
+All commands run from within this service directory (`B:\maliev\Maliev.Aspire`).
 
-### Running Single Tests
-To run a specific test, use the `--filter` flag with the Fully Qualified Name (FQN) or a substring.
+```powershell
+# Build (treats warnings as errors — all must be fixed)
+dotnet build Maliev.Aspire.slnx
 
-```bash
-# Run a specific test method
+# Run all tests
+dotnet test Maliev.Aspire.slnx --verbosity normal
+
+# Run a single test method
 dotnet test --filter "FullyQualifiedName~Maliev.Aspire.Tests.MessagingTests.PaymentService_Publishes_Event"
 
 # Run all tests in a class
 dotnet test --filter "FullyQualifiedName~Maliev.Aspire.Tests.MessagingTests"
+
+# Run with code coverage
+dotnet test Maliev.Aspire.slnx --collect:"XPlat Code Coverage"
+
+# Format check
+dotnet format Maliev.Aspire.slnx
 ```
 
 ## 3. Code Style & Conventions
 
-### Formatting
-- **Namespaces**: Use file-scoped namespaces (`namespace Maliev.Aspire.Tests;`).
-- **Braces**: Use Allman style (braces on new lines) for methods and control structures.
-- **Indentation**: 4 spaces.
-- **Line Length**: Aim for < 120 characters, but readability takes precedence.
+### C# Naming & Formatting
+- **Namespaces**: File-scoped (`namespace Maliev.Aspire.Tests;`)
+- **Classes/Methods/Properties**: `PascalCase`
+- **Private fields**: `_camelCase` (underscore prefix)
+- **Parameters/locals**: `camelCase`
+- **Async methods**: Suffix with `Async` (e.g., `InitializeAsync`)
+- **Interfaces**: Prefix with `I` (e.g., `IAuthenticationService`)
+- **Permissions**: GCP-style `{domain}.{plural-resource}.{action}` as `public const string` in a `Permissions` static class
+  - Valid: `customer.customers.create`, `auth.tokens.revoke`
+  - Invalid: `customer.customer.create` (singular), `auth.revoke` (missing resource)
+- **XML docs**: Required on ALL public methods and properties
+- **Nullable**: Enabled (`<Nullable>enable</Nullable>`). Use `?` explicitly
+- **Imports**: System first, then third-party, then local. Alphabetize within groups. Remove unused `using`
+- **Braces**: Allman style (new line) for methods and control structures. Expression-bodied for properties/accessors
+- **Indentation**: 4 spaces, LF line endings, UTF-8, trim trailing whitespace
 
-### Naming
-- **Classes/Methods/Properties**: PascalCase (e.g., `ConfigureServices`, `ServiceDatabases`).
-- **Private Fields**: `_camelCase` (e.g., `_appFactory`, `_output`).
-- **Local Variables**: camelCase (e.g., `iamService`, `builder`).
-- **Async Methods**: Suffix with `Async` (e.g., `InitializeAsync`).
+### C# Patterns
+- **DI**: Constructor injection with `private readonly` fields
+- **Logging**: `ILogger<T>` with structured placeholders (never interpolate): `_logger.LogInformation("Processing {FileId}", fileId)`
+- **Manual mapping**: Static extension methods (`ToDto()`, `ToEntity()`). AutoMapper is banned
+- **Validation**: `System.ComponentModel.DataAnnotations` on DTOs. FluentValidation is banned
 
-### C# Features
-- **Implicit Usings**: Enabled. Do not add `using System;` etc., unless necessary to resolve conflicts.
-- **Nullable Reference Types**: Enabled. Use `?` for nullable types and handle nulls appropriately.
-- **Records**: Use `record` for data transfer objects (DTOs) and configuration holders (e.g., `SharedConfiguration`).
+## 4. Banned Libraries (Build Will Fail)
 
-### "Maliev Constitution" (Banned Libraries)
-**STRICTLY FORBIDDEN**. The build will fail if these are used.
-- ❌ `AutoMapper` (Use manual mapping or fast mappers)
-- ❌ `FluentValidation` (Use standard `ComponentModel.DataAnnotations` or manual validation)
-- ❌ `FluentAssertions` (Use standard xUnit `Assert` or `Aspire.Hosting.Testing` assertions)
-- ❌ `Swashbuckle` (Use `Scalar` instead)
+| Banned | Use Instead |
+|--------|-------------|
+| AutoMapper | Manual mapping extensions |
+| FluentValidation | DataAnnotations or manual validation |
+| FluentAssertions | Standard xUnit `Assert.*` |
+| Swashbuckle/Swagger | Scalar (at `/{service}/scalar`) |
+| InMemoryDatabase (EF Core) | Testcontainers with real PostgreSQL |
 
-## 4. Architecture & Aspire Patterns
+## 5. Testing Rules
+
+- **Framework**: xUnit with standard `Assert` (`Assert.Equal`, `Assert.NotNull`, etc.)
+- **Naming**: `MethodName_StateUnderTest_ExpectedBehavior` or `HTTP_METHOD_Path_Scenario_ExpectedStatus`
+- **System tests** (Tier 3): `AspireTestFixture` with `[Collection("AspireDomainTests")]` — shared AppHost, never one per class
+- **Eventual consistency**: Use `TestHelpers.WaitForAsync`. Never `Task.Delay`
+- **MassTransit consumers**: Must have consumer tests using `AddMassTransitTestHarness()`
+
+## 6. Mandatory Rules
+
+- **`TreatWarningsAsErrors = true`**: Zero warnings allowed. No suppression
+- **`[RequirePermission("domain.resources.action")]`**: On all endpoints, not plain `[Authorize]`
+- **API versioning**: All routes versioned (`v1/`)
+- **Service prefix**: Routes prefixed with service domain (e.g., `/auth`, `/customer`, `/job`)
+- **Scalar docs**: Configured at `/{service}/scalar`
+- **Secrets**: Never hardcoded. Use GCP Secret Manager or environment variables
+- **Async/await**: All the way down. Pass `CancellationToken`
+- **EF Core Design package**: Only in Infrastructure project, never in Api
+- **PostgreSQL xmin**: Shadow property only — `entity.Property<uint>("xmin").HasColumnType("xid").IsRowVersion()`. Never add entity property
+- **Temporary files**: Generate in `/temp` folder, clean up afterwards
+
+## 7. Architecture & Aspire Patterns
 
 ### AppHost
 - **Service Registration**: Services are added via `builder.AddProject<T>`.
@@ -145,48 +179,21 @@ Maliev.Aspire.Tests/
 - **Assertions**: Use strict xUnit `Assert` (e.g., `Assert.NotNull`, `Assert.Equal`). FluentAssertions is banned.
 - **Logging**: Use `_output.WriteLine` for test diagnostics (injected via `ITestOutputHelper`).
 
-## 5. Development Workflow
+## 8. Development Workflow
 1. **Analyze**: Read `Directory.Build.props` to understand global constraints.
 2. **Implement**: Follow existing patterns in `AppHost.cs`.
-3. **Verify**: Run `dotnet build` to ensure no warnings (as errors) are introduced.
+3. **Verify**: Run `dotnet build Maliev.Aspire.slnx` to ensure no warnings (as errors) are introduced.
 4. **Test**: Run relevant tests using `dotnet test --filter ...`.
 
-## 6. Common Paths
+## 9. Common Paths
 - `Maliev.Aspire.AppHost/AppHost.cs`: Main orchestration logic.
 - `Maliev.Aspire.AppHost/Program.cs`: Configuration extensions (Infrastructure, Services).
 - `Maliev.Aspire.Tests/`: Integration tests.
 - `Directory.Build.props`: Global build settings and banned packages.
 
+## 10. Git Rules
 
-## Git & Version Control — Mandatory Rules
-
-### 🚨 CRITICAL: Always Commit Code Changes (Non-Negotiable)
-- **You MUST commit your changes to the local repository after completing any meaningful unit of work.**
-- **Never accumulate uncommitted changes.** Do not wait until end of session or until something breaks.
-- **Commit early and often** — if a change is meaningful (even a small fix or refactor), commit it.
-- **You do NOT need to push to remote** — local commits are sufficient to protect against accidental loss.
-- **If you are unsure whether to commit, commit anyway.** Extra commits are harmless; lost work is irreversible.
-- This rule applies even if you are just "testing" or "exploring" — use git branches to isolate experimental work and commit those changes too.
-
-### 🚨 CRITICAL: Never Use `git checkout` to Restore Broken Files
-- **NEVER use `git checkout` to restore or recover files.** This operation discards uncommitted changes permanently and will result in data loss.
-- **To undo/recover from broken files: first commit your current changes, then use `git revert` or `git reset --soft` to safely undo.**
-
-## Database & EF Core — Mandatory Rules
-
-### EF Core Design Package
-- ❌ `Microsoft.EntityFrameworkCore.Design` MUST NOT be in Api projects
-- ✅ It belongs ONLY in the Infrastructure (or Data) project where migrations live
-- Migration commands must target Infrastructure as both project and startup-project (since EF Core Design package is in Infrastructure):
-  ```
-  dotnet ef migrations add <Name> --project Maliev.<Domain>Service.Infrastructure --startup-project Maliev.<Domain>Service.Infrastructure
-  ```
-
-### PostgreSQL xmin Concurrency — Mandatory Pattern
-Use shadow property ONLY. Never add a Xmin/xmin property to domain entities.
-```csharp
-entity.Property<uint>("xmin").HasColumnType("xid").IsRowVersion();
-```
-- ❌ Never use `UseXminAsConcurrencyToken()` (removed in Npgsql EF v7)
-- ❌ Never use entity property `public uint Xmin { get; set; }` or `public uint xmin { get; set; }`
-- ❌ Never use `.Ignore(e => e.Xmin)` — remove the entity property instead
+- This is an independent git repo. `cd` into it before git commands.
+- **Commit early and often** after every meaningful unit of work. Do not accumulate changes.
+- **Never use `git checkout` to restore files** — commit first, then `git revert` or `git reset --soft`.
+- Feature branches merged to `develop` via PR. Do not push without being asked.
