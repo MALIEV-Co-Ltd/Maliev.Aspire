@@ -42,6 +42,10 @@ public static class Extensions
         builder.Logging.AddFilter("Microsoft.AspNetCore.ResponseCaching", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.AspNetCore.Mvc.Infrastructure", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.AspNetCore.Mvc.ModelBinding", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Authentication", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Antiforgery", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.StaticFiles", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.StaticAssets", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Warning); // Reduce startup/shutdown noise
 
         // Health checks - Enabled for debugging

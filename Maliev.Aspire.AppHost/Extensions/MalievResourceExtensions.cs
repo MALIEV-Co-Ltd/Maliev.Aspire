@@ -18,7 +18,6 @@ public static class MalievResourceExtensions
         IResourceBuilder<IResource> otelCollector)
     {
         return project
-            .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
             .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
             .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)

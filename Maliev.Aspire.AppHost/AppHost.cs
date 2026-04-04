@@ -870,7 +870,7 @@ static partial class Program
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", environmentName)
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
             .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
-            .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)  // RSA private key for JWT signing
+            .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
             .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
