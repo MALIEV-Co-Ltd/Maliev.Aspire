@@ -824,6 +824,9 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        // Add JobService reference to IntranetBff now that jobService is declared
+        intranetBff = intranetBff.WithReference(jobService);
+
         var predictionService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PredictionService_Api>("PredictionService")
                 .WithReference(databases.Prediction, "PredictionDatabase")
