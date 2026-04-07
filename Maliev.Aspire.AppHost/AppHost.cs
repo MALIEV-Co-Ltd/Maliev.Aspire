@@ -841,8 +841,8 @@ static partial class Program
             otelCollector,
             environmentName);
 
-        // --- Python Services ---
-        var geometryService = builder.AddPythonApp("GeometryService", "../../Maliev.GeometryService", "src/main.py")
+        // --- Geometry Service (Container with full CADQuery/OCP support) ---
+        var geometryService = builder.AddContainer("GeometryService", "maliev/geometryservice:latest")
             .WithReference(infrastructure.RabbitMQ)
             .WaitFor(infrastructure.RabbitMQ)
             .WithReference(uploadService)
@@ -855,8 +855,7 @@ static partial class Program
             .WithEnvironment("JWT_AUDIENCE", config.JwtAudience)
             .WithHttpEndpoint(targetPort: 8081, name: "http")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
-            .WithHttpHealthCheck("/geometry/aspire-liveness")
-            .WithVirtualEnvironment(".venv");
+            .WithHttpHealthCheck("/geometry/aspire-liveness");
     }
 
     /// <summary>
