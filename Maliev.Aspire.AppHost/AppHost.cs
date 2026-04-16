@@ -841,8 +841,21 @@ static partial class Program
             otelCollector,
             environmentName);
 
-        // --- Geometry Service (Container with full CADQuery/OCP support) ---
-        var geometryService = builder.AddContainer("GeometryService", "maliev/geometryservice:latest")
+        // --- Geometry Service (Python FastAPI — Linux Docker container) ---
+        //
+        // GeometryService is a Python/FastAPI workload, not a .NET project. It runs inside a
+        // Linux Docker container both locally (via Aspire) and in production (Kubernetes Engine
+        // on Linux). Keeping local and production identical eliminates an entire class of
+        // platform-specific bugs (e.g. Linux-only rendering libraries, OSMesa, headless Xvfb).
+        //
+        // AddDockerfile rebuilds the image from source on every debug start (F5), so there is
+        // never a risk of running stale code. The build context is the Maliev.GeometryService
+        // directory; the Dockerfile uses a two-stage python:3.12-slim build with Poetry.
+        //
+        // Because this is not a .NET project it does NOT go through WithSharedSecrets.
+        // JWT keys and service URLs are injected directly as flat environment variables,
+        // which is how pydantic-settings reads them on the Python side.
+        var geometryService = builder.AddDockerfile("GeometryService", "../../Maliev.GeometryService")
             .WithReference(infrastructure.RabbitMQ)
             .WaitFor(infrastructure.RabbitMQ)
             .WithReference(uploadService)
@@ -853,7 +866,9 @@ static partial class Program
             .WithEnvironment("JWT_SECURITY_KEY", config.JwtSecurityKey)
             .WithEnvironment("JWT_ISSUER", config.JwtIssuer)
             .WithEnvironment("JWT_AUDIENCE", config.JwtAudience)
-            .WithHttpEndpoint(targetPort: 8081, name: "http")
+            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+            .WithExternalHttpEndpoints()
+            .WithHttpEndpoint(port: 8081, targetPort: 8081, env: "PORT")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
             .WithHttpHealthCheck("/geometry/aspire-liveness");
     }
