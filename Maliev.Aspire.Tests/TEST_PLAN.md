@@ -2,7 +2,7 @@
 
 > Living document defining the test strategy, coverage matrix, and governance for the Maliev microservices ecosystem.
 >
-> **Last updated**: 2026-04-01
+> **Last updated**: 2026-04-16
 
 ---
 
@@ -129,9 +129,9 @@
 | 33 | ProjectService | 6 | 0 | ProjectServiceTests | OK — CRUD + parts workflow added |
 | 34 | PredictionService | 15 | 0 | None | Gap: no Aspire test |
 | | **Frontend** | | | | |
-| 35 | Intranet BFF | 92 files | 3 | ServiceDiscovery health only | Gap: no E2E tests |
+| 35 | Intranet BFF | 92 files | 3 | ServiceDiscovery health; SignalR integration | Partial: consumer-to-status-service integration tested; full event chain blocked by GeometryService |
 | | **Python** | | | | |
-| 36 | GeometryService | N/A | N/A | None | Gap: no tests in Aspire |
+| 36 | GeometryService | N/A | N/A | GeometryServiceTests.cs (created, infrastructure blocked) | Tests written but Python Docker container build exceeds test timeout; requires pre-built images or longer startup tolerance |
 
 ### 2.2 Cross-Service Event Chain Coverage
 
@@ -153,7 +153,7 @@
 | Employee Created → IAM + Leave + Career provisioning | **Tested** | `EventChainTests.cs` + `EmployeeLifecycleWorkflowTests.cs` |
 | Order → Payment → Delivery full workflow | **Tested** | `OrderFulfillmentWorkflowTests.cs` |
 | Supplier → Material → PurchaseOrder → Invoice chain | **Tested** | `ProcurementWorkflowTests.cs` + `SupplyChainTests.cs` |
-| File Upload → Preview Images Generated → Order/Project update | **Not tested** | — |
+| File Upload → Preview Images Generated → Order/Project update | **Partially tested** | ConsumerToSignalRIntegrationTests.cs (Intranet.Tests) — status service integration; full chain blocked by GeometryService infrastructure |
 
 ### 2.3 Non-Functional Coverage
 
@@ -324,7 +324,7 @@ dotnet test Maliev.OrderService.Tests/ -v n
 |-----|--------|--------|
 | No E2E browser tests | UI flows unverified | Create `Maliev.Intranet.E2E/` with Playwright |
 | No load/performance tests | Performance regressions undetected | Consider k6 or NBomber |
-| GeometryService (Python) untested | Python service untested | Add pytest suite in GeometryService repo |
+| GeometryService (Python) infrastructure | Python Docker build exceeds test timeout | Use pre-built images or optimize build; tests written at `GeometryServiceTests.cs` |
 | PricingService has low per-service coverage | Pricing logic gaps | Expand per-service tests |
 
 ---

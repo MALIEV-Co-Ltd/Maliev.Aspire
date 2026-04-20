@@ -827,6 +827,10 @@ static partial class Program
         // Add JobService reference to IntranetBff now that jobService is declared
         intranetBff = intranetBff.WithReference(jobService);
 
+        // PricingService queries JobService for queue depth — wire the reference here
+        // because jobService is declared after pricingService.
+        pricingService = pricingService.WithReference(jobService);
+
         var predictionService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PredictionService_Api>("PredictionService")
                 .WithReference(databases.Prediction, "PredictionDatabase")
@@ -871,6 +875,12 @@ static partial class Program
             .WithHttpEndpoint(port: 8081, targetPort: 8081, env: "PORT")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
             .WithHttpHealthCheck("/geometry/aspire-liveness");
+
+        // Wire GeometryService into IntranetBff for service discovery.
+        // GeometryService is a Docker container (not a .NET project), so its endpoint is injected
+        // via EndpointReference — which Aspire translates to the services__GeometryService__http__0
+        // environment variable that AddServiceDiscovery() reads on the BFF side.
+        intranetBff = intranetBff.WithReference(geometryService.GetEndpoint("http"));
     }
 
     /// <summary>
