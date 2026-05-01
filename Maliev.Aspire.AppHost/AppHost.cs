@@ -757,6 +757,7 @@ static partial class Program
                 .WithReference(employeeService)
                 .WithReference(invoiceService)
                 .WithReference(paymentService)
+                .WithReference(pdfService)
                 .WithReference(supplierService)
                 .WithReference(chatbotService)
                 .WithReference(careerService)
@@ -777,7 +778,7 @@ static partial class Program
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
                 .WithHttpHealthCheck("/intranet/aspire-liveness")
                 .WithHttpCommand(
-                    path: "/api/seed/customers",
+                    path: "/api/v1/seed/customers",
                     displayName: "Seed Customer Data",
                     commandOptions: new HttpCommandOptions
                     {
@@ -829,7 +830,7 @@ static partial class Program
 
         // PricingService queries JobService for queue depth — wire the reference here
         // because jobService is declared after pricingService.
-        pricingService = pricingService.WithReference(jobService);
+        pricingService = pricingService.WithReference(jobService).WaitFor(jobService);
 
         var predictionService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PredictionService_Api>("PredictionService")
@@ -871,6 +872,11 @@ static partial class Program
             .WithEnvironment("JWT_ISSUER", config.JwtIssuer)
             .WithEnvironment("JWT_AUDIENCE", config.JwtAudience)
             .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+            .WithEnvironment("GEOMETRY_MAIN_WORKERS", "2")
+            .WithEnvironment("GEOMETRY_DFM_WORKERS", "1")
+            .WithEnvironment("GEOMETRY_PREVIEW_RENDER_WORKERS", "2")
+            .WithEnvironment("GEOMETRY_DFM_BODY_WORKERS", "2")
+            .WithEnvironment("GEOMETRY_RABBITMQ_PREFETCH", "1")
             .WithExternalHttpEndpoints()
             .WithHttpEndpoint(port: 8081, targetPort: 8081, env: "PORT")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
@@ -904,6 +910,12 @@ static partial class Program
             .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins)
             .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http"))
+            .WithEnvironment("Observability__TracingEnabled", "false")
+            .WithEnvironment("Observability__RuntimeMetricsEnabled", "false")
+            .WithEnvironment("DOTNET_gcServer", "0")
+            .WithEnvironment("COMPlus_gcServer", "0")
+            .WithEnvironment("DOTNET_GCHeapHardLimitPercent", "3")
+            .WithEnvironment("COMPlus_GCHeapHardLimitPercent", "3")
             .WithEnvironment("NPGSQL_GSSAPI_AUTHENTICATION", "false")
             .WithEnvironment("PGGSSENCMODE", "disable");
     }

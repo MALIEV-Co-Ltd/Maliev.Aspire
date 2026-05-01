@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
@@ -84,21 +85,34 @@ public static class Extensions
         });
 
         var useOtlpExporter = !string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+        var enableTracing = useOtlpExporter ||
+            builder.Configuration.GetValue("Observability:TracingEnabled", false);
+        var enableRuntimeMetrics = builder.Configuration.GetValue(
+            "Observability:RuntimeMetricsEnabled",
+            !builder.Environment.IsDevelopment());
 
-        builder.Services.AddOpenTelemetry()
+        var openTelemetry = builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
-                    .AddHttpClientInstrumentation()
-                    .AddRuntimeInstrumentation()
-                    .AddPrometheusExporter(); // Export metrics for Prometheus
+                    .AddHttpClientInstrumentation();
+
+                if (enableRuntimeMetrics)
+                {
+                    metrics.AddRuntimeInstrumentation();
+                }
+
+                metrics.AddPrometheusExporter(); // Export metrics for Prometheus
 
                 if (useOtlpExporter)
                 {
                     metrics.AddOtlpExporter();
                 }
-            })
-            .WithTracing(tracing =>
+            });
+
+        if (enableTracing)
+        {
+            openTelemetry.WithTracing(tracing =>
             {
                 tracing.AddAspNetCoreInstrumentation()
                        .AddHttpClientInstrumentation()
@@ -110,6 +124,7 @@ public static class Extensions
                     tracing.AddOtlpExporter();
                 }
             });
+        }
 
 
         // --- Health Checks ---
