@@ -1,9 +1,9 @@
 <Project>
-  <!-- 
+  <!--
     MALIEV Platform Global Build Configuration
     Enforces the "Maliev Constitution" rules for library usage and code quality.
   -->
-  
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,6 +12,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <SharedLibraryVersion Condition="'$(SharedLibraryVersion)' == ''">1.0.*-alpha*</SharedLibraryVersion>
   </PropertyGroup>
 
   <!-- Disable TreatWarningsAsErrors for generated contracts -->

@@ -50,7 +50,7 @@ jobs:
           if [ "$BRANCH" == "main" ]; then
             VERSION_PATTERN="1.0.*"
           else
-            VERSION_PATTERN="1.0.*-*"
+            VERSION_PATTERN="1.0.*-alpha*"
           fi
           sed -i "s|<ProjectReference Include=\"..\\\\..\\\\Maliev.MessagingContracts\\\\generated\\\\csharp\\\\Maliev.MessagingContracts.csproj\" />|<PackageReference Include=\"Maliev.MessagingContracts\" Version=\"$VERSION_PATTERN\" />|g" ${{ env.PROJECT_PATH }}
 
