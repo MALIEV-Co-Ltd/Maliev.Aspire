@@ -88,10 +88,15 @@ public static class DatabaseExtensions
                 });
             }
 
-            // Enable detailed logging in development for debugging
-            if (builder.Environment.IsDevelopment())
+            if (builder.Configuration.GetValue("Database:EnableSensitiveDataLogging", false))
             {
                 options.EnableSensitiveDataLogging();
+            }
+
+            if (builder.Configuration.GetValue(
+                "Database:EnableDetailedErrors",
+                builder.Environment.IsDevelopment()))
+            {
                 options.EnableDetailedErrors();
             }
 

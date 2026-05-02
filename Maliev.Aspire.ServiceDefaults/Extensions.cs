@@ -59,9 +59,7 @@ public static class Extensions
         // Infrastructure components
         builder.Logging.AddFilter("StackExchange.Redis", LogLevel.Warning); // Redis connection noise
         builder.Logging.AddFilter("Npgsql", LogLevel.Warning); // PostgreSQL connection noise
-        // EF Core logs "Sensitive data logging is enabled" at Warning during startup.
-        // This is expected in development — the warning reminds developers that parameter
-        // values are being logged. In production, sensitive data logging should be disabled.
+        builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Critical);
 
         // MassTransit/RabbitMQ - Warning level for transport; Information for message processing
@@ -114,7 +112,10 @@ public static class Extensions
         {
             openTelemetry.WithTracing(tracing =>
             {
-                tracing.AddAspNetCoreInstrumentation()
+                tracing.AddAspNetCoreInstrumentation(options =>
+                {
+                    options.Filter = IsNotAspireLivenessRequest;
+                })
                        .AddHttpClientInstrumentation()
                        .AddSource("MassTransit") // Track messaging activities
                        .AddSource("Npgsql");      // Track DB activities
@@ -158,6 +159,14 @@ public static class Extensions
         });
 
         return builder;
+    }
+
+    private static bool IsNotAspireLivenessRequest(HttpContext context)
+    {
+        var path = context.Request.Path.Value;
+        return path is null || !path.EndsWith(
+            "/aspire-liveness",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
