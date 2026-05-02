@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
+using Maliev.Aspire.ServiceDefaults.Telemetry;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -118,7 +119,8 @@ public static class Extensions
                 })
                        .AddHttpClientInstrumentation()
                        .AddSource("MassTransit") // Track messaging activities
-                       .AddSource("Npgsql");      // Track DB activities
+                       .AddSource("Npgsql")       // Track DB activities
+                       .AddProcessor(new UrlQueryRedactionProcessor());
 
                 if (useOtlpExporter)
                 {
