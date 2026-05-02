@@ -14,7 +14,9 @@ bld/
 
 # IDE files
 .vs/
-.vscode/
+**/.vscode/*
+!.vscode/
+!.vscode/settings.json
 .idea/
 *.swp
 *.swo
