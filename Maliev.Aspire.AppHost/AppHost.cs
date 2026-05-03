@@ -748,6 +748,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WithUrlForEndpoint("http", u => { u.Url = "/search/scalar"; u.DisplayText = "Scalar Documentation"; })
+                .WithUrlForEndpoint("https", u => { u.Url = "/search/scalar"; u.DisplayText = "Scalar Documentation"; })
                 .WithHttpHealthCheck("/search/aspire-liveness"),
             config,
             grafana,
