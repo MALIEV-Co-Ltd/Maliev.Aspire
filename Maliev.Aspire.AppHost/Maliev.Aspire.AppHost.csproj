@@ -55,6 +55,7 @@
 
     <ProjectReference Include="..\..\Maliev.PurchaseOrderService\Maliev.PurchaseOrderService.Api\Maliev.PurchaseOrderService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.QuotationService\Maliev.QuotationService.Api\Maliev.QuotationService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.SearchService\Maliev.SearchService.Api\Maliev.SearchService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.SupplierService\Maliev.SupplierService.Api\Maliev.SupplierService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.AccountingService\Maliev.AccountingService.Api\Maliev.AccountingService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ReceiptService\Maliev.ReceiptService.Api\Maliev.ReceiptService.Api.csproj" />

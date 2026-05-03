@@ -200,6 +200,7 @@ static partial class Program
             Quotation: postgres.AddDatabase("quotation-app-db"),
             Receipt: postgres.AddDatabase("receipt-app-db"),
             Registry: postgres.AddDatabase("registry-app-db"),
+            Search: postgres.AddDatabase("search-app-db"),
             Supplier: postgres.AddDatabase("supplier-app-db"),
             Upload: postgres.AddDatabase("upload-app-db"),
             Facility: postgres.AddDatabase("facility-app-db"),
@@ -739,6 +740,20 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        var searchService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_SearchService_Api>("SearchService")
+                .WithReference(databases.Search, "SearchDbContext")
+                .WaitFor(databases.Search)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithHttpHealthCheck("/search/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
         var intranetBff = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
                 .WithReference(infrastructure.RabbitMQ)
@@ -773,6 +788,7 @@ static partial class Program
                 .WithReference(notificationService)
                 .WithReference(facilityService)
                 .WithReference(projectService)
+                .WithReference(searchService)
                 .WithReference(currencyService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
@@ -978,6 +994,7 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Quotation,
     IResourceBuilder<PostgresDatabaseResource> Receipt,
     IResourceBuilder<PostgresDatabaseResource> Registry,
+    IResourceBuilder<PostgresDatabaseResource> Search,
     IResourceBuilder<PostgresDatabaseResource> Supplier,
     IResourceBuilder<PostgresDatabaseResource> Upload,
     IResourceBuilder<PostgresDatabaseResource> Facility,
