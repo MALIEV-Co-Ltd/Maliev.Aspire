@@ -680,6 +680,14 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        purchaseOrderService = purchaseOrderService
+            .WithReference(supplierService)
+            .WithReference(orderService)
+            .WithReference(currencyService)
+            .WaitFor(supplierService)
+            .WaitFor(orderService)
+            .WaitFor(currencyService);
+
         var chatbotService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ChatbotService_Api>("ChatbotService")
                 .WithReference(databases.Chatbot, "ChatbotDbContext")
