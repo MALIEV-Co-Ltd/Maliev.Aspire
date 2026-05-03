@@ -200,6 +200,7 @@ static partial class Program
             Quotation: postgres.AddDatabase("quotation-app-db"),
             Receipt: postgres.AddDatabase("receipt-app-db"),
             Registry: postgres.AddDatabase("registry-app-db"),
+            Search: postgres.AddDatabase("search-app-db"),
             Supplier: postgres.AddDatabase("supplier-app-db"),
             Upload: postgres.AddDatabase("upload-app-db"),
             Facility: postgres.AddDatabase("facility-app-db"),
@@ -219,7 +220,7 @@ static partial class Program
         ServiceDatabases databases,
         SharedConfiguration config,
         IResourceBuilder<ContainerResource> grafana,
-        IResourceBuilder<IResource> otelCollector)
+        IResourceBuilder<ContainerResource> otelCollector)
     {
         var environmentName = builder.Environment.EnvironmentName;
 
@@ -679,6 +680,14 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        purchaseOrderService = purchaseOrderService
+            .WithReference(supplierService)
+            .WithReference(orderService)
+            .WithReference(currencyService)
+            .WaitFor(supplierService)
+            .WaitFor(orderService)
+            .WaitFor(currencyService);
+
         var chatbotService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ChatbotService_Api>("ChatbotService")
                 .WithReference(databases.Chatbot, "ChatbotDbContext")
@@ -739,6 +748,22 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        var searchService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_SearchService_Api>("SearchService")
+                .WithReference(databases.Search, "SearchDbContext")
+                .WaitFor(databases.Search)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithUrlForEndpoint("http", u => { u.Url = "/search/scalar"; u.DisplayText = "Scalar Documentation"; })
+                .WithUrlForEndpoint("https", u => { u.Url = "/search/scalar"; u.DisplayText = "Scalar Documentation"; })
+                .WithHttpHealthCheck("/search/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
         var intranetBff = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
                 .WithReference(infrastructure.RabbitMQ)
@@ -773,6 +798,7 @@ static partial class Program
                 .WithReference(notificationService)
                 .WithReference(facilityService)
                 .WithReference(projectService)
+                .WithReference(searchService)
                 .WithReference(currencyService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
@@ -871,12 +897,14 @@ static partial class Program
             .WithEnvironment("JWT_SECURITY_KEY", config.JwtSecurityKey)
             .WithEnvironment("JWT_ISSUER", config.JwtIssuer)
             .WithEnvironment("JWT_AUDIENCE", config.JwtAudience)
-            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", otelCollector.GetEndpoint("grpc"))
             .WithEnvironment("GEOMETRY_MAIN_WORKERS", "2")
             .WithEnvironment("GEOMETRY_DFM_WORKERS", "1")
             .WithEnvironment("GEOMETRY_PREVIEW_RENDER_WORKERS", "2")
             .WithEnvironment("GEOMETRY_DFM_BODY_WORKERS", "2")
-            .WithEnvironment("GEOMETRY_RABBITMQ_PREFETCH", "1")
+            .WithEnvironment("GEOMETRY_FILE_INGEST_CONCURRENCY", "2")
+            .WithEnvironment("GEOMETRY_ARTIFACT_CONCURRENCY", "2")
+            .WithEnvironment("GEOMETRY_RABBITMQ_PREFETCH", "2")
             .WithExternalHttpEndpoints()
             .WithHttpEndpoint(port: 8081, targetPort: 8081, env: "PORT")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
@@ -896,7 +924,7 @@ static partial class Program
         IResourceBuilder<ProjectResource> project,
         SharedConfiguration config,
         IResourceBuilder<ContainerResource> grafana,
-        IResourceBuilder<IResource> otelCollector,
+        IResourceBuilder<ContainerResource> otelCollector,
         string environmentName)
     {
         return project
@@ -976,6 +1004,7 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Quotation,
     IResourceBuilder<PostgresDatabaseResource> Receipt,
     IResourceBuilder<PostgresDatabaseResource> Registry,
+    IResourceBuilder<PostgresDatabaseResource> Search,
     IResourceBuilder<PostgresDatabaseResource> Supplier,
     IResourceBuilder<PostgresDatabaseResource> Upload,
     IResourceBuilder<PostgresDatabaseResource> Facility,

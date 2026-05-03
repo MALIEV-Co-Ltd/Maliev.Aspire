@@ -85,25 +85,29 @@ public class SupplyChainTests : IClassFixture<AspireTestFixture>
         _output.WriteLine("Scenario: Create Purchase Order");
         var createPoRequest = new CreatePurchaseOrderRequest
         {
-            SupplierId = supplierId,
-            Date = DateTime.UtcNow,
+            SupplierServiceId = supplierId,
+            OrderId = 1,
+            CurrencyCode = "THB",
+            ExpectedDeliveryDate = DateTime.UtcNow.AddDays(14),
             Items =
             [
                 new PurchaseOrderLineItemDto
                 {
-                    MaterialId = material.Id,
+                    ExternalOrderItemId = 1,
+                    ProductCode = material.SKU,
+                    ProductName = material.Name,
                     Quantity = 100,
                     UnitPrice = 150.00m
                 }
             ]
         };
 
-        var poResponse = await poClient.PostAsJsonAsync("/purchase-order/v1/orders", createPoRequest);
+        var poResponse = await poClient.PostAsJsonAsync("/purchase-order/v1/purchase-orders", createPoRequest);
         Assert.Equal(HttpStatusCode.Created, poResponse.StatusCode);
 
         var po = await poResponse.Content.ReadFromJsonAsync<PurchaseOrderDto>();
         Assert.NotNull(po);
-        Assert.Equal(supplierId, po.SupplierId);
+        Assert.Equal(supplierId, po.SupplierServiceId);
         Assert.Single(po.Items);
         _output.WriteLine($"✓ Purchase Order created: {po.PoNumber}");
     }
