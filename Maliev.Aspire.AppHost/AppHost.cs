@@ -191,6 +191,7 @@ static partial class Program
             Delivery: postgres.AddDatabase("delivery-app-db"),
             Employee: postgres.AddDatabase("employee-app-db"),
             IAM: postgres.AddDatabase("iam-app-db"),
+            Intranet: postgres.AddDatabase("intranet-app-db"),
             Invoice: postgres.AddDatabase("invoice-app-db"),
             Leave: postgres.AddDatabase("leave-app-db"),
             Lifecycle: postgres.AddDatabase("lifecycle-app-db"),
@@ -778,6 +779,8 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
+                .WithReference(databases.Intranet, "IntranetDbContext")
+                .WaitFor(databases.Intranet)
                 .WithReference(authService)
                 .WithReference(customerService)
                 .WithReference(orderService)
@@ -999,6 +1002,7 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Delivery,
     IResourceBuilder<PostgresDatabaseResource> Employee,
     IResourceBuilder<PostgresDatabaseResource> IAM,
+    IResourceBuilder<PostgresDatabaseResource> Intranet,
     IResourceBuilder<PostgresDatabaseResource> Invoice,
     IResourceBuilder<PostgresDatabaseResource> Leave,
     IResourceBuilder<PostgresDatabaseResource> Lifecycle,
