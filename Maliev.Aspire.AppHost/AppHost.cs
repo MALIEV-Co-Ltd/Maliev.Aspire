@@ -513,6 +513,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WithReference(customerService)
                 .WithHttpHealthCheck("/quotation/aspire-liveness"),
             config,
             grafana,
