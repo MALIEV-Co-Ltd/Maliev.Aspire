@@ -85,6 +85,11 @@ static partial class Program
         var gcpProjectId = builder.AddParameterFromConfig("GcpProjectId", "GCP:ProjectId", secret: true);
         var gcpServiceAccountKeyBase64 = builder.AddParameterFromConfig("GcpServiceAccountKeyBase64", "GCP:ServiceAccountKeyBase64", secret: true);
 
+        const string devNotificationEncryptionKey = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+        var notificationEncryptionKey = builder.AddParameter("NotificationEncryptionKey", secret: true);
+        builder.Configuration["Parameters:NotificationEncryptionKey"] =
+            builder.Configuration["Encryption:DataProtectionKey"] ?? devNotificationEncryptionKey;
+
         return new SharedConfiguration(
             JwtSecurityKey: jwtSecurityKey,
             JwtPrivateKey: jwtPrivateKey,
@@ -95,7 +100,8 @@ static partial class Program
             GoogleClientSecret: googleClientSecret,
             CorsAllowedOrigins: corsAllowedOrigins,
             GcpProjectId: gcpProjectId,
-            GcpServiceAccountKeyBase64: gcpServiceAccountKeyBase64
+            GcpServiceAccountKeyBase64: gcpServiceAccountKeyBase64,
+            NotificationEncryptionKey: notificationEncryptionKey
             );
     }
 
@@ -368,8 +374,10 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
+                .WithReference(customerService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/notification/aspire-liveness"),
+                .WithHttpHealthCheck("/notification/aspire-liveness")
+                .WithEnvironment("Encryption__DataProtectionKey", config.NotificationEncryptionKey),
             config,
             grafana,
             otelCollector,
@@ -963,7 +971,8 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> GoogleClientSecret,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,
     IResourceBuilder<ParameterResource> GcpProjectId,
-    IResourceBuilder<ParameterResource> GcpServiceAccountKeyBase64);
+    IResourceBuilder<ParameterResource> GcpServiceAccountKeyBase64,
+    IResourceBuilder<ParameterResource> NotificationEncryptionKey);
 
 /// <summary>
 /// Infrastructure resource references (messaging, caching, database server).
