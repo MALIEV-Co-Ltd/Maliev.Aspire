@@ -802,6 +802,7 @@ static partial class Program
                 .WithReference(performanceService)
                 .WithReference(compensationService)
                 .WithReference(accountingService)
+                .WithReference(contactService)
                 .WithReference(receiptService)
                 .WithReference(lifecycleService)
                 .WithReference(purchaseOrderService)
@@ -863,6 +864,8 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        intranetBff = intranetBff.WithReference(inventoryService);
+
         // Add JobService reference to IntranetBff now that jobService is declared
         intranetBff = intranetBff.WithReference(jobService);
 
@@ -883,6 +886,8 @@ static partial class Program
             grafana,
             otelCollector,
             environmentName);
+
+        intranetBff = intranetBff.WithReference(predictionService);
 
         // --- Geometry Service (Python FastAPI — Linux Docker container) ---
         //
