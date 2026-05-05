@@ -20,7 +20,8 @@ public class IAMRegistrationHealthCheck : IHealthCheck
 
     /// <summary>
     /// Checks the IAM registration status and returns an appropriate health check result.
-    /// Reports Healthy when registered, Degraded when partially registered or failed, and Unhealthy when pending.
+    /// Reports Healthy when registered, Degraded while registration is pending, attempting, or failed,
+    /// and Unhealthy only for unexpected status values.
     /// </summary>
     /// <param name="context">The health check context.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -41,10 +42,10 @@ public class IAMRegistrationHealthCheck : IHealthCheck
                 Task.FromResult(HealthCheckResult.Healthy("IAM registration successful", data)),
 
             RegistrationStatus.Pending =>
-                Task.FromResult(HealthCheckResult.Unhealthy("IAM registration pending application startup", null, data)),
+                Task.FromResult(HealthCheckResult.Degraded("IAM registration pending application startup", null, data)),
 
             RegistrationStatus.Attempting =>
-                Task.FromResult(HealthCheckResult.Unhealthy("IAM registration in progress (publishing to RabbitMQ)", null, data)),
+                Task.FromResult(HealthCheckResult.Degraded("IAM registration in progress (publishing to RabbitMQ)", null, data)),
 
             RegistrationStatus.PartiallyRegistered =>
                 Task.FromResult(HealthCheckResult.Degraded(
