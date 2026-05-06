@@ -26,6 +26,28 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".WithReference(customerService)", quotationBlock, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// GeometryService must not start OTLP export before the collector is ready.
+    /// </summary>
+    [Fact]
+    public void AppHost_GeometryService_WaitsForOpenTelemetryCollector()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var geometryBlockStart = appHostSource.IndexOf(
+            "var geometryService = builder.AddDockerfile(",
+            StringComparison.Ordinal);
+        var intranetBffReferenceCommentStart = appHostSource.IndexOf(
+            "// Wire GeometryService into IntranetBff for service discovery.",
+            StringComparison.Ordinal);
+
+        Assert.True(geometryBlockStart >= 0, "GeometryService resource declaration was not found.");
+        Assert.True(intranetBffReferenceCommentStart > geometryBlockStart, "GeometryService reference block was not found after GeometryService.");
+
+        var geometryBlock = appHostSource[geometryBlockStart..intranetBffReferenceCommentStart];
+        Assert.Contains(".WithEnvironment(\"OTEL_EXPORTER_OTLP_ENDPOINT\", otelCollector.GetEndpoint(\"grpc\"))", geometryBlock, StringComparison.Ordinal);
+        Assert.Contains(".WaitFor(otelCollector)", geometryBlock, StringComparison.Ordinal);
+    }
+
     private static string FindAppHostSource()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

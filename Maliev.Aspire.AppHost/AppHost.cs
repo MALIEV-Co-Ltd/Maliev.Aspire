@@ -915,6 +915,7 @@ static partial class Program
             .WithEnvironment("JWT_ISSUER", config.JwtIssuer)
             .WithEnvironment("JWT_AUDIENCE", config.JwtAudience)
             .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", otelCollector.GetEndpoint("grpc"))
+            .WaitFor(otelCollector)
             .WithEnvironment("GEOMETRY_MAIN_WORKERS", "2")
             .WithEnvironment("GEOMETRY_DFM_WORKERS", "1")
             .WithEnvironment("GEOMETRY_PREVIEW_RENDER_WORKERS", "2")
