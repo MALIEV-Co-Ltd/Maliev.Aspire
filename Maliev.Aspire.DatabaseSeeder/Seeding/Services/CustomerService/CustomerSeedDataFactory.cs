@@ -60,7 +60,7 @@ public static class CustomerSeedDataFactory
             var customerId = CreateGuid(1000 + index);
             var company = index % 2 == 0 ? companies[index / 5 % companies.Count] : null;
             var firstName = FirstNames[index % FirstNames.Length];
-            var lastName = LastNames[index % LastNames.Length];
+            var lastName = LastNames[(index + index / FirstNames.Length) % LastNames.Length];
             var tier = CustomerTier.All[index % CustomerTier.All.Length];
 
             customers.Add(new Customer

@@ -17,6 +17,9 @@ public class CustomerSeedDataFactoryTests
         var seedData = CustomerSeedDataFactory.CreateLocalTestingData();
 
         Assert.Equal(50, seedData.Customers.Count);
+        Assert.Equal(
+            seedData.Customers.Count,
+            seedData.Customers.Select(customer => $"{customer.FirstName} {customer.LastName}").Distinct().Count());
         Assert.NotEmpty(seedData.Companies);
         Assert.Contains(seedData.Customers, customer => customer.CompanyId is null);
         Assert.Contains(seedData.Customers, customer => customer.CompanyId is not null);
