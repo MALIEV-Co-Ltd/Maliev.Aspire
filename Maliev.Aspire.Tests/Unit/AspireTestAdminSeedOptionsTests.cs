@@ -57,10 +57,30 @@ public class AspireTestAdminSeedOptionsTests
         var options = AspireTestAdminSeedOptions.FromConfiguration(configuration);
 
         Assert.True(options.Enabled);
-        Assert.Equal("codex.admin@seed.maliev.local", options.Email);
+        Assert.Equal("aspire-automation@debug.com", options.Email);
         Assert.Equal("AspireTestAdminSeeder", options.LinkedService);
         Assert.NotEqual(Guid.Empty, options.PrincipalId);
         Assert.NotEqual(Guid.Empty, options.EmployeeId);
+    }
+
+    /// <summary>
+    /// The system principal is reserved for service-to-service work and must not be reused as a browser login.
+    /// </summary>
+    [Fact]
+    public void FromConfiguration_WhenEmailIsSystemPrincipal_Throws()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["AspireTestAdmin:Enabled"] = "true",
+            ["AspireTestAdmin:Password"] = "local-only-secret",
+            ["AspireTestAdmin:Email"] = "system@maliev.com"
+        });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => AspireTestAdminSeedOptions.FromConfiguration(configuration));
+
+        Assert.Contains("system@maliev.com", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("reserved", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static IConfiguration BuildConfiguration(Dictionary<string, string?> values)

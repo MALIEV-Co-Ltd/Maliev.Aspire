@@ -7,6 +7,9 @@ namespace Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
 /// </summary>
 public sealed class AspireTestAdminSeedOptions
 {
+    private const string DefaultEmail = "aspire-automation@debug.com";
+    private const string ReservedSystemPrincipalEmail = "system@maliev.com";
+
     /// <summary>
     /// Configuration marker used to distinguish the synthetic local test administrator from real employees.
     /// </summary>
@@ -23,7 +26,7 @@ public sealed class AspireTestAdminSeedOptions
     /// <summary>
     /// Gets the synthetic employee email used for password login.
     /// </summary>
-    public string Email { get; init; } = "codex.admin@seed.maliev.local";
+    public string Email { get; init; } = DefaultEmail;
 
     /// <summary>
     /// Gets the local-only password supplied from user secrets or environment variables.
@@ -77,7 +80,7 @@ public sealed class AspireTestAdminSeedOptions
         var options = new AspireTestAdminSeedOptions
         {
             Enabled = enabled,
-            Email = ReadString(configuration, "AspireTestAdmin:Email", "codex.admin@seed.maliev.local"),
+            Email = ReadString(configuration, "AspireTestAdmin:Email", DefaultEmail),
             Password = ReadOptionalString(configuration, "AspireTestAdmin:Password"),
             PrincipalId = ReadGuid(configuration, "AspireTestAdmin:PrincipalId", DefaultPrincipalId),
             EmployeeId = ReadGuid(configuration, "AspireTestAdmin:EmployeeId", DefaultEmployeeId),
@@ -93,6 +96,14 @@ public sealed class AspireTestAdminSeedOptions
             throw new InvalidOperationException(
                 "AspireTestAdmin:Password is required when AspireTestAdmin:Enabled is true. " +
                 "Set it through local user secrets or an environment variable; do not commit it.");
+        }
+
+        if (options.Enabled &&
+            string.Equals(options.Email, ReservedSystemPrincipalEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"AspireTestAdmin:Email cannot be {ReservedSystemPrincipalEmail}. " +
+                "That address is reserved for the IAM system principal; use a synthetic automation user instead.");
         }
 
         return options;
