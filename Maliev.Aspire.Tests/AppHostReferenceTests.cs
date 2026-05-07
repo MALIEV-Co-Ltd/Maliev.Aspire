@@ -48,18 +48,41 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".WaitFor(otelCollector)", geometryBlock, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Aspire should expose explicit seed commands for the local test administrator login path.
+    /// </summary>
+    [Fact]
+    public void AppHost_LocalTestAdmin_RegistersEmployeeAndIamSeeders()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+
+        Assert.Contains(".SeedDatabase<EmployeeDatabaseSeeder>(databases.Employee", appHostSource, StringComparison.Ordinal);
+        Assert.Contains(".SeedDatabase<IAMDatabaseSeeder>(databases.IAM", appHostSource, StringComparison.Ordinal);
+    }
+
     private static string FindAppHostSource()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
+        foreach (var startDirectory in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
         {
-            var candidate = Path.Combine(directory.FullName, "Maliev.Aspire.AppHost", "AppHost.cs");
-            if (File.Exists(candidate))
+            var directory = new DirectoryInfo(startDirectory);
+            while (directory is not null)
             {
-                return candidate;
-            }
+                var candidates = new[]
+                {
+                    Path.Combine(directory.FullName, "Maliev.Aspire.AppHost", "AppHost.cs"),
+                    Path.Combine(directory.FullName, "Maliev.Aspire", "Maliev.Aspire.AppHost", "AppHost.cs")
+                };
 
-            directory = directory.Parent;
+                foreach (var candidate in candidates)
+                {
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+
+                directory = directory.Parent;
+            }
         }
 
         throw new FileNotFoundException("Unable to locate Maliev.Aspire.AppHost/AppHost.cs.");

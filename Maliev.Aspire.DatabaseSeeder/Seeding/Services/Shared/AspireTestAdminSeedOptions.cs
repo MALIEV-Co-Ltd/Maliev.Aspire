@@ -1,0 +1,118 @@
+using Microsoft.Extensions.Configuration;
+
+namespace Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
+
+/// <summary>
+/// Configuration for the Aspire-local test administrator seed.
+/// </summary>
+public sealed class AspireTestAdminSeedOptions
+{
+    /// <summary>
+    /// Configuration marker used to distinguish the synthetic local test administrator from real employees.
+    /// </summary>
+    public const string LinkedServiceName = "AspireTestAdminSeeder";
+
+    private static readonly Guid DefaultPrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111001");
+    private static readonly Guid DefaultEmployeeId = Guid.Parse("11111111-1111-1111-1111-111111111002");
+
+    /// <summary>
+    /// Gets a value indicating whether the Aspire-local test administrator seed is enabled.
+    /// </summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>
+    /// Gets the synthetic employee email used for password login.
+    /// </summary>
+    public string Email { get; init; } = "codex.admin@seed.maliev.local";
+
+    /// <summary>
+    /// Gets the local-only password supplied from user secrets or environment variables.
+    /// </summary>
+    public string? Password { get; init; }
+
+    /// <summary>
+    /// Gets the stable IAM principal identifier used by the local test administrator.
+    /// </summary>
+    public Guid PrincipalId { get; init; } = DefaultPrincipalId;
+
+    /// <summary>
+    /// Gets the stable employee identifier used by the local test administrator.
+    /// </summary>
+    public Guid EmployeeId { get; init; } = DefaultEmployeeId;
+
+    /// <summary>
+    /// Gets the employee number assigned to the local test administrator.
+    /// </summary>
+    public string EmployeeNumber { get; init; } = "EMP-CODEX-001";
+
+    /// <summary>
+    /// Gets the first name assigned to the local test administrator.
+    /// </summary>
+    public string FirstName { get; init; } = "Codex";
+
+    /// <summary>
+    /// Gets the last name assigned to the local test administrator.
+    /// </summary>
+    public string LastName { get; init; } = "Admin";
+
+    /// <summary>
+    /// Gets the preferred display name assigned to the local test administrator.
+    /// </summary>
+    public string PreferredName { get; init; } = "Codex Admin";
+
+    /// <summary>
+    /// Gets the IAM linked-service marker used to exclude this seed from first-real-user bootstrap counts.
+    /// </summary>
+    public string LinkedService { get; init; } = LinkedServiceName;
+
+    /// <summary>
+    /// Creates options from configuration and validates fail-closed safety rules.
+    /// </summary>
+    /// <param name="configuration">The application configuration.</param>
+    /// <returns>Parsed Aspire test administrator options.</returns>
+    public static AspireTestAdminSeedOptions FromConfiguration(IConfiguration configuration)
+    {
+        var enabled = bool.TryParse(configuration["AspireTestAdmin:Enabled"], out var parsedEnabled) && parsedEnabled;
+
+        var options = new AspireTestAdminSeedOptions
+        {
+            Enabled = enabled,
+            Email = ReadString(configuration, "AspireTestAdmin:Email", "codex.admin@seed.maliev.local"),
+            Password = ReadOptionalString(configuration, "AspireTestAdmin:Password"),
+            PrincipalId = ReadGuid(configuration, "AspireTestAdmin:PrincipalId", DefaultPrincipalId),
+            EmployeeId = ReadGuid(configuration, "AspireTestAdmin:EmployeeId", DefaultEmployeeId),
+            EmployeeNumber = ReadString(configuration, "AspireTestAdmin:EmployeeNumber", "EMP-CODEX-001"),
+            FirstName = ReadString(configuration, "AspireTestAdmin:FirstName", "Codex"),
+            LastName = ReadString(configuration, "AspireTestAdmin:LastName", "Admin"),
+            PreferredName = ReadString(configuration, "AspireTestAdmin:PreferredName", "Codex Admin"),
+            LinkedService = LinkedServiceName
+        };
+
+        if (options.Enabled && string.IsNullOrWhiteSpace(options.Password))
+        {
+            throw new InvalidOperationException(
+                "AspireTestAdmin:Password is required when AspireTestAdmin:Enabled is true. " +
+                "Set it through local user secrets or an environment variable; do not commit it.");
+        }
+
+        return options;
+    }
+
+    private static string ReadString(IConfiguration configuration, string key, string defaultValue)
+    {
+        var value = configuration[key];
+        return string.IsNullOrWhiteSpace(value) ? defaultValue : value.Trim();
+    }
+
+    private static string? ReadOptionalString(IConfiguration configuration, string key)
+    {
+        var value = configuration[key];
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static Guid ReadGuid(IConfiguration configuration, string key, Guid defaultValue)
+    {
+        var value = configuration[key];
+        return Guid.TryParse(value, out var parsed) ? parsed : defaultValue;
+    }
+}

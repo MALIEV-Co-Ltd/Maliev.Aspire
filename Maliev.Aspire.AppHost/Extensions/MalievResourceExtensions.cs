@@ -38,10 +38,12 @@ public static class MalievResourceExtensions
     /// <param name="targetService">The service to seed the database for.</param>
     /// <param name="database">The database resource to seed.</param>
     /// <param name="seederName">Optional custom name for the seeder. Useful for chaining multiple seeders.</param>
+    /// <param name="configureSeeder">Optional callback for adding seeder-specific environment.</param>
     public static IResourceBuilder<ProjectResource> SeedDatabase<TSeeder>(
         this IResourceBuilder<ProjectResource> targetService,
         IResourceBuilder<PostgresDatabaseResource> database,
-        string? seederName = null)
+        string? seederName = null,
+        Action<IResourceBuilder<ProjectResource>>? configureSeeder = null)
         where TSeeder : class
     {
         var seederClassName = typeof(TSeeder).Name;
@@ -57,6 +59,7 @@ public static class MalievResourceExtensions
             .WithParentRelationship(targetService);
 
         CopyParentEnvironment(seeder, targetService);
+        configureSeeder?.Invoke(seeder);
 
         seeder.WithCommand(
             name: "seed-database",

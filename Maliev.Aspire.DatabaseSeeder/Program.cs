@@ -64,6 +64,7 @@ public class SeederRunner
         {
             builder.Services.AddSingleton<Maliev.EmployeeService.Application.Interfaces.IEncryptionService, Maliev.EmployeeService.Infrastructure.Security.EncryptionService>();
             builder.Services.AddSingleton<Maliev.EmployeeService.Application.Interfaces.ICurrentUserService, SeederCurrentUserService>();
+            builder.Services.AddSingleton<Maliev.EmployeeService.Infrastructure.Security.IPasswordService, Maliev.EmployeeService.Infrastructure.Security.PasswordService>();
             builder.Services.AddHttpContextAccessor();
             builder.Services.AddDistributedMemoryCache();
             builder.Services.AddScoped<Maliev.EmployeeService.Infrastructure.Data.Interceptors.AuditLogInterceptor>();

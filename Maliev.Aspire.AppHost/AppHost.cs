@@ -1,3 +1,5 @@
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.EmployeeService;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.IAMService;
 using Maliev.Aspire.AppHost.Extensions;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
 using Microsoft.Extensions.Configuration;
@@ -76,6 +78,13 @@ static partial class Program
         var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId", secret: true);
         var googleClientSecret = builder.AddParameterFromConfig("GoogleClientSecret", "Authentication:Google:ClientSecret", secret: true);
 
+        var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
+        builder.Configuration["Parameters:AspireTestAdminEnabled"] =
+            builder.Configuration["AspireTestAdmin:Enabled"] ?? "false";
+        var aspireTestAdminPassword = builder.AddParameter("AspireTestAdminPassword", secret: true);
+        builder.Configuration["Parameters:AspireTestAdminPassword"] =
+            builder.Configuration["AspireTestAdmin:Password"] ?? string.Empty;
+
         var corsAllowedOrigins = builder.AddParameter("CorsAllowedOrigins");
         // Convert the JSON array to a comma-separated string for easier environment injection
         var origins = builder.Configuration.GetSection("CORS:AllowedOrigins").Get<string[]>();
@@ -98,6 +107,8 @@ static partial class Program
             JwtAudience: jwtAudience,
             GoogleClientId: googleClientId,
             GoogleClientSecret: googleClientSecret,
+            AspireTestAdminEnabled: aspireTestAdminEnabled,
+            AspireTestAdminPassword: aspireTestAdminPassword,
             CorsAllowedOrigins: corsAllowedOrigins,
             GcpProjectId: gcpProjectId,
             GcpServiceAccountKeyBase64: gcpServiceAccountKeyBase64,
@@ -231,6 +242,13 @@ static partial class Program
     {
         var environmentName = builder.Environment.EnvironmentName;
 
+        void ConfigureAspireTestAdminSeeder(IResourceBuilder<ProjectResource> seeder)
+        {
+            seeder
+                .WithEnvironment("AspireTestAdmin__Enabled", config.AspireTestAdminEnabled)
+                .WithEnvironment("AspireTestAdmin__Password", config.AspireTestAdminPassword);
+        }
+
         // --- Core Services (dependencies for Auth) ---
         var iamService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_IAMService_Api>("IAMService")
@@ -243,7 +261,8 @@ static partial class Program
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .SeedDatabase<IAMDatabaseSeeder>(databases.IAM, configureSeeder: ConfigureAspireTestAdminSeeder);
 
         // Note: CountryService must be declared before CustomerService to be referenced
         var countryService = WithSharedSecrets(
@@ -333,7 +352,8 @@ static partial class Program
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .SeedDatabase<EmployeeDatabaseSeeder>(databases.Employee, configureSeeder: ConfigureAspireTestAdminSeeder);
 
         var authService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_AuthService_Api>("AuthService")
@@ -978,6 +998,8 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtAudience,
     IResourceBuilder<ParameterResource> GoogleClientId,
     IResourceBuilder<ParameterResource> GoogleClientSecret,
+    IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
+    IResourceBuilder<ParameterResource> AspireTestAdminPassword,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,
     IResourceBuilder<ParameterResource> GcpProjectId,
     IResourceBuilder<ParameterResource> GcpServiceAccountKeyBase64,
