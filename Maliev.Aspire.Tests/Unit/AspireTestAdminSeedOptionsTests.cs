@@ -59,6 +59,7 @@ public class AspireTestAdminSeedOptionsTests
         Assert.True(options.Enabled);
         Assert.Equal("aspire-automation@debug.com", options.Email);
         Assert.Equal("AspireTestAdminSeeder", options.LinkedService);
+        Assert.Equal("roles.aspire.automation", options.RoleId);
         Assert.NotEqual(Guid.Empty, options.PrincipalId);
         Assert.NotEqual(Guid.Empty, options.EmployeeId);
     }

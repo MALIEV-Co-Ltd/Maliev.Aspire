@@ -15,6 +15,11 @@ public sealed class AspireTestAdminSeedOptions
     /// </summary>
     public const string LinkedServiceName = "AspireTestAdminSeeder";
 
+    /// <summary>
+    /// IAM role assigned to the Aspire-local automation principal.
+    /// </summary>
+    public const string AutomationRoleId = "roles.aspire.automation";
+
     private static readonly Guid DefaultPrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111001");
     private static readonly Guid DefaultEmployeeId = Guid.Parse("11111111-1111-1111-1111-111111111002");
 
@@ -69,6 +74,11 @@ public sealed class AspireTestAdminSeedOptions
     public string LinkedService { get; init; } = LinkedServiceName;
 
     /// <summary>
+    /// Gets the dedicated IAM role assigned to the local automation principal.
+    /// </summary>
+    public string RoleId { get; init; } = AutomationRoleId;
+
+    /// <summary>
     /// Creates options from configuration and validates fail-closed safety rules.
     /// </summary>
     /// <param name="configuration">The application configuration.</param>
@@ -88,7 +98,8 @@ public sealed class AspireTestAdminSeedOptions
             FirstName = ReadString(configuration, "AspireTestAdmin:FirstName", "Codex"),
             LastName = ReadString(configuration, "AspireTestAdmin:LastName", "Admin"),
             PreferredName = ReadString(configuration, "AspireTestAdmin:PreferredName", "Codex Admin"),
-            LinkedService = LinkedServiceName
+            LinkedService = LinkedServiceName,
+            RoleId = AutomationRoleId
         };
 
         if (options.Enabled && string.IsNullOrWhiteSpace(options.Password))

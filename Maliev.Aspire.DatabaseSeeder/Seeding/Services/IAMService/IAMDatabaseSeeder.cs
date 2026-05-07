@@ -14,6 +14,7 @@ namespace Maliev.Aspire.DatabaseSeeder.Seeding.Services.IAMService;
 public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
 {
     private const string PlatformOwnerRoleId = "roles.platform.owner";
+    private const string AutomationRoleName = "Aspire Automation";
     private readonly IConfiguration _configuration;
 
     /// <summary>
@@ -42,13 +43,14 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
         }
 
         await EnsurePrincipalAsync(options, cancellationToken);
-        await EnsurePlatformOwnerRoleAsync(cancellationToken);
-        await EnsurePlatformOwnerBindingAsync(options, cancellationToken);
+        await EnsureAutomationRoleAsync(options, cancellationToken);
+        await RemoveLegacyPlatformOwnerBindingAsync(options, cancellationToken);
+        await EnsureAutomationRoleBindingAsync(options, cancellationToken);
 
         Logger.LogInformation(
             "Successfully seeded Aspire local test administrator IAM principal {Email} with {RoleId}.",
             options.Email,
-            PlatformOwnerRoleId);
+            options.RoleId);
     }
 
     private async Task EnsurePrincipalAsync(
@@ -91,7 +93,9 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
         await Context.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task EnsurePlatformOwnerRoleAsync(CancellationToken cancellationToken)
+    private async Task EnsureAutomationRoleAsync(
+        AspireTestAdminSeedOptions options,
+        CancellationToken cancellationToken)
     {
         var wildcardPermission = await Context.Permissions
             .FirstOrDefaultAsync(p => p.PermissionId == "*", cancellationToken);
@@ -111,17 +115,17 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
 
         var role = await Context.Roles
             .Include(r => r.RolePermissions)
-            .FirstOrDefaultAsync(r => r.RoleId == PlatformOwnerRoleId, cancellationToken);
+            .FirstOrDefaultAsync(r => r.RoleId == options.RoleId, cancellationToken);
 
         if (role == null)
         {
             role = new Role
             {
-                RoleId = PlatformOwnerRoleId,
-                RoleName = "Platform Owner",
-                ServiceName = "platform",
-                Description = "Full ownership and administrative access to all platform services and resources",
-                IsCustom = false,
+                RoleId = options.RoleId,
+                RoleName = AutomationRoleName,
+                ServiceName = "aspire",
+                Description = "Aspire-local automation role with wildcard access for browser and system validation",
+                IsCustom = true,
                 CreatedBy = IAMDbContext.SystemPrincipalId,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
@@ -129,7 +133,7 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
 
             role.RolePermissions.Add(new RolePermission
             {
-                RoleId = PlatformOwnerRoleId,
+                RoleId = options.RoleId,
                 PermissionId = "*"
             });
 
@@ -137,13 +141,17 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
         }
         else
         {
+            role.RoleName = AutomationRoleName;
+            role.ServiceName = "aspire";
+            role.Description = "Aspire-local automation role with wildcard access for browser and system validation";
+            role.IsCustom = true;
             role.UpdatedAt = DateTime.UtcNow;
 
             if (!role.RolePermissions.Any(rp => rp.PermissionId == "*"))
             {
                 role.RolePermissions.Add(new RolePermission
                 {
-                    RoleId = PlatformOwnerRoleId,
+                    RoleId = options.RoleId,
                     PermissionId = "*"
                 });
             }
@@ -152,13 +160,35 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
         await Context.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task EnsurePlatformOwnerBindingAsync(
+    private async Task RemoveLegacyPlatformOwnerBindingAsync(
+        AspireTestAdminSeedOptions options,
+        CancellationToken cancellationToken)
+    {
+        var legacyBindings = await Context.PrincipalRoleBindings
+            .Where(b => b.PrincipalId == options.PrincipalId && b.RoleId == PlatformOwnerRoleId)
+            .ToListAsync(cancellationToken);
+
+        if (legacyBindings.Count == 0)
+        {
+            return;
+        }
+
+        Context.PrincipalRoleBindings.RemoveRange(legacyBindings);
+        await Context.SaveChangesAsync(cancellationToken);
+
+        Logger.LogInformation(
+            "Removed {Count} legacy Platform Owner binding(s) from Aspire automation principal {PrincipalId}.",
+            legacyBindings.Count,
+            options.PrincipalId);
+    }
+
+    private async Task EnsureAutomationRoleBindingAsync(
         AspireTestAdminSeedOptions options,
         CancellationToken cancellationToken)
     {
         var bindingExists = await Context.PrincipalRoleBindings.AnyAsync(
             b => b.PrincipalId == options.PrincipalId &&
-                 b.RoleId == PlatformOwnerRoleId &&
+                 b.RoleId == options.RoleId &&
                  b.ResourcePath == "*",
             cancellationToken);
 
@@ -171,7 +201,7 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
         {
             BindingId = Guid.NewGuid(),
             PrincipalId = options.PrincipalId,
-            RoleId = PlatformOwnerRoleId,
+            RoleId = options.RoleId,
             ResourcePath = "*",
             GrantedBy = IAMDbContext.SystemPrincipalId,
             GrantedAt = DateTime.UtcNow
