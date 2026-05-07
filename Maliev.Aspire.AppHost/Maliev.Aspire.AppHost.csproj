@@ -67,6 +67,7 @@
     <ProjectReference Include="..\..\Maliev.JobService\Maliev.JobService.Api\Maliev.JobService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ProjectService\Maliev.ProjectService.Api\Maliev.ProjectService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.Intranet\Maliev.Intranet.Bff\Maliev.Intranet.Bff.csproj" />
+    <ProjectReference Include="..\..\Maliev.Web\Maliev.Web.Bff\Maliev.Web.Bff.csproj" />
 
     <!-- Service Data layers for direct database seeding -->
     <ProjectReference Include="..\Maliev.Aspire.DatabaseSeeder\Maliev.Aspire.DatabaseSeeder.csproj" IsAspireProjectResource="false" />

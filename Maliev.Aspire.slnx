@@ -216,6 +216,11 @@
     <Project Path="..\Maliev.Intranet\Maliev.Intranet.Client\Maliev.Intranet.Client.csproj" />
     <Project Path="..\Maliev.Intranet\Maliev.Intranet.Shared\Maliev.Intranet.Shared.csproj" />
   </Folder>
+  <Folder Name="/Frontends/Web/">
+    <Project Path="..\Maliev.Web\Maliev.Web.Bff\Maliev.Web.Bff.csproj" />
+    <Project Path="..\Maliev.Web\Maliev.Web.Client\Maliev.Web.Client.csproj" />
+    <Project Path="..\Maliev.Web\Maliev.Web.Shared\Maliev.Web.Shared.csproj" />
+  </Folder>
   <Folder Name="/Messaging Contracts/">
     <Project Path="..\Maliev.MessagingContracts\generated\csharp\Maliev.MessagingContracts.csproj" />
   </Folder>

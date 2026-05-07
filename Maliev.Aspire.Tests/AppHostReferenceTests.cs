@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Maliev.Aspire.Tests;
 
 /// <summary>
@@ -60,6 +62,74 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".SeedDatabase<IAMDatabaseSeeder>(databases.IAM", appHostSource, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Customer Web BFF must be registered with the downstream services used by its BFF clients.
+    /// </summary>
+    [Fact]
+    public void AppHost_WebBff_ReferencesCustomerFacingServices()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var webBlockStart = appHostSource.IndexOf(
+            "builder.AddProject<Projects.Maliev_Web_Bff>(\"WebBff\")",
+            StringComparison.Ordinal);
+        var inventoryBlockStart = appHostSource.IndexOf(
+            "var inventoryService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+
+        Assert.True(webBlockStart >= 0, "WebBff resource declaration was not found.");
+        Assert.True(inventoryBlockStart > webBlockStart, "InventoryService resource declaration was not found after WebBff.");
+
+        var webBlock = appHostSource[webBlockStart..inventoryBlockStart];
+        foreach (var dependency in new[]
+        {
+            "iamService",
+            "customerService",
+            "deliveryService",
+            "materialService",
+            "orderService",
+            "paymentService",
+            "pricingService",
+            "uploadService"
+        })
+        {
+            Assert.Contains($".WithReference({dependency})", webBlock, StringComparison.Ordinal);
+        }
+
+        Assert.Contains(".WithHttpHealthCheck(\"/web/aspire-liveness\")", webBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Customer Web launch ports must not collide with other local MALIEV launch profiles.
+    /// </summary>
+    [Fact]
+    public void AppHost_WebBff_LaunchPortsAreUnique()
+    {
+        var appHostSource = FindAppHostSource();
+        var workspaceRoot = Directory.GetParent(Path.GetDirectoryName(appHostSource)!)!.Parent!.FullName;
+        var webLaunchSettings = Path.Combine(
+            workspaceRoot,
+            "Maliev.Web",
+            "Maliev.Web.Bff",
+            "Properties",
+            "launchSettings.json");
+
+        Assert.True(File.Exists(webLaunchSettings), $"WebBff launch settings were not found at {webLaunchSettings}.");
+
+        var webPorts = ReadApplicationPorts(webLaunchSettings).ToHashSet();
+        Assert.Contains(5026, webPorts);
+        Assert.Contains(7236, webPorts);
+
+        var conflicts = Directory.EnumerateFiles(workspaceRoot, "launchSettings.json", SearchOption.AllDirectories)
+            .Where(path => !IsGeneratedPath(path))
+            .Where(path => !Path.GetFullPath(path).Equals(Path.GetFullPath(webLaunchSettings), StringComparison.OrdinalIgnoreCase))
+            .SelectMany(path => ReadApplicationPorts(path)
+                .Where(port => webPorts.Contains(port))
+                .Select(port => new PortUse(port, Path.GetRelativePath(workspaceRoot, path))))
+            .ToList();
+
+        Assert.Empty(conflicts);
+    }
+
     private static string FindAppHostSource()
     {
         foreach (var startDirectory in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
@@ -87,4 +157,45 @@ public sealed class AppHostReferenceTests
 
         throw new FileNotFoundException("Unable to locate Maliev.Aspire.AppHost/AppHost.cs.");
     }
+
+    private static IEnumerable<int> ReadApplicationPorts(string launchSettingsPath)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(launchSettingsPath));
+        if (!document.RootElement.TryGetProperty("profiles", out var profiles))
+        {
+            yield break;
+        }
+
+        foreach (var profile in profiles.EnumerateObject())
+        {
+            if (!profile.Value.TryGetProperty("applicationUrl", out var applicationUrlElement))
+            {
+                continue;
+            }
+
+            var applicationUrl = applicationUrlElement.GetString();
+            if (string.IsNullOrWhiteSpace(applicationUrl))
+            {
+                continue;
+            }
+
+            foreach (var url in applicationUrl.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                {
+                    yield return uri.Port;
+                }
+            }
+        }
+    }
+
+    private static bool IsGeneratedPath(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        return normalized.Contains("/bin/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/obj/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/node_modules/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed record PortUse(int Port, string LaunchSettingsPath);
 }

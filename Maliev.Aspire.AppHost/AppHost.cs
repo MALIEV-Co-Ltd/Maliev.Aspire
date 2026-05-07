@@ -851,6 +851,24 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        _ = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_Web_Bff>("WebBff")
+                .WithReference(iamService)
+                .WithReference(customerService)
+                .WithReference(deliveryService)
+                .WithReference(materialService)
+                .WithReference(orderService)
+                .WithReference(paymentService)
+                .WithReference(pricingService)
+                .WithReference(uploadService)
+                .WithUrlForEndpoint("http", u => u.DisplayText = "Customer Web (HTTP)")
+                .WithUrlForEndpoint("https", u => u.DisplayText = "Customer Web (HTTPS)")
+                .WithHttpHealthCheck("/web/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
         var inventoryService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_InventoryService_Api>("InventoryService")
                 .WithReference(databases.Inventory, "InventoryDbContext")
