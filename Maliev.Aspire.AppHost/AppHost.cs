@@ -77,9 +77,6 @@ static partial class Program
 
         var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId", secret: true);
         var googleClientSecret = builder.AddParameterFromConfig("GoogleClientSecret", "Authentication:Google:ClientSecret", secret: true);
-        var shopifyStoreDomain = builder.AddParameterFromConfig("ShopifyStoreDomain", "Shopify:StoreDomain");
-        var shopifyAdminAccessToken = builder.AddParameterFromConfig("ShopifyAdminAccessToken", "Shopify:AdminAccessToken", secret: true);
-        var shopifyAdminApiVersion = builder.AddParameterFromConfig("ShopifyAdminApiVersion", "Shopify:AdminApiVersion");
 
         var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
         builder.Configuration["Parameters:AspireTestAdminEnabled"] =
@@ -110,9 +107,6 @@ static partial class Program
             JwtAudience: jwtAudience,
             GoogleClientId: googleClientId,
             GoogleClientSecret: googleClientSecret,
-            ShopifyStoreDomain: shopifyStoreDomain,
-            ShopifyAdminAccessToken: shopifyAdminAccessToken,
-            ShopifyAdminApiVersion: shopifyAdminApiVersion,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
             AspireTestAdminPassword: aspireTestAdminPassword,
             CorsAllowedOrigins: corsAllowedOrigins,
@@ -667,10 +661,7 @@ static partial class Program
             config,
             grafana,
             otelCollector,
-            environmentName)
-            .WithEnvironment("Shopify__StoreDomain", config.ShopifyStoreDomain)
-            .WithEnvironment("Shopify__AdminAccessToken", config.ShopifyAdminAccessToken)
-            .WithEnvironment("Shopify__AdminApiVersion", config.ShopifyAdminApiVersion);
+            environmentName);
 
         var pdfService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PdfService_Api>("PdfService")
@@ -1043,9 +1034,6 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtAudience,
     IResourceBuilder<ParameterResource> GoogleClientId,
     IResourceBuilder<ParameterResource> GoogleClientSecret,
-    IResourceBuilder<ParameterResource> ShopifyStoreDomain,
-    IResourceBuilder<ParameterResource> ShopifyAdminAccessToken,
-    IResourceBuilder<ParameterResource> ShopifyAdminApiVersion,
     IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
     IResourceBuilder<ParameterResource> AspireTestAdminPassword,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,

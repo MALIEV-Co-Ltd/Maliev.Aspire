@@ -100,7 +100,7 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
-    /// CommerceService must be available to the Intranet catalog manager and configured for Shopify imports.
+    /// CommerceService must be available to the Intranet catalog manager.
     /// </summary>
     [Fact]
     public void AppHost_CommerceService_IsRegisteredForCatalogManagement()
@@ -119,9 +119,7 @@ public sealed class AppHostReferenceTests
         var commerceBlock = appHostSource[commerceBlockStart..pdfBlockStart];
         Assert.Contains("builder.AddProject<Projects.Maliev_CommerceService_Api>(\"CommerceService\")", commerceBlock, StringComparison.Ordinal);
         Assert.Contains(".WithReference(databases.Commerce, \"CommerceDbContext\")", commerceBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithEnvironment(\"Shopify__StoreDomain\", config.ShopifyStoreDomain)", commerceBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithEnvironment(\"Shopify__AdminAccessToken\", config.ShopifyAdminAccessToken)", commerceBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithEnvironment(\"Shopify__AdminApiVersion\", config.ShopifyAdminApiVersion)", commerceBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("Shopify__", commerceBlock, StringComparison.Ordinal);
 
         var intranetBlockStart = appHostSource.IndexOf(
             "builder.AddProject<Projects.Maliev_Intranet_Bff>(\"IntranetBff\")",
