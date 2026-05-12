@@ -89,13 +89,52 @@ public sealed class AppHostReferenceTests
             "orderService",
             "paymentService",
             "pricingService",
-            "uploadService"
+            "uploadService",
+            "commerceService"
         })
         {
             Assert.Contains($".WithReference({dependency})", webBlock, StringComparison.Ordinal);
         }
 
         Assert.Contains(".WithHttpHealthCheck(\"/web/aspire-liveness\")", webBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// CommerceService must be available to the Intranet catalog manager and configured for Shopify imports.
+    /// </summary>
+    [Fact]
+    public void AppHost_CommerceService_IsRegisteredForCatalogManagement()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var commerceBlockStart = appHostSource.IndexOf(
+            "var commerceService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+        var pdfBlockStart = appHostSource.IndexOf(
+            "var pdfService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+
+        Assert.True(commerceBlockStart >= 0, "CommerceService resource declaration was not found.");
+        Assert.True(pdfBlockStart > commerceBlockStart, "PdfService resource declaration was not found after CommerceService.");
+
+        var commerceBlock = appHostSource[commerceBlockStart..pdfBlockStart];
+        Assert.Contains("builder.AddProject<Projects.Maliev_CommerceService_Api>(\"CommerceService\")", commerceBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithReference(databases.Commerce, \"CommerceDbContext\")", commerceBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"Shopify__StoreDomain\", config.ShopifyStoreDomain)", commerceBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"Shopify__AdminAccessToken\", config.ShopifyAdminAccessToken)", commerceBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"Shopify__AdminApiVersion\", config.ShopifyAdminApiVersion)", commerceBlock, StringComparison.Ordinal);
+
+        var intranetBlockStart = appHostSource.IndexOf(
+            "builder.AddProject<Projects.Maliev_Intranet_Bff>(\"IntranetBff\")",
+            StringComparison.Ordinal);
+        var webBlockStart = appHostSource.IndexOf(
+            "builder.AddProject<Projects.Maliev_Web_Bff>(\"WebBff\")",
+            StringComparison.Ordinal);
+
+        Assert.True(intranetBlockStart >= 0, "IntranetBff resource declaration was not found.");
+        Assert.True(webBlockStart > intranetBlockStart, "WebBff resource declaration was not found after IntranetBff.");
+
+        var intranetBlock = appHostSource[intranetBlockStart..webBlockStart];
+        Assert.Contains(".WithReference(commerceService)", intranetBlock, StringComparison.Ordinal);
     }
 
     /// <summary>

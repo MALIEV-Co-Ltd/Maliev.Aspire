@@ -77,6 +77,9 @@ static partial class Program
 
         var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId", secret: true);
         var googleClientSecret = builder.AddParameterFromConfig("GoogleClientSecret", "Authentication:Google:ClientSecret", secret: true);
+        var shopifyStoreDomain = builder.AddParameterFromConfig("ShopifyStoreDomain", "Shopify:StoreDomain");
+        var shopifyAdminAccessToken = builder.AddParameterFromConfig("ShopifyAdminAccessToken", "Shopify:AdminAccessToken", secret: true);
+        var shopifyAdminApiVersion = builder.AddParameterFromConfig("ShopifyAdminApiVersion", "Shopify:AdminApiVersion");
 
         var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
         builder.Configuration["Parameters:AspireTestAdminEnabled"] =
@@ -107,6 +110,9 @@ static partial class Program
             JwtAudience: jwtAudience,
             GoogleClientId: googleClientId,
             GoogleClientSecret: googleClientSecret,
+            ShopifyStoreDomain: shopifyStoreDomain,
+            ShopifyAdminAccessToken: shopifyAdminAccessToken,
+            ShopifyAdminApiVersion: shopifyAdminApiVersion,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
             AspireTestAdminPassword: aspireTestAdminPassword,
             CorsAllowedOrigins: corsAllowedOrigins,
@@ -195,6 +201,7 @@ static partial class Program
             Chatbot: postgres.AddDatabase("chatbot-app-db"),
             Compensation: postgres.AddDatabase("compensation-app-db"),
             Compliance: postgres.AddDatabase("compliance-app-db"),
+            Commerce: postgres.AddDatabase("commerce-app-db"),
             Contact: postgres.AddDatabase("contact-app-db"),
             Country: postgres.AddDatabase("country-app-db"),
             Currency: postgres.AddDatabase("currency-app-db"),
@@ -647,6 +654,24 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        var commerceService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_CommerceService_Api>("CommerceService")
+                .WithReference(databases.Commerce, "CommerceDbContext")
+                .WaitFor(databases.Commerce)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WithReference(customerService)
+                .WithHttpHealthCheck("/commerce/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithEnvironment("Shopify__StoreDomain", config.ShopifyStoreDomain)
+            .WithEnvironment("Shopify__AdminAccessToken", config.ShopifyAdminAccessToken)
+            .WithEnvironment("Shopify__AdminApiVersion", config.ShopifyAdminApiVersion);
+
         var pdfService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PdfService_Api>("PdfService")
                 .WithReference(databases.Pdf, "PdfDbContext")
@@ -833,6 +858,7 @@ static partial class Program
                 .WithReference(projectService)
                 .WithReference(searchService)
                 .WithReference(currencyService)
+                .WithReference(commerceService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
                 .WithHttpHealthCheck("/intranet/aspire-liveness")
@@ -861,6 +887,7 @@ static partial class Program
                 .WithReference(paymentService)
                 .WithReference(pricingService)
                 .WithReference(uploadService)
+                .WithReference(commerceService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Customer Web (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Customer Web (HTTPS)")
                 .WithHttpHealthCheck("/web/aspire-liveness"),
@@ -1016,6 +1043,9 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtAudience,
     IResourceBuilder<ParameterResource> GoogleClientId,
     IResourceBuilder<ParameterResource> GoogleClientSecret,
+    IResourceBuilder<ParameterResource> ShopifyStoreDomain,
+    IResourceBuilder<ParameterResource> ShopifyAdminAccessToken,
+    IResourceBuilder<ParameterResource> ShopifyAdminApiVersion,
     IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
     IResourceBuilder<ParameterResource> AspireTestAdminPassword,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,
@@ -1041,6 +1071,7 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Chatbot,
     IResourceBuilder<PostgresDatabaseResource> Compensation,
     IResourceBuilder<PostgresDatabaseResource> Compliance,
+    IResourceBuilder<PostgresDatabaseResource> Commerce,
     IResourceBuilder<PostgresDatabaseResource> Contact,
     IResourceBuilder<PostgresDatabaseResource> Country,
     IResourceBuilder<PostgresDatabaseResource> Currency,

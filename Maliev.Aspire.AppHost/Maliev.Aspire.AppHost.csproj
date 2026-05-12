@@ -35,6 +35,7 @@
     <ProjectReference Include="..\..\Maliev.ChatbotService\Maliev.ChatbotService.Api\Maliev.ChatbotService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CompensationService\Maliev.CompensationService.Api\Maliev.CompensationService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ComplianceService\Maliev.ComplianceService.Api\Maliev.ComplianceService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.CommerceService\Maliev.CommerceService.Api\Maliev.CommerceService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ContactService\Maliev.ContactService.Api\Maliev.ContactService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CountryService\Maliev.CountryService.Api\Maliev.CountryService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CurrencyService\Maliev.CurrencyService.Api\Maliev.CurrencyService.Api.csproj" />

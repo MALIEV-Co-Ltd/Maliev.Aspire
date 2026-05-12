@@ -36,6 +36,12 @@
     <Project Path="..\Maliev.ComplianceService\Maliev.ComplianceService.Domain\Maliev.ComplianceService.Domain.csproj" />
     <Project Path="..\Maliev.ComplianceService\Maliev.ComplianceService.Infrastructure\Maliev.ComplianceService.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/APIs/Commerce Service/">
+    <Project Path="..\Maliev.CommerceService\Maliev.CommerceService.Api\Maliev.CommerceService.Api.csproj" />
+    <Project Path="..\Maliev.CommerceService\Maliev.CommerceService.Application\Maliev.CommerceService.Application.csproj" />
+    <Project Path="..\Maliev.CommerceService\Maliev.CommerceService.Domain\Maliev.CommerceService.Domain.csproj" />
+    <Project Path="..\Maliev.CommerceService\Maliev.CommerceService.Infrastructure\Maliev.CommerceService.Infrastructure.csproj" />
+  </Folder>
   <Folder Name="/APIs/Contact Service/">
     <Project Path="../Maliev.ContactService/Maliev.ContactService.Application/Maliev.ContactService.Application.csproj" />
     <Project Path="../Maliev.ContactService/Maliev.ContactService.Domain/Maliev.ContactService.Domain.csproj" />
