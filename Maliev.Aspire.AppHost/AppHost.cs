@@ -967,6 +967,7 @@ static partial class Program
             .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ)
             .WithEnvironment("UPLOAD_SERVICE_URL", uploadService.GetEndpoint("http"))
             .WithEnvironment("JWT_PRIVATE_KEY", config.JwtPrivateKey)
+            .WithEnvironment("JWT_PUBLIC_KEY", config.JwtPublicKey)
             .WithEnvironment("JWT_SECURITY_KEY", config.JwtSecurityKey)
             .WithEnvironment("JWT_ISSUER", config.JwtIssuer)
             .WithEnvironment("JWT_AUDIENCE", config.JwtAudience)
