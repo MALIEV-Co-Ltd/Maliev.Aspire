@@ -2,7 +2,7 @@
 
 > Production-gate user journey catalog for browser-driven E2E tests against the Aspire integrated environment.
 >
-> Last updated: 2026-05-13
+> Last updated: 2026-05-14
 
 ## Purpose
 
@@ -25,6 +25,7 @@ Use this document as the source of truth when creating future Playwright E2E sui
 - Use service-level verification only for journey outcomes: customer/account/order/project/payment/PDF/document records, emitted events, and generated artifacts.
 - Do not duplicate endpoint CRUD coverage from per-service tests.
 - Do not assert private implementation details unless they are the only reliable way to prove the cross-service side effect.
+- Keep the current Intranet ProjectNew quote/project lifecycle untouched until the product owner revisits the separate QuoteEngine/ProjectNew lifecycle discussion.
 - Use unique test data per run: customer email, company name, project reference, quote number, product handle, and order number.
 - Use the Aspire dashboard, service health endpoints, logs, and traces as supporting verification for failures and event-driven waits.
 - Never rely on fixed sleeps. Future automated tests must poll visible UI state or downstream records until the expected state appears or a meaningful timeout expires.
@@ -43,6 +44,7 @@ Use this document as the source of truth when creating future Playwright E2E sui
 - Customer email sign-up currently creates customer/account records and allows authentication, but a full email verification token and email-link confirmation journey was not found in the current Web/Auth/Customer/Notification flow.
 - Customer password reset token creation exists, but the full "receive reset email, click link, return to site" browser journey must be verified or implemented with the notification/email provider.
 - `Maliev.QuoteEngine` currently contains prototype-backed session and quote behavior. E2E stories must mark these flows partial until the BFF uses the real Upload, Geometry, Pricing, Project, Quotation, PDF, Order, Payment, and Delivery services.
+- ProjectNew and QuoteEngine lifecycle unification is explicitly deferred. QuoteEngine-local portal stories may be planned, but no story in this pass requires ProjectNew to share or replace its current quote/project workflow.
 - Browser E2E automation is not yet implemented in this repo. This document is the production-gate story catalog for that future suite.
 
 ---
@@ -554,6 +556,218 @@ Use this document as the source of truth when creating future Playwright E2E sui
 
 **Known product gaps:** Any missing account editing UI should be logged as product work, not hidden by direct API setup.
 
+## WEB-010: Customer researches trust content before conversion
+
+**Persona:** Prospective customer validating MALIEV capability before contacting sales or starting a quote.
+
+**Entry point:** `Maliev.Web` `/materials`, `/industries`, `/case-studies`, `/case-studies/{slug}`, `/blog`, `/blog/{slug}`, and `/faq`.
+
+**Business value:** Confirms the marketing site can educate and build trust before a customer commits to a quote or contact request.
+
+**Prerequisites:**
+- Aspire is running with `WebBff` healthy.
+- Static/content routes are published and reachable.
+- At least one case study and blog/detail route is present.
+
+**User path:**
+1. Open `/materials` and verify manufacturing material guidance is visible.
+2. Open `/industries` and verify industry fit is understandable.
+3. Open `/case-studies`, then a case-study detail.
+4. Open `/blog`, then a blog detail.
+5. Open `/faq`.
+6. Navigate from content to quote or contact without losing language/culture preference.
+
+**Features covered:**
+- Static content routing.
+- SEO/content discovery.
+- Content-to-conversion navigation.
+- Culture/preference persistence where exposed.
+
+**Services involved:**
+- `Maliev.Web.Bff`
+- `Maliev.Web.Client`
+- `ContactService` only when the journey ends in contact submission.
+
+**Data created or mutated:**
+- None for browsing.
+- Contact inquiry if the journey converts through contact.
+
+**Verification checklist:**
+- Every listed route renders with HTTP success and customer-readable content.
+- Detail routes render the expected title and do not fall back to a generic not-found page.
+- Quote/contact CTAs are visible and route to the current Web-owned quote/contact surfaces.
+- Browser title/meta content is present enough for SEO smoke coverage.
+- Culture/preference state is preserved if the user changes language before conversion.
+
+**Observability checks:**
+- WebBff health remains green.
+- Browser console has no fatal route/render errors.
+- ContactService receives data only if the user submits contact.
+
+**Current implementation status:** Ready to automate for existing Web content routes.
+
+**Known product gaps:** Content-to-quote conversion should be reviewed once the final Web-to-QuoteEngine handoff is revisited.
+
+**Product direction implied by story:** Web should remain the customer education and trust surface even while quote ownership is discussed separately.
+
+## WEB-011: Customer manages cookie and privacy consent
+
+**Persona:** Public website visitor deciding whether to accept optional tracking or preference cookies.
+
+**Entry point:** `Maliev.Web` first-page visit and `/cookie-policy`, `/privacy`, `/terms`.
+
+**Business value:** Confirms compliance-facing website behavior is clear, reversible, and does not block core conversion.
+
+**Prerequisites:**
+- Browser profile starts without MALIEV consent state.
+- Web static policy pages are reachable.
+
+**User path:**
+1. Open Web home page in a fresh browser context.
+2. Observe consent banner or panel.
+3. Reject optional cookies.
+4. Refresh and verify the decision persists.
+5. Reset or change consent where UI supports it.
+6. Accept cookies and verify banner no longer blocks navigation.
+7. Open cookie, privacy, and terms pages from the consent/policy links.
+
+**Features covered:**
+- Consent banner.
+- Consent persistence.
+- Policy navigation.
+- Non-blocking website access.
+
+**Services involved:**
+- `Maliev.Web.Client`
+- `Maliev.Web.Bff` if preferences are server-backed.
+
+**Data created or mutated:**
+- Browser consent/preference state.
+- Optional server preference record if signed in and implemented.
+
+**Verification checklist:**
+- Consent UI appears only when consent state is missing.
+- Reject and accept states persist across refresh.
+- Banner does not cover required navigation or quote/contact actions after a choice.
+- Policy links navigate to the correct pages.
+- Consent state does not leak across isolated browser contexts.
+
+**Observability checks:**
+- Browser console has no consent-script errors.
+- WebBff receives no unexpected PII for anonymous consent-only browsing.
+
+**Current implementation status:** Ready to automate where consent UI is currently implemented.
+
+**Known product gaps:** If consent cannot be changed after the first decision, add a visible preference-management affordance.
+
+**Product direction implied by story:** Compliance controls must protect trust without reducing conversion usability.
+
+## WEB-012: Customer uses post-sale support information and submits support/contact request
+
+**Persona:** Customer or buyer looking for warranty, refund, shipping, or post-sale help.
+
+**Entry point:** `Maliev.Web` `/warranty-policy`, `/refund-policy`, `/shipping-returns`, `/contact`.
+
+**Business value:** Ensures customers can self-serve policy answers and escalate to MALIEV with usable context.
+
+**Prerequisites:**
+- Policy pages are reachable.
+- ContactService is healthy.
+- Unique support inquiry data is available.
+
+**User path:**
+1. Open shipping/returns, refund, and warranty policy pages.
+2. Confirm each page explains next steps and scope.
+3. Navigate to contact.
+4. Submit a support inquiry referencing an order, product, or quote where possible.
+5. Verify the customer receives confirmation.
+6. Verify ContactService stores the inquiry for employee follow-up.
+
+**Features covered:**
+- Policy pages.
+- Support escalation.
+- Contact form validation.
+- ContactService persistence.
+
+**Services involved:**
+- `Maliev.Web.Bff`
+- `ContactService`
+- `NotificationService` if support notifications are configured.
+
+**Data created or mutated:**
+- Contact/support message.
+- Optional notification delivery record.
+
+**Verification checklist:**
+- Policy pages are reachable and not hidden behind auth.
+- Contact form captures support category/context where UI exposes it.
+- Required fields validate.
+- Success state is visible and duplicate submissions are prevented.
+- Employee follow-up queue or ContactService contains the support request.
+
+**Observability checks:**
+- WebBff logs a successful ContactService call.
+- NotificationService logs support notification if configured.
+
+**Current implementation status:** Ready to automate for policy routes and contact persistence; category-specific support fields may be a product gap.
+
+**Known product gaps:** The contact form should distinguish sales inquiry from post-sale support if it does not already.
+
+**Product direction implied by story:** Web should support the complete customer relationship, not only acquisition.
+
+## WEB-013: Customer submits current Web quote request without assuming QuoteEngine ownership
+
+**Persona:** Customer starting a lightweight quote from the public website.
+
+**Entry point:** `Maliev.Web` `/quote`.
+
+**Business value:** Preserves the current Web quote-entry behavior while the dedicated QuoteEngine lifecycle decision remains deferred.
+
+**Prerequisites:**
+- Web quote page is reachable.
+- WebBff quote endpoints and any downstream ManufacturingCatalog, Upload, Material, Pricing, or Contact dependencies are healthy.
+
+**User path:**
+1. Open `/quote`.
+2. Enter manufacturing intent, contact details, files, quantities, material/process preferences, or other currently exposed quote fields.
+3. Submit the current Web quote request.
+4. Verify the UI confirms receipt or produces the expected draft estimate.
+5. Verify downstream records/artifacts are created according to the current Web quote path.
+
+**Features covered:**
+- Current Web-owned quote entry.
+- Quote/request validation.
+- File or option handling where exposed.
+- Contact/quote request persistence.
+
+**Services involved:**
+- `Maliev.Web.Bff`
+- `UploadService` if file upload is exposed.
+- `MaterialService` and `PricingService` if instant estimate is exposed.
+- `ContactService` or current quote request owner.
+
+**Data created or mutated:**
+- Web quote request or draft.
+- Optional upload artifact.
+- Optional pricing estimate.
+
+**Verification checklist:**
+- Required quote fields validate clearly.
+- Submit action does not route to QuoteEngine unless current Web behavior explicitly does so.
+- Uploaded files are accepted/rejected with visible status.
+- Created request/draft can be found through the current backend owner.
+- Customer receives a confirmation state with next action.
+
+**Observability checks:**
+- WebBff resolves downstream services through Aspire.
+- Upload/pricing/contact logs match the visible UI result.
+
+**Current implementation status:** Ready to automate for the current Web quote page.
+
+**Known product gaps:** Revisit Web-to-QuoteEngine handoff only after the deferred lifecycle consultation.
+
+**Product direction implied by story:** Web quote entry should remain stable and testable while QuoteEngine architecture is discussed separately.
+
 ---
 
 # Dedicated QuoteEngine Stories
@@ -1053,6 +1267,322 @@ Use this document as the source of truth when creating future Playwright E2E sui
 **Current implementation status:** Partial.
 
 **Known product gaps:** QuoteEngine history needs durable backend ownership before this can pass.
+
+## QUOTE-010: Customer manages QuoteEngine profile and preferences
+
+**Persona:** Signed-in customer using the dedicated quote portal.
+
+**Entry point:** `Maliev.QuoteEngine` `/profile` and `/preferences`.
+
+**Business value:** Gives quoting customers a portal-specific place to maintain contact, company, communication, and quote preferences.
+
+**Prerequisites:**
+- Customer is signed in to QuoteEngine.
+- QuoteEngine account endpoints are reachable.
+- CustomerService/AuthService integration is available or prototype store is seeded.
+
+**User path:**
+1. Open `/profile`.
+2. Review customer name, company, email, phone, and billing/contact context.
+3. Update editable profile fields where supported.
+4. Open `/preferences`.
+5. Update preferred process, unit/currency/language, notification, or delivery preferences where supported.
+6. Refresh and verify values persist.
+
+**Features covered:**
+- QuoteEngine customer profile.
+- Portal preferences.
+- Customer session scoping.
+- Persistence across refresh.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `CustomerService` in production.
+- `AuthService`/`IAMService` for signed-in context.
+- `QuoteEnginePrototypeStore` where still prototype-backed.
+
+**Data created or mutated:**
+- Customer profile fields.
+- QuoteEngine/customer preferences.
+
+**Verification checklist:**
+- Anonymous users are redirected to sign-in for profile/preferences.
+- UI shows the signed-in customer's data only.
+- Editable fields validate before save.
+- Saved changes survive refresh and sign-out/sign-in.
+- Another customer cannot see or mutate the profile.
+
+**Observability checks:**
+- QuoteEngineBff logs customer-scoped account calls.
+- Production implementation calls CustomerService rather than trusting browser-supplied customer ids.
+
+**Current implementation status:** Partial. Current routes exist, but durable backend behavior depends on replacing prototype-backed account handling.
+
+**Known product gaps:** Define which preferences are customer-owned versus quote-draft-owned before broadening UI.
+
+**Product direction implied by story:** QuoteEngine should become a real customer portal while remaining independent from the deferred ProjectNew lifecycle discussion.
+
+## QUOTE-011: Customer views quote list and quote detail history
+
+**Persona:** Returning customer reviewing previous quote requests.
+
+**Entry point:** `Maliev.QuoteEngine` `/quotes/{QuoteId:guid}` and quote-history navigation.
+
+**Business value:** Lets customers recover prior quote context without asking employees to resend information.
+
+**Prerequisites:**
+- Signed-in customer has at least one QuoteEngine quote record or prototype quote fixture.
+- Quote detail route is reachable.
+
+**User path:**
+1. Sign in to QuoteEngine.
+2. Open quote history/list if exposed from navigation.
+3. Select a quote.
+4. Verify quote detail shows quote status, line items, totals, uploaded file references, and next action.
+5. Attempt to open another customer's quote id directly.
+
+**Features covered:**
+- Quote history.
+- Quote detail.
+- Customer-scoped access control.
+- Direct-url authorization.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- Production owner: `QuotationService` or customer quote-history service.
+- `UploadService`/`PdfService` when artifacts are shown.
+- `QuoteEnginePrototypeStore` where still prototype-backed.
+
+**Data created or mutated:**
+- None required for read-only history.
+
+**Verification checklist:**
+- Customer sees only their quote records.
+- Quote detail totals/status match the source quote.
+- PDF/download links work or show a clear unavailable state.
+- Direct access to another customer's quote returns sign-in, forbidden, or not-found without data leakage.
+- Browser refresh preserves route state.
+
+**Observability checks:**
+- BFF resolves customer identity server-side.
+- Backend logs show customer-scoped read and no browser-supplied trusted customer id.
+
+**Current implementation status:** Partial. Mark as prototype-backed until real quote history is durable.
+
+**Known product gaps:** Quote list navigation should be explicit if only detail route currently exists.
+
+**Product direction implied by story:** QuoteEngine should own customer-visible quote history without changing employee ProjectNew flow yet.
+
+## QUOTE-012: Customer views order list and order detail
+
+**Persona:** Customer checking accepted QuoteEngine order progress.
+
+**Entry point:** `Maliev.QuoteEngine` `/orders` and `/orders/{OrderId:guid}`.
+
+**Business value:** Reduces status requests by giving customers a self-service order view.
+
+**Prerequisites:**
+- Signed-in customer has at least one order or prototype order fixture.
+- Order detail route is reachable.
+
+**User path:**
+1. Sign in to QuoteEngine.
+2. Open `/orders`.
+3. Select an order.
+4. Verify order detail includes status, line items, payment state, delivery state, and related quote/document links where available.
+5. Attempt direct access to another customer's order id.
+
+**Features covered:**
+- Customer order list.
+- Customer order detail.
+- Payment/delivery status visibility.
+- Customer authorization boundary.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `OrderService`
+- `PaymentService`
+- `DeliveryService`
+- `QuotationService`
+- `QuoteEnginePrototypeStore` where still prototype-backed.
+
+**Data created or mutated:**
+- None required for read-only status.
+
+**Verification checklist:**
+- Orders list is customer-scoped.
+- Order status is understandable and not employee-only jargon.
+- Payment and delivery statuses match backend records.
+- Direct access to another customer order does not leak data.
+- Empty order history has a helpful state and route back to quoting.
+
+**Observability checks:**
+- BFF order reads use server-resolved customer identity.
+- Order/Payment/Delivery services remain healthy.
+
+**Current implementation status:** Partial.
+
+**Known product gaps:** Production order history must replace prototype-backed order records.
+
+**Product direction implied by story:** QuoteEngine can mature as a customer status portal without requiring ProjectNew lifecycle unification now.
+
+## QUOTE-013: Customer manages NDA records
+
+**Persona:** Customer sharing or reviewing legal documents in the quote portal.
+
+**Entry point:** `Maliev.QuoteEngine` `/ndas`.
+
+**Business value:** Gives customers a clear legal-document surface separate from CAD and quote documents.
+
+**Prerequisites:**
+- Signed-in customer.
+- NDA records or upload workflow are available.
+- UploadService is healthy if uploads are implemented.
+
+**User path:**
+1. Open `/ndas`.
+2. Review existing NDA records and statuses.
+3. Upload or attach NDA if supported.
+4. Download/view an existing NDA if authorized.
+5. Confirm NDA documents are not mixed into CAD upload lists.
+
+**Features covered:**
+- NDA list/status.
+- NDA upload/download where implemented.
+- Legal-document separation.
+- Customer authorization.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `CustomerService` or document ownership service.
+- `UploadService`
+- `QuoteEnginePrototypeStore` where still prototype-backed.
+
+**Data created or mutated:**
+- NDA document record.
+- NDA upload artifact if upload is supported.
+
+**Verification checklist:**
+- NDA page requires customer sign-in.
+- NDA records are customer-scoped.
+- NDA artifact has legal/NDA kind, not CAD kind.
+- Unauthorized customer cannot access another customer's NDA.
+- CAD analysis is not triggered for NDA files.
+
+**Observability checks:**
+- UploadService records correct document kind.
+- GeometryService receives no NDA-related CAD analysis message.
+
+**Current implementation status:** Partial.
+
+**Known product gaps:** Define NDA approval/signature statuses if the current UI only lists placeholder records.
+
+**Product direction implied by story:** Legal documents need their own portal lifecycle independent from manufacturing file analysis.
+
+## QUOTE-014: Customer manages supporting documents
+
+**Persona:** Customer providing drawings, requirements, purchase documents, or other supporting files.
+
+**Entry point:** `Maliev.QuoteEngine` `/documents`.
+
+**Business value:** Keeps supporting customer documents traceable and separate from CAD files that drive geometry analysis.
+
+**Prerequisites:**
+- Signed-in customer.
+- UploadService is healthy if document upload is implemented.
+
+**User path:**
+1. Open `/documents`.
+2. Upload a supporting document where supported.
+3. Assign or verify document description/type.
+4. Download/view document.
+5. Confirm document is visible only to the owning customer and authorized employees.
+
+**Features covered:**
+- Customer document list.
+- Supporting document upload/download.
+- Document categorization.
+- Authorization.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `UploadService`
+- `CustomerService` or document owner service.
+- `QuoteEnginePrototypeStore` where still prototype-backed.
+
+**Data created or mutated:**
+- Supporting document record.
+- Upload artifact.
+
+**Verification checklist:**
+- Documents require sign-in.
+- File type/size validation is visible.
+- Supporting documents are not submitted to GeometryService for CAD analysis.
+- Download/open links are authorized and stable.
+- Employee visibility should appear in Intranet only where an authorized employee surface exists.
+
+**Observability checks:**
+- UploadService records document kind and owner.
+- No cross-customer document access appears in logs.
+
+**Current implementation status:** Partial.
+
+**Known product gaps:** Define document categories and employee review surface before automating broad document workflows.
+
+**Product direction implied by story:** QuoteEngine should distinguish CAD, NDA, and supporting documents as separate customer concepts.
+
+## QUOTE-015: Customer receives real-time QuoteEngine notifications
+
+**Persona:** Customer waiting for upload analysis, quote generation, or order status updates.
+
+**Entry point:** `Maliev.QuoteEngine` quote workspace, quote detail, and `/hubs/quote-notifications`.
+
+**Business value:** Prevents stale UI during long-running quote operations and reduces manual refresh.
+
+**Prerequisites:**
+- Signed-in customer where the hub requires session context.
+- SignalR hub is reachable.
+- A quote/upload/order event can be triggered in the test environment.
+
+**User path:**
+1. Open a QuoteEngine page that subscribes to notifications.
+2. Trigger upload analysis, quote generation, or order status update.
+3. Wait for UI to update through SignalR.
+4. Refresh and confirm the final state remains persisted.
+5. Disconnect/reconnect network where automation supports it and verify recovery behavior.
+
+**Features covered:**
+- QuoteEngine SignalR hub.
+- Real-time analysis/quote/order updates.
+- Reconnect behavior.
+- Stale UI prevention.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `/hubs/quote-notifications`
+- `UploadService`/`GeometryService` for analysis events.
+- `QuotationService`, `OrderService`, or prototype store depending on event type.
+
+**Data created or mutated:**
+- Event-driven status updates.
+- No new data required beyond the triggering workflow.
+
+**Verification checklist:**
+- Hub connection establishes for the signed-in customer.
+- UI updates without manual refresh after the event.
+- Reconnect does not duplicate messages or show stale terminal state.
+- Customer receives only events for their own quote/order.
+- Refresh shows the same final state loaded from persisted backend/prototype data.
+
+**Observability checks:**
+- QuoteEngineBff logs hub connection and customer scope.
+- Event source logs match the visible UI update.
+
+**Current implementation status:** Partial.
+
+**Known product gaps:** Production event source must replace prototype-only notifications for quote/order workflows.
+
+**Product direction implied by story:** QuoteEngine should feel live and trustworthy for long-running customer operations.
 
 ---
 
@@ -1575,6 +2105,363 @@ Use this document as the source of truth when creating future Playwright E2E sui
 
 ---
 
+## INT-010: Admin creates IAM user and verifies access changes
+
+**Persona:** Platform admin or HR administrator.
+
+**Entry point:** Intranet IAM/user administration pages.
+
+**Business value:** Confirms employee access is intentionally created, scoped, and revoked before production data is exposed.
+
+**Prerequisites:**
+- Admin user is signed in with IAM user-management permissions.
+- IAMService, AuthService, EmployeeService, and NotificationService are healthy.
+- Test role and permission category data exist.
+
+**User path:**
+1. Open Intranet IAM user administration.
+2. Create a new user or invite an employee-linked user.
+3. Assign a role and optional direct permissions.
+4. Sign in or impersonation-check as the new user according to supported policy.
+5. Verify visible navigation and direct URL access match the assigned permissions.
+6. Remove a permission or deactivate the user and verify access changes on the next request/session refresh.
+
+**Features covered:**
+- IAM user creation.
+- Role assignment.
+- Direct permission override.
+- Session/access refresh.
+- Employee-to-user linkage.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `IAMService`
+- `AuthService`
+- `EmployeeService`
+- `NotificationService`
+
+**Data created or mutated:**
+- IAM user/principal.
+- Role assignment.
+- Permission assignment.
+- Optional employee linkage and invitation/notification record.
+
+**Verification checklist:**
+- UI route shows created user with stable identity, email, status, roles, and permissions.
+- BFF endpoint forwards the request to IAMService without exposing admin-only fields to unauthorized users.
+- Domain owner is IAMService for access state; EmployeeService owns employee profile linkage.
+- New user can access only permitted Intranet modules; denied modules hide navigation and return a safe forbidden page on direct URL.
+- Revoked permission takes effect after refresh, token renewal, or documented session invalidation behavior.
+- Audit metadata records who made the access change.
+
+**Observability checks:**
+- IAMService logs user/role mutation with correlation id.
+- AuthService traces token/session evaluation after permission change.
+- Notification event is emitted if invitation or access-change messaging exists.
+- Aspire dashboard keeps IAMService, AuthService, and Intranet BFF healthy.
+
+**Current implementation status:** Partial. Automate the IAM screens that exist and keep invitation/session-refresh gaps visible.
+
+**Product direction implied by story:** IAM administration should be a first-class Intranet flow with visible permission effects, not a backend-only setup task.
+
+**Known product gaps:** Define whether new employees are invited by email, activated immediately, or created as pending users.
+
+## INT-011: Admin manages role detail and permission categories
+
+**Persona:** Platform admin.
+
+**Entry point:** Intranet IAM role/permission pages.
+
+**Business value:** Confirms permission design can be managed without code changes while preventing accidental broad access.
+
+**Prerequisites:**
+- Admin user has role-management permissions.
+- IAMService is healthy.
+- At least one non-critical test role exists.
+
+**User path:**
+1. Open role list.
+2. Create or edit a role.
+3. Add permissions from grouped categories.
+4. Save changes and reopen the role detail.
+5. Assign the role to a test user.
+6. Verify the test user's navigation and restricted actions change accordingly.
+
+**Features covered:**
+- Role list and detail.
+- Permission category grouping.
+- Role-to-user assignment.
+- Permission propagation.
+- Auditability.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `IAMService`
+- `AuthService`
+
+**Data created or mutated:**
+- Role record.
+- Role-permission mappings.
+- User-role assignment.
+- Audit record where implemented.
+
+**Verification checklist:**
+- Role detail route displays name, description, category-grouped permissions, and assigned users where supported.
+- BFF endpoint reaches IAMService as the domain owner for role state.
+- Duplicate role names or invalid permission keys are blocked with visible validation.
+- Permission category labels match the actual permission keys used by protected endpoints.
+- A user with the edited role can perform newly granted actions and cannot perform non-granted actions.
+
+**Observability checks:**
+- IAMService logs role mutations.
+- AuthService evaluates the updated permission set on a new token/session check.
+- Aspire traces show no unexpected downstream calls outside IAM/Auth.
+
+**Current implementation status:** Partial. Ready where role-management UI exists; permission category UX may need product work.
+
+**Product direction implied by story:** Permission categories must be understandable to non-developer admins and map cleanly to protected routes.
+
+**Known product gaps:** Role templates and guardrails for high-risk permissions should be defined.
+
+## INT-012: Employee manages material master data
+
+**Persona:** Operations, estimating, or production employee.
+
+**Entry point:** Intranet material master-data pages.
+
+**Business value:** Ensures quoting, procurement, and manufacturing use trusted material definitions.
+
+**Prerequisites:**
+- Employee has material-management permission.
+- MaterialService, PricingService, InventoryService, and SearchService are healthy.
+- Test material category and supplier data exist where required.
+
+**User path:**
+1. Open material list.
+2. Create or edit material name, category, process compatibility, unit, cost, and visible flags.
+3. Save and reopen material detail.
+4. Verify the material appears in search and eligible quoting/configuration pickers.
+5. Disable/archive the material and verify it is hidden from new operational selections while historical records remain readable.
+
+**Features covered:**
+- Material master data.
+- Process compatibility.
+- Pricing inputs.
+- Search indexing.
+- Archive/active behavior.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `MaterialService`
+- `PricingService`
+- `InventoryService`
+- `SearchService`
+
+**Data created or mutated:**
+- Material record.
+- Compatibility/settings data.
+- Cost or pricing metadata.
+- Search index document where implemented.
+
+**Verification checklist:**
+- UI route shows saved material fields after refresh.
+- BFF endpoint writes to MaterialService as domain owner.
+- PricingService uses active material data for price calculations when applicable.
+- Archived materials do not appear in new quote/project selectors but remain visible on historical records.
+- Unauthorized users cannot create, edit, or archive materials.
+
+**Observability checks:**
+- MaterialService logs create/update/archive action.
+- SearchService receives index update where configured.
+- PricingService traces show current material id/version during price calculation.
+- Aspire dashboard shows dependent service health during the flow.
+
+**Current implementation status:** Partial. Automate implemented material pages first and mark missing pricing/search propagation as gaps.
+
+**Product direction implied by story:** Material data should be governed centrally and reused by quoting, purchasing, inventory, and production.
+
+**Known product gaps:** Define material versioning rules so historical quotes keep the exact material assumptions used at quote time.
+
+## INT-013: Employee manages equipment and facility master data
+
+**Persona:** Production manager or maintenance employee.
+
+**Entry point:** Intranet facility/equipment master-data pages.
+
+**Business value:** Confirms production scheduling uses accurate machine/work-center capabilities and maintenance status.
+
+**Prerequisites:**
+- Employee has facility/equipment management permissions.
+- FacilityService, JobService, SearchService, and NotificationService are healthy.
+- Test process/material capability data exists.
+
+**User path:**
+1. Open equipment/work-center list.
+2. Create or edit machine name, process capability, capacity, status, and location.
+3. Add maintenance notes or downtime status.
+4. Save and reopen detail.
+5. Verify production scheduling selectors reflect active equipment and exclude unavailable equipment.
+
+**Features covered:**
+- Equipment/work-center master data.
+- Maintenance notes.
+- Capability and availability.
+- Production schedule integration.
+- Search visibility.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `FacilityService`
+- `JobService`
+- `SearchService`
+- `NotificationService`
+
+**Data created or mutated:**
+- Equipment/work-center record.
+- Capability metadata.
+- Maintenance note/status.
+- Search index document where implemented.
+
+**Verification checklist:**
+- Equipment route displays saved capabilities, status, and notes.
+- BFF endpoint writes to FacilityService as domain owner.
+- Unavailable equipment is blocked or clearly warned when assigned to a production job.
+- Maintenance notes remain visible to authorized employees and hidden from customer-facing surfaces.
+- Search results reflect the latest equipment status if equipment is indexed.
+
+**Observability checks:**
+- FacilityService logs equipment and maintenance changes.
+- JobService traces assignment validation against current equipment status.
+- NotificationService emits maintenance or downtime events where configured.
+- Aspire health remains green for facility and job services.
+
+**Current implementation status:** Partial. Ready where facility/equipment UI exists; production assignment validation may still be a gap.
+
+**Product direction implied by story:** Equipment availability should actively guide production scheduling instead of being passive reference data.
+
+**Known product gaps:** Define maintenance schedule recurrence, downtime calendar, and whether capacity is hour-based, quantity-based, or both.
+
+## INT-014: Employee uses dashboard overview to detect work needing attention
+
+**Persona:** Sales, operations, finance, or management employee.
+
+**Entry point:** Intranet dashboard/business overview.
+
+**Business value:** Confirms employees can spot stalled work without manually opening every module.
+
+**Prerequisites:**
+- Employee is signed in with permissions for at least one operational module.
+- SearchService, NotificationService, OrderService, ProjectService, QuotationService, InvoiceService, and JobService are healthy as applicable.
+- Test data includes overdue quote, pending payment, production job, delivery, or customer follow-up.
+
+**User path:**
+1. Open Intranet dashboard.
+2. Review KPI cards, work queues, alerts, or recent activity.
+3. Click a dashboard item.
+4. Verify navigation lands on the correct domain detail page.
+5. Resolve or update the underlying work item.
+6. Return to dashboard and verify stale alert/count behavior is resolved or refreshes according to policy.
+
+**Features covered:**
+- Business overview.
+- Work queue.
+- Cross-module navigation.
+- Permission-scoped dashboard data.
+- Stale-data refresh.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `SearchService`
+- `NotificationService`
+- `ProjectService`
+- `QuotationService`
+- `OrderService`
+- `InvoiceService`
+- `JobService`
+- `IAMService`
+
+**Data created or mutated:**
+- Underlying domain record updated by linked action.
+- Dashboard state may be read-only.
+- Notification/read state where implemented.
+
+**Verification checklist:**
+- Dashboard route shows only data from modules the employee can access.
+- Each clicked item opens the correct URL and visible detail state.
+- BFF aggregates data through service-owned endpoints instead of direct database access.
+- Counts refresh after mutation or show a clear last-updated state.
+- Direct URL to a restricted detail remains denied even if a dashboard card count exists.
+
+**Observability checks:**
+- Aspire traces show bounded dashboard aggregation calls.
+- Slow dashboard calls are visible with correlation ids.
+- Notification/Search health remains current during long-running dashboard sessions.
+
+**Current implementation status:** Partial. Automate existing dashboard widgets and capture missing work queues as product gaps.
+
+**Product direction implied by story:** Dashboard should become a permission-scoped action surface for operational risk, not just static metrics.
+
+**Known product gaps:** Define the critical work queues and SLA thresholds that deserve first-screen visibility.
+
+## INT-015: Employee uses chat or AI assistant and verifies tool callbacks
+
+**Persona:** Employee using guided assistance inside Intranet.
+
+**Entry point:** Intranet chat/assistant surface.
+
+**Business value:** Confirms AI-assisted workflows are grounded in authorized system data and produce auditable actions.
+
+**Prerequisites:**
+- Employee has permission to use assistant feature and the target module.
+- Chat/assistant service and any tool-backed domain services are healthy.
+- Test customer, quote, order, or document data exists.
+
+**User path:**
+1. Open Intranet assistant.
+2. Ask a domain-specific question or request a safe action, such as finding a customer or summarizing a quote.
+3. Assistant invokes the appropriate tool callback or service endpoint.
+4. User reviews the result and confirms any mutating action if supported.
+5. Open the referenced domain record and verify the assistant's result/action matches system state.
+
+**Features covered:**
+- Assistant UI.
+- Tool callback execution.
+- Permission-scoped data retrieval.
+- Human confirmation for mutations.
+- Audit/log trail.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- Assistant/chat service if deployed
+- `SearchService`
+- Target domain service such as `CustomerService`, `ProjectService`, `QuotationService`, `OrderService`, or `Document`/`UploadService`
+- `IAMService`
+
+**Data created or mutated:**
+- Assistant conversation.
+- Tool-call audit record.
+- Optional domain mutation only after explicit user confirmation.
+
+**Verification checklist:**
+- Chat route shows assistant response tied to the requested domain object.
+- BFF or assistant gateway enforces IAM permissions before tool callback execution.
+- Tool callback uses service-owned APIs and returns traceable identifiers.
+- Mutating actions require confirmation and show resulting domain state.
+- Assistant does not reveal restricted customer, pricing, document, or employee-only data.
+
+**Observability checks:**
+- Assistant/tool-call logs include correlation id, user id, tool name, and target record id without leaking secrets.
+- Target domain service traces show the tool-originated call.
+- Unauthorized tool attempts are denied and logged safely.
+
+**Current implementation status:** Required gap unless the assistant surface and tool callbacks are already deployed.
+
+**Product direction implied by story:** AI assistance must be permission-aware, auditable, and useful inside real employee workflows.
+
+**Known product gaps:** Define supported assistant tools, approval policy for mutating actions, retention policy, and redaction rules.
+
+---
+
 # Commerce, Catalog, And Storefront Stories
 
 ## COM-001: Employee creates or edits catalog product
@@ -1929,13 +2816,142 @@ Use this document as the source of truth when creating future Playwright E2E sui
 
 **Known product gaps:** Event types without notification mappings should be cataloged.
 
-## MFG-001: Employee schedules manufacturing work and tracks job progress
+## FIN-001: Employee creates invoice with attachments, billing notes, and credit terms
+
+**Persona:** Finance or sales operations employee.
+
+**Entry point:** Intranet finance/invoice pages.
+
+**Business value:** Confirms billing can be created with enough commercial context for customer payment and internal audit.
+
+**Prerequisites:**
+- Customer and billable order/quotation exist.
+- InvoiceService, CustomerService, OrderService, UploadService, PdfService, and AccountingService are healthy.
+- Employee has invoice-create permission.
+
+**User path:**
+1. Open invoice creation page from finance module or order detail.
+2. Select customer/order and verify billing address/payment terms are loaded.
+3. Add invoice lines, credit terms, billing notes, tax/discounts where supported, and attachment files.
+4. Save draft invoice and reopen it.
+5. Finalize or issue invoice according to supported policy.
+6. Verify generated invoice PDF/artifact and customer/accounting visibility.
+
+**Features covered:**
+- Invoice creation.
+- Billing terms and notes.
+- Attachment upload.
+- Invoice PDF artifact.
+- Accounting handoff.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `InvoiceService`
+- `CustomerService`
+- `OrderService`
+- `UploadService`
+- `PdfService`
+- `AccountingService`
+- `NotificationService`
+
+**Data created or mutated:**
+- Invoice draft/issued record.
+- Invoice line items.
+- Attachment artifact references.
+- PDF artifact.
+- Accounting entry where implemented.
+
+**Verification checklist:**
+- UI route displays draft and issued invoice states with stable invoice id/number.
+- BFF endpoint calls InvoiceService as domain owner and uses UploadService for attachments.
+- Billing address, customer tax fields, credit terms, and notes persist after refresh.
+- PDF artifact contains invoice number, customer data, line totals, tax/discounts, terms, and attachment/document references where applicable.
+- Unauthorized employees cannot issue or edit invoice financial fields.
+
+**Observability checks:**
+- InvoiceService logs draft and issue transitions.
+- UploadService stores and authorizes attachments.
+- PdfService trace links generated invoice PDF to the invoice id.
+- AccountingService receives invoice-issued event where implemented.
+- Aspire dashboard keeps finance and document services healthy.
+
+**Current implementation status:** Partial. Ready for implemented invoice screens; attachment and accounting propagation may remain gaps.
+
+**Product direction implied by story:** Invoice creation should be a finance-owned workflow with auditable artifacts and clear payment terms.
+
+**Known product gaps:** Define whether customer-facing invoice delivery happens through Web, QuoteEngine, email, or a finance-only process.
+
+## FIN-002: Employee updates invoice and payment status
+
+**Persona:** Finance employee.
+
+**Entry point:** Intranet invoice detail/payment pages.
+
+**Business value:** Confirms payment state, receipt generation, and accounting status stay aligned.
+
+**Prerequisites:**
+- Issued invoice exists.
+- PaymentService, InvoiceService, Receipt/PdfService, AccountingService, and NotificationService are healthy.
+- Employee has payment-update permission.
+
+**User path:**
+1. Open issued invoice detail.
+2. Record full, partial, failed, refunded, or corrected payment status according to supported policy.
+3. Attach payment evidence where supported.
+4. Generate or open receipt artifact.
+5. Verify invoice status, accounting effect, and customer/order payment state.
+
+**Features covered:**
+- Payment status update.
+- Receipt artifact.
+- Payment evidence.
+- Accounting side effect.
+- Customer/order payment visibility.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `InvoiceService`
+- `PaymentService`
+- `PdfService`
+- `AccountingService`
+- `OrderService`
+- `UploadService`
+- `NotificationService`
+
+**Data created or mutated:**
+- Payment record/status.
+- Invoice status.
+- Receipt PDF/artifact.
+- Payment evidence artifact.
+- Accounting entry.
+- Notification record where configured.
+
+**Verification checklist:**
+- Invoice detail route shows updated payment state and history.
+- BFF endpoint delegates payment mutations to PaymentService or InvoiceService according to current ownership.
+- Receipt PDF includes invoice number, customer, paid amount, payment date, method, and generated-by identity.
+- Accounting/payment side effects match the amount and payment status.
+- Unauthorized employees cannot mark payment complete or view restricted payment evidence.
+
+**Observability checks:**
+- PaymentService and InvoiceService traces share correlation id.
+- PdfService logs receipt generation with correct document type.
+- AccountingService event consumer handles payment event where implemented.
+- NotificationService emits customer/internal payment notification where configured.
+
+**Current implementation status:** Partial. Automate implemented payment/receipt paths and keep provider/accounting gaps visible.
+
+**Product direction implied by story:** Payment updates should be one auditable flow, not disconnected invoice, receipt, and accounting actions.
+
+**Known product gaps:** Define correction/refund rules and the source of truth between InvoiceService and PaymentService.
+
+## MFG-001: Employee schedules manufacturing work
 
 **Persona:** Shop-floor or production employee.
 
 **Entry point:** Intranet manufacturing schedule/job pages.
 
-**Business value:** Confirms accepted work becomes trackable production activity.
+**Business value:** Confirms accepted work can be planned into a production schedule without changing the current ProjectNew quote/project lifecycle.
 
 **Prerequisites:**
 - Accepted order/job exists from quote acceptance.
@@ -1945,104 +2961,528 @@ Use this document as the source of truth when creating future Playwright E2E sui
 **User path:**
 1. Open production schedule.
 2. Select job from accepted order.
-3. Assign equipment or work center.
-4. Reserve or confirm material.
-5. Move job through planned/in-progress/done statuses.
-6. Verify order/customer status updates where expected.
+3. Set planned start/end date, priority, and production queue.
+4. Save schedule assignment.
+5. Reopen schedule and job detail to verify planned state.
+6. Verify customer/order status exposes only safe high-level production progress where applicable.
 
 **Features covered:**
 - Production schedule.
-- Equipment/facility assignment.
-- Material/inventory availability.
-- Job lifecycle.
-- Status propagation.
+- Job planning.
+- Queue/priority.
+- Permission-scoped production data.
+- Customer-safe status projection.
 
 **Services involved:**
 - `Maliev.Intranet.Bff`
 - `JobService`
 - `OrderService`
 - `FacilityService`
-- `MaterialService`
-- `InventoryService`
 - `NotificationService`
 
 **Data created or mutated:**
 - Job schedule/status.
-- Equipment assignment.
-- Material reservation/consumption.
+- Planned dates/priority.
 - Order production status.
 
 **Verification checklist:**
-- Job appears in production schedule.
-- Equipment assignment persists.
-- Invalid status transitions are blocked.
-- Shop-floor action path is fast and not overloaded with unnecessary fields.
-- Customer/order status reflects meaningful progress only.
+- Job appears in production schedule at the selected date/queue.
+- BFF endpoint writes scheduling state to JobService as domain owner.
+- Invalid or conflicting schedule dates are blocked or clearly warned.
+- Employee without manufacturing scheduling permission cannot create or edit schedule assignments.
+- Customer-facing surfaces do not expose internal queue, machine, or labor notes.
 
 **Observability checks:**
-- JobService logs lifecycle transition.
-- Inventory/material events occur where configured.
+- JobService logs schedule mutation.
+- NotificationService emits scheduling event where configured.
+- Aspire dashboard shows JobService and Intranet BFF healthy during the flow.
 
 **Current implementation status:** Partial. Automate implemented manufacturing pages first and mark missing UI as product gaps.
 
-**Known product gaps:** Shop-floor workflows must satisfy the 3-second rule.
+**Product direction implied by story:** Scheduling should be its own production-planning journey, separate from execution, equipment, and material-consumption checks.
 
-## PROC-001: Employee creates purchase order, receives supplier material, and updates inventory/accounting
+**Known product gaps:** Define conflict rules for overlapping work, priority, and production queue capacity.
+
+## MFG-002: Shop-floor employee completes mobile job status transition
+
+**Persona:** Shop-floor employee using a phone or tablet.
+
+**Entry point:** Mobile-width Intranet job detail or shop-floor task page.
+
+**Business value:** Confirms production execution is fast enough for real shop-floor use and satisfies the 3-second rule.
+
+**Prerequisites:**
+- Scheduled job exists.
+- Employee has job execution permission.
+- JobService, OrderService, NotificationService, and Intranet BFF are healthy.
+
+**User path:**
+1. Open assigned job on a mobile viewport.
+2. Review only the fields needed to act: job id, part/customer-safe context, current status, next action, and blockers.
+3. Start job, pause job, mark step complete, or move to the next allowed status.
+4. Verify visible confirmation appears within 3 seconds on a normal test environment.
+5. Refresh or reopen job and verify persisted status.
+
+**Features covered:**
+- Mobile shop-floor UI.
+- Job status transition.
+- Fast-action UX.
+- Permission boundary.
+- Status persistence.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `JobService`
+- `OrderService`
+- `NotificationService`
+- `IAMService`
+
+**Data created or mutated:**
+- Job status transition.
+- Optional timestamp/operator record.
+- Notification/readiness event where configured.
+
+**Verification checklist:**
+- Mobile route renders without horizontal overflow and keeps the primary action visible.
+- BFF endpoint updates JobService as domain owner.
+- Invalid transitions are disabled or rejected with visible feedback.
+- Status change completes and paints the new state within 3 seconds in Aspire test conditions.
+- Unauthorized employee cannot transition a job by direct endpoint or direct URL.
+
+**Observability checks:**
+- JobService logs transition, operator id, prior status, and next status.
+- Aspire trace includes BFF-to-JobService call duration.
+- NotificationService consumes job-status event where configured.
+
+**Current implementation status:** Required gap unless a mobile shop-floor execution surface already exists.
+
+**Product direction implied by story:** Production execution must be optimized for short, repeated shop-floor actions.
+
+**Known product gaps:** Define exact status model, mobile navigation, and offline/poor-network behavior.
+
+## MFG-003: Employee assigns equipment or work center from production schedule
+
+**Persona:** Production planner or supervisor.
+
+**Entry point:** Intranet production schedule/job assignment page.
+
+**Business value:** Confirms jobs are matched to available equipment and work centers using current facility data.
+
+**Prerequisites:**
+- Scheduled job and active equipment/work-center records exist.
+- FacilityService and JobService are healthy.
+- Employee has equipment assignment permission.
+
+**User path:**
+1. Open production schedule.
+2. Select a scheduled job.
+3. Choose equipment or work center from eligible active options.
+4. Save assignment and reopen job detail.
+5. Attempt to assign unavailable or incompatible equipment and verify guardrail behavior.
+
+**Features covered:**
+- Equipment/work-center selection.
+- Capability validation.
+- Availability validation.
+- Production assignment.
+- Maintenance-state awareness.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `JobService`
+- `FacilityService`
+- `IAMService`
+- `NotificationService`
+
+**Data created or mutated:**
+- Equipment/work-center assignment.
+- Job planning metadata.
+- Assignment audit event.
+
+**Verification checklist:**
+- Assignment UI lists only active/eligible equipment or clearly labels warnings.
+- BFF reads equipment from FacilityService and writes assignment to JobService.
+- Incompatible or unavailable equipment is blocked or requires explicit override permission.
+- Saved assignment appears on schedule and job detail after refresh.
+- Customer-facing views do not expose internal machine or maintenance details.
+
+**Observability checks:**
+- FacilityService traces equipment lookup.
+- JobService logs assignment mutation.
+- NotificationService emits assignment event where configured.
+- Aspire health remains green for FacilityService and JobService.
+
+**Current implementation status:** Partial. Automate where facility and production assignment UI exists.
+
+**Product direction implied by story:** Equipment assignment should be constrained by current facility capabilities and maintenance state.
+
+**Known product gaps:** Define whether equipment conflict detection is hard-blocking or advisory.
+
+## MFG-004: Employee records material reservation or consumption for a job
+
+**Persona:** Production or inventory employee.
+
+**Entry point:** Intranet job material or inventory reservation page.
+
+**Business value:** Confirms production consumes inventory in a traceable way without losing cost/accounting context.
+
+**Prerequisites:**
+- Scheduled job exists with material requirements.
+- InventoryService, MaterialService, JobService, and AccountingService are healthy.
+- Employee has material reservation/consumption permission.
+
+**User path:**
+1. Open job material tab.
+2. Reserve required material from inventory or confirm material already issued.
+3. Record actual consumption or scrap/waste where supported.
+4. Save and reopen job/inventory detail.
+5. Verify inventory quantity and job material status update.
+
+**Features covered:**
+- Material reservation.
+- Material consumption.
+- Inventory decrement.
+- Job material status.
+- Cost/accounting impact.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `JobService`
+- `InventoryService`
+- `MaterialService`
+- `AccountingService`
+- `NotificationService`
+
+**Data created or mutated:**
+- Material reservation/issue record.
+- Inventory quantity/value.
+- Job material status.
+- Accounting/cost record where implemented.
+
+**Verification checklist:**
+- Job material route shows required, reserved, issued, consumed, and remaining quantities where supported.
+- BFF writes inventory changes through InventoryService as domain owner.
+- Consumption cannot exceed reserved/available quantity without explicit override policy.
+- Inventory detail reflects the reservation or decrement after refresh.
+- Accounting/cost impact is emitted or recorded where implemented.
+
+**Observability checks:**
+- InventoryService logs reservation/consumption transaction.
+- JobService receives or reads updated material status.
+- AccountingService consumes inventory/cost event where configured.
+- Aspire dashboard shows no stale service health after the mutation.
+
+**Current implementation status:** Partial. Ready only where job material and inventory UI are available.
+
+**Product direction implied by story:** Material movement should be traceable from job requirement to inventory and accounting impact.
+
+**Known product gaps:** Define lot/batch traceability, scrap reason codes, and override policy.
+
+## MFG-005: Production status updates stay fresh through SignalR or refresh
+
+**Persona:** Sales, operations, production, and customer-support employees watching job progress.
+
+**Entry point:** Intranet production board, order detail, or job detail page.
+
+**Business value:** Confirms production status does not become stale during long-running work sessions.
+
+**Prerequisites:**
+- Production job exists.
+- JobService, OrderService, NotificationService, and any SignalR hub/BFF refresh path are healthy.
+- Two employee sessions are available for cross-session verification.
+
+**User path:**
+1. Open production board or order/job detail in Session A.
+2. Change job status from Session B or backend test fixture.
+3. Wait for SignalR update or documented refresh interval.
+4. Verify Session A shows the new status without manual full-page reload where product requires live behavior.
+5. Open customer-safe status surface and verify it updates only to approved external milestones.
+
+**Features covered:**
+- Real-time or timed status refresh.
+- Cross-session state consistency.
+- Production board.
+- Customer-safe progress projection.
+- Stale UI handling.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `JobService`
+- `OrderService`
+- `NotificationService`
+- SignalR hub/BFF real-time path where implemented
+- `IAMService`
+
+**Data created or mutated:**
+- Job status.
+- Notification/live update message.
+- Order production status where applicable.
+
+**Verification checklist:**
+- Session A visible status updates through SignalR or documented refresh interval.
+- BFF/SignalR channel enforces user permissions before sending job data.
+- Stale state is clearly refreshed or marked with last-updated time if real-time is not implemented.
+- Customer-facing status hides internal statuses and shows only approved progress.
+- Long-running page session keeps auth valid or redirects safely when expired.
+
+**Observability checks:**
+- SignalR or polling traces include job id and correlation id.
+- JobService logs source status transition.
+- NotificationService/live update path records delivery where configured.
+- Aspire dashboard shows no connection or health degradation.
+
+**Current implementation status:** Required gap unless production live-update UI is already implemented.
+
+**Product direction implied by story:** Production status surfaces should be trustworthy during active operations, not stale snapshots.
+
+**Known product gaps:** Define which production pages require SignalR versus timed refresh and the acceptable update latency.
+
+## PROC-001: Employee creates purchase order
 
 **Persona:** Procurement employee.
 
 **Entry point:** Intranet purchasing pages.
 
-**Business value:** Confirms supply chain replenishment connects purchasing, supplier, inventory, invoice, and accounting.
+**Business value:** Confirms procurement can create a controlled purchase request without bundling receiving/accounting into the same E2E gate.
 
 **Prerequisites:**
 - Supplier and material exist.
-- PurchaseOrderService, SupplierService, MaterialService, InventoryService, InvoiceService, and AccountingService are healthy.
+- PurchaseOrderService, SupplierService, MaterialService, and IAMService are healthy.
+- Employee has purchase-order create permission.
 
 **User path:**
 1. Open purchasing.
 2. Create purchase order for supplier/material.
-3. Approve or submit PO.
-4. Receive material.
-5. Verify inventory quantity/value updates.
-6. Verify invoice/accounting record where applicable.
+3. Add line items, quantities, requested date, price/terms, and internal notes.
+4. Save as draft.
+5. Submit or approve according to current workflow.
+6. Reopen PO detail and verify persisted state.
 
 **Features covered:**
 - Purchase order creation.
 - Supplier/material selection.
-- Receiving.
-- Inventory update.
-- Invoice/accounting side effect.
+- Draft/submitted status.
+- Line item validation.
+- Permission boundary.
 
 **Services involved:**
 - `Maliev.Intranet.Bff`
 - `PurchaseOrderService`
 - `SupplierService`
 - `MaterialService`
-- `InventoryService`
-- `InvoiceService`
-- `AccountingService`
+- `IAMService`
+- `NotificationService`
 
 **Data created or mutated:**
 - Purchase order.
-- Receiving record.
-- Inventory quantity/value.
-- Supplier invoice/accounting record.
+- PO line items.
+- Approval/submission status.
+- Notification/audit record where configured.
 
 **Verification checklist:**
-- PO line references correct supplier/material.
-- Receiving cannot exceed allowed quantity without explicit rule.
-- Inventory changes after receiving.
-- Accounting/invoice impact matches PO/receipt.
-- Unauthorized employee cannot approve or receive.
+- PO creation route shows supplier, material, line totals, requested date, and status after save.
+- BFF endpoint writes to PurchaseOrderService as domain owner.
+- Invalid supplier/material combinations or missing required fields are blocked with visible validation.
+- Unauthorized employee cannot create, submit, or approve a PO.
+- PO remains editable or locked according to documented draft/submitted policy.
 
 **Observability checks:**
-- PurchaseOrderService event chain reaches inventory/accounting where implemented.
-- Service health remains green.
+- PurchaseOrderService logs create and submit/approve transitions.
+- SupplierService and MaterialService traces show lookup calls.
+- NotificationService emits approval/request event where configured.
+- Aspire service health remains green.
 
-**Current implementation status:** Ready to automate where UI exposes the complete flow.
+**Current implementation status:** Partial. Ready where PO creation UI exists.
 
-**Known product gaps:** Any missing receiving/accounting UI should be documented as product backlog.
+**Product direction implied by story:** PO creation should be a procurement-owned journey with clear draft/submitted/approved behavior.
+
+**Known product gaps:** Define approval workflow, PO numbering, and whether supplier price terms are copied from SupplierService or entered per PO.
+
+## PROC-002: Employee creates and edits supplier profile
+
+**Persona:** Procurement employee.
+
+**Entry point:** Intranet supplier pages.
+
+**Business value:** Confirms supplier records can support procurement, quality, billing, and contact workflows.
+
+**Prerequisites:**
+- Employee has supplier-management permission.
+- SupplierService, SearchService, UploadService, and IAMService are healthy.
+- Optional test tax/company lookup data exists where supported.
+
+**User path:**
+1. Open supplier list.
+2. Create supplier with company name, contact, tax/registration, address, payment terms, categories, and notes.
+3. Attach supplier documents where supported.
+4. Save and reopen supplier detail.
+5. Edit key fields and verify search/PO selectors use the latest supplier data.
+
+**Features covered:**
+- Supplier create/edit.
+- Contact/address/payment terms.
+- Supplier documents.
+- Search indexing.
+- PO selector integration.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `SupplierService`
+- `UploadService`
+- `SearchService`
+- `PurchaseOrderService`
+- `IAMService`
+
+**Data created or mutated:**
+- Supplier record.
+- Supplier contacts/addresses/payment terms.
+- Supplier document artifact.
+- Search index entry where implemented.
+
+**Verification checklist:**
+- Supplier detail route shows saved fields and document links after refresh.
+- BFF endpoint writes supplier data to SupplierService as domain owner.
+- Supplier documents use UploadService and are not mixed with customer NDA/manufacturing uploads.
+- Updated supplier appears in search and PO supplier selectors.
+- Unauthorized users cannot view restricted financial notes or edit supplier data.
+
+**Observability checks:**
+- SupplierService logs create/update.
+- UploadService logs supplier document artifact.
+- SearchService receives index update where configured.
+- PurchaseOrderService selector lookup sees active supplier state.
+
+**Current implementation status:** Partial. Ready where supplier UI exists.
+
+**Product direction implied by story:** Supplier profile should be the procurement source of truth and feed PO creation without duplicate manual entry.
+
+**Known product gaps:** Define supplier document categories, duplicate detection, and supplier onboarding approval.
+
+## PROC-003: Employee manages PO detail, attachments, cancellation, and audit
+
+**Persona:** Procurement employee or manager.
+
+**Entry point:** Intranet purchase order detail page.
+
+**Business value:** Confirms PO changes after creation are controlled, documented, and auditable.
+
+**Prerequisites:**
+- Draft or submitted PO exists.
+- PurchaseOrderService, UploadService, SupplierService, and IAMService are healthy.
+- Employee has PO edit/cancel permissions as appropriate.
+
+**User path:**
+1. Open PO detail.
+2. Edit allowed PO fields or line notes while in editable status.
+3. Attach quote, drawing, supplier document, or internal supporting file.
+4. Cancel PO with required reason.
+5. Reopen PO and verify status, reason, attachments, and audit history.
+
+**Features covered:**
+- PO detail.
+- Attachment upload.
+- Status-specific edit rules.
+- Cancellation reason.
+- Audit trail.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `PurchaseOrderService`
+- `UploadService`
+- `SupplierService`
+- `IAMService`
+- `NotificationService`
+
+**Data created or mutated:**
+- PO detail fields.
+- PO attachment artifact references.
+- Cancellation status and reason.
+- Audit/event record.
+
+**Verification checklist:**
+- PO detail route displays attachment list, status history, and cancellation reason after refresh.
+- BFF stores files through UploadService and writes status to PurchaseOrderService.
+- Submitted/approved PO edit restrictions match policy.
+- Cancellation requires a reason and blocks receiving on canceled PO.
+- Unauthorized employee cannot cancel or edit restricted PO fields.
+
+**Observability checks:**
+- PurchaseOrderService logs edit and cancel transitions.
+- UploadService logs attachment storage with PO scope.
+- NotificationService emits cancellation event where configured.
+- Aspire traces show no cross-domain direct database access.
+
+**Current implementation status:** Partial. Ready where PO detail/attachment UI exists.
+
+**Product direction implied by story:** Procurement changes must remain explainable after the fact, especially cancellations and attached supplier evidence.
+
+**Known product gaps:** Define immutable fields after approval and whether canceled POs can be reopened.
+
+## PROC-004: Employee receives purchased material and verifies inventory/accounting impact
+
+**Persona:** Procurement or warehouse employee.
+
+**Entry point:** Intranet PO receiving or inventory receipt page.
+
+**Business value:** Confirms purchased material becomes inventory and creates the expected financial effect.
+
+**Prerequisites:**
+- Approved/submitted PO exists with outstanding quantity.
+- PurchaseOrderService, InventoryService, MaterialService, InvoiceService, AccountingService, and SupplierService are healthy.
+- Employee has receiving permission.
+
+**User path:**
+1. Open approved PO.
+2. Start receiving against one or more PO lines.
+3. Enter received quantity, lot/batch/serial data where supported, receipt date, and evidence/packing slip attachment.
+4. Save receipt.
+5. Verify inventory quantity/value updates and accounting/supplier invoice state is created or updated where implemented.
+
+**Features covered:**
+- PO receiving.
+- Partial/complete receipt.
+- Inventory update.
+- Receiving evidence.
+- Accounting/invoice side effect.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `PurchaseOrderService`
+- `InventoryService`
+- `MaterialService`
+- `UploadService`
+- `InvoiceService`
+- `AccountingService`
+- `SupplierService`
+- `NotificationService`
+
+**Data created or mutated:**
+- Receiving record.
+- Inventory quantity/value.
+- PO received status.
+- Evidence artifact.
+- Supplier invoice/accounting record where implemented.
+
+**Verification checklist:**
+- Receiving route shows outstanding, received, and remaining quantities.
+- BFF records receipt through PurchaseOrderService/InventoryService according to current ownership.
+- Receiving cannot exceed PO quantity without explicit override policy.
+- Inventory detail reflects quantity/value change after refresh.
+- Accounting or supplier-invoice impact matches received amount and PO terms where implemented.
+- Canceled PO cannot be received.
+
+**Observability checks:**
+- PurchaseOrderService logs receiving event.
+- InventoryService logs stock movement with PO reference.
+- AccountingService/InvoiceService consumes receipt event where implemented.
+- UploadService authorizes evidence artifact.
+- Aspire dashboard keeps supply-chain and finance services healthy.
+
+**Current implementation status:** Partial. Ready only where receiving and inventory screens exist.
+
+**Product direction implied by story:** Receiving is the bridge between procurement, inventory, and finance and should be tested independently from PO creation.
+
+**Known product gaps:** Define partial receiving, over-receiving tolerance, lot traceability, and accounting posting rules.
 
 ## HR-001: Employee lifecycle creates employee profile and IAM access
 
@@ -2149,62 +3589,481 @@ Use this document as the source of truth when creating future Playwright E2E sui
 
 **Known product gaps:** Calendar/status integration should be added if business requires it.
 
-## HR-003: HR manages candidate, training, compliance, compensation, and performance records
+## HR-003: HR manages candidate and application workflow
 
 **Persona:** HR employee.
 
-**Entry point:** Intranet HR modules.
+**Entry point:** Intranet career/candidate pages.
 
-**Business value:** Confirms the employee lifecycle beyond hiring is visible and controlled.
+**Business value:** Confirms hiring candidates can be tracked before they become employees.
 
 **Prerequisites:**
-- HR user has required permissions.
-- Career, Compliance, Compensation, Performance, and Lifecycle services are healthy.
-- Test employee/candidate exists.
+- HR user has candidate-management permission.
+- CareerService, EmployeeService, UploadService, and NotificationService are healthy.
+- Test applicant/candidate data or resume file exists.
 
 **User path:**
-1. Create or open candidate/application.
-2. Move candidate through hiring state where UI exists.
-3. Open employee training/compliance record.
-4. Add or verify compliance/training item.
-5. Open compensation/performance records.
-6. Update review or compensation data according to permissions.
+1. Open candidate list.
+2. Create candidate/application with contact details, role, source, resume, and notes.
+3. Move candidate through screening/interview/offer/rejected or supported states.
+4. Attach or review resume/supporting documents.
+5. Convert to employee or mark final state where supported.
+6. Reopen candidate and verify history, documents, and status.
 
 **Features covered:**
 - Candidate/career workflow.
-- Training/compliance tracking.
-- Compensation records.
-- Performance records.
+- Resume/document upload.
+- Hiring status history.
+- Candidate-to-employee handoff.
 - HR permissions.
 
 **Services involved:**
 - `Maliev.Intranet.Bff`
 - `CareerService`
-- `ComplianceService`
-- `CompensationService`
-- `PerformanceService`
-- `LifecycleService`
 - `EmployeeService`
+- `UploadService`
+- `NotificationService`
 - `IAMService`
 
 **Data created or mutated:**
 - Candidate/application record.
-- Compliance/training record.
-- Compensation/performance record.
+- Candidate status/history.
+- Resume/supporting document artifact.
+- Optional employee/lifecycle record on conversion.
 
 **Verification checklist:**
-- HR-only records are not visible to non-HR users.
-- Candidate/employee status transitions persist.
-- Sensitive compensation fields are permission-protected.
-- Performance/compliance updates appear after refresh.
+- Candidate route shows saved contact, role, source, notes, documents, and status after refresh.
+- BFF writes candidate state to CareerService as domain owner.
+- Resume/supporting files are stored through UploadService under HR/candidate scope.
+- Invalid status transitions are blocked or clearly warned.
+- Non-HR employee cannot view candidate notes or documents.
 
 **Observability checks:**
-- Each HR domain service remains healthy.
+- CareerService logs candidate creation and status transition.
+- UploadService logs candidate document artifact.
+- NotificationService emits hiring workflow event where configured.
 - Unauthorized attempts are denied and logged safely.
 
-**Current implementation status:** Partial. Automate the HR modules that have production UI; document missing pages as product gaps.
+**Current implementation status:** Partial. Automate candidate pages where implemented.
 
-**Known product gaps:** HR modules should be prioritized according to current operational need and data sensitivity.
+**Product direction implied by story:** Candidate management should be its own HR gate and should not be mixed with employee-only records.
+
+**Known product gaps:** Define candidate stages, conversion rules, retention policy, and sensitive document permissions.
+
+## HR-004: HR manages compliance and training records
+
+**Persona:** HR or compliance employee.
+
+**Entry point:** Intranet compliance/training pages.
+
+**Business value:** Confirms mandatory employee qualifications and compliance obligations can be tracked and audited.
+
+**Prerequisites:**
+- Employee record exists.
+- ComplianceService, EmployeeService, UploadService, NotificationService, and IAMService are healthy.
+- HR/compliance user has training/compliance permissions.
+
+**User path:**
+1. Open employee compliance/training profile.
+2. Add training requirement, certification, policy acknowledgement, or compliance record.
+3. Attach evidence document where supported.
+4. Mark status as pending, completed, expired, or renewed according to supported policy.
+5. Reopen employee/compliance view and verify status and evidence.
+6. Verify reminder/notification behavior for due or expired items where configured.
+
+**Features covered:**
+- Training record.
+- Compliance/certification status.
+- Evidence upload.
+- Due/expiry tracking.
+- Notification.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `ComplianceService`
+- `EmployeeService`
+- `UploadService`
+- `NotificationService`
+- `IAMService`
+
+**Data created or mutated:**
+- Compliance/training record.
+- Evidence artifact.
+- Due/expiry status.
+- Notification/reminder record where implemented.
+
+**Verification checklist:**
+- Compliance route displays employee, requirement, status, due date, and evidence after refresh.
+- BFF writes compliance data to ComplianceService as domain owner.
+- Evidence files are stored through UploadService and restricted to authorized HR/compliance users.
+- Expired or due records appear in dashboard/notification surfaces where configured.
+- Non-HR users cannot view restricted compliance evidence.
+
+**Observability checks:**
+- ComplianceService logs record creation/status update.
+- UploadService logs evidence artifact.
+- NotificationService consumes due/expiry event where implemented.
+- Aspire dashboard shows HR services healthy.
+
+**Current implementation status:** Partial. Automate implemented compliance/training pages first.
+
+**Product direction implied by story:** Compliance/training should be operationally visible and audit-ready, separate from candidate and compensation flows.
+
+**Known product gaps:** Define mandatory training catalog, renewal rules, reminders, and document retention.
+
+## HR-005: HR manages compensation records
+
+**Persona:** HR or finance-authorized employee.
+
+**Entry point:** Intranet compensation pages.
+
+**Business value:** Confirms sensitive pay information is permission-protected and auditable.
+
+**Prerequisites:**
+- Employee record exists.
+- CompensationService, EmployeeService, IAMService, and AccountingService/Payroll integration where implemented are healthy.
+- HR/finance user has compensation permissions.
+
+**User path:**
+1. Open employee compensation profile.
+2. Add or update compensation package, effective date, currency, allowance, bonus, or payroll note where supported.
+3. Save and reopen the record.
+4. Verify restricted field visibility for HR/finance user.
+5. Sign in as a non-authorized employee and verify compensation data is hidden or forbidden.
+
+**Features covered:**
+- Compensation detail.
+- Effective-dated pay records.
+- Sensitive field protection.
+- Audit history.
+- Optional accounting/payroll handoff.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `CompensationService`
+- `EmployeeService`
+- `IAMService`
+- `AccountingService` or payroll integration where implemented
+
+**Data created or mutated:**
+- Compensation record.
+- Effective-date history.
+- Audit record.
+- Optional accounting/payroll export event.
+
+**Verification checklist:**
+- Compensation route shows correct employee, currency, amount, effective date, and history for authorized user.
+- BFF writes compensation state to CompensationService as domain owner.
+- Non-authorized users cannot access the route, direct endpoint, or restricted fields.
+- Audit metadata records who changed pay-sensitive data.
+- Optional payroll/accounting side effect is emitted only after allowed status.
+
+**Observability checks:**
+- CompensationService logs mutation without exposing sensitive amounts in unsafe logs.
+- IAMService denial is logged safely for unauthorized attempts.
+- Accounting/payroll event is traceable where implemented.
+
+**Current implementation status:** Partial. Automate only if compensation UI exists; otherwise keep as high-priority required gap.
+
+**Product direction implied by story:** Compensation must be treated as one of the strongest permission boundaries in Intranet.
+
+**Known product gaps:** Define payroll integration, approval workflow, and log redaction policy for sensitive compensation data.
+
+## HR-006: HR or manager manages performance records
+
+**Persona:** HR employee or manager.
+
+**Entry point:** Intranet performance review pages.
+
+**Business value:** Confirms employee performance data can be captured, reviewed, and protected.
+
+**Prerequisites:**
+- Employee and manager records exist.
+- PerformanceService, EmployeeService, IAMService, and NotificationService are healthy.
+- Reviewer has performance-review permissions.
+
+**User path:**
+1. Open employee performance profile or review cycle.
+2. Create review, goals, feedback, rating, or development notes according to supported UI.
+3. Save as draft or submit final review.
+4. Notify employee/manager where configured.
+5. Verify visibility differs between HR, manager, employee, and unrelated employee roles.
+
+**Features covered:**
+- Performance review.
+- Goals/feedback.
+- Draft/final state.
+- Notification.
+- Role-scoped visibility.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `PerformanceService`
+- `EmployeeService`
+- `IAMService`
+- `NotificationService`
+
+**Data created or mutated:**
+- Performance review.
+- Goal/feedback/rating records.
+- Draft/final status.
+- Notification record where implemented.
+
+**Verification checklist:**
+- Performance route displays review content and status after refresh for authorized users.
+- BFF writes review state to PerformanceService as domain owner.
+- Draft review is visible only to allowed reviewers/HR.
+- Final review follows the documented employee visibility policy.
+- Unrelated employee cannot view or mutate another employee's performance record.
+
+**Observability checks:**
+- PerformanceService logs review creation/submission.
+- NotificationService emits review event where configured.
+- IAMService denial traces are safe and do not expose review content.
+- Aspire dashboard keeps HR domain services healthy.
+
+**Current implementation status:** Partial. Automate implemented performance pages and keep missing review-cycle UI as gap.
+
+**Product direction implied by story:** Performance records should be managed separately from compensation and compliance because visibility rules differ.
+
+**Known product gaps:** Define review cycles, employee acknowledgement, manager calibration, and retention policy.
+
+---
+
+# Security And Negative Journey Stories
+
+## SEC-001: Customer cannot access another customer's private records
+
+**Persona:** Signed-in customer attempting to access another customer's data.
+
+**Entry point:** Maliev.Web account pages, Maliev.QuoteEngine customer portal pages, direct document/PDF URLs, and BFF endpoints.
+
+**Business value:** Confirms customer isolation across profiles, quotes, orders, NDA records, documents, and generated PDFs.
+
+**Prerequisites:**
+- Customer A and Customer B exist with separate quotes, orders, NDA records, documents, and PDF artifacts where implemented.
+- Web BFF, QuoteEngine BFF, AuthService, IAM/authorization boundary, CustomerService, QuotationService, OrderService, UploadService, and PdfService are healthy.
+- Customer A is signed in.
+
+**User path:**
+1. Sign in as Customer A.
+2. Open Customer A profile, quote, order, NDA, document, and PDF links to establish allowed access.
+3. Attempt to navigate to Customer B profile/quote/order/document/PDF URLs by changing identifiers or using captured links.
+4. Attempt equivalent direct BFF/API calls where Playwright test support can safely exercise them.
+5. Verify the UI remains on an authorized page or shows a safe not-found/forbidden state without leaking Customer B data.
+
+**Features covered:**
+- Customer tenant/data isolation.
+- Quote/order ownership.
+- NDA/document/PDF authorization.
+- Direct URL protection.
+- Safe error handling.
+
+**Services involved:**
+- `Maliev.Web.Bff`
+- `Maliev.QuoteEngine.Bff`
+- `AuthService`
+- `CustomerService`
+- `QuotationService`
+- `OrderService`
+- `UploadService`
+- `PdfService`
+- `IAMService` or authorization service boundary where applicable
+
+**Data created or mutated:**
+- None expected except safe audit/security logs.
+
+**Verification checklist:**
+- Customer A sees only Customer A records in list and detail routes.
+- BFF endpoints reject Customer B identifiers even if the URL shape is valid.
+- Upload/PDF artifact links require owner authorization and do not expose signed URLs for another customer.
+- Error responses do not reveal Customer B name, email, quote number, order detail, document title, or internal ids beyond what policy allows.
+- No domain data is mutated by denied access attempts.
+
+**Observability checks:**
+- Auth/authorization traces show denied access with correlation id and customer principal.
+- Denial logs avoid sensitive customer payloads.
+- Aspire dashboard keeps Web, QuoteEngine, and backend services healthy after denied attempts.
+
+**Current implementation status:** Required production gate. Automate wherever customer portal/list/detail routes exist; mark missing QuoteEngine prototype-backed surfaces as partial.
+
+**Product direction implied by story:** Every customer-facing surface must enforce ownership at the BFF/service boundary, not only by hiding links in UI.
+
+**Known product gaps:** Define consistent forbidden versus not-found behavior for cross-customer resource probing.
+
+## SEC-002: Employee without permission cannot access restricted Intranet modules by direct URL
+
+**Persona:** Employee with limited permissions.
+
+**Entry point:** Intranet restricted module URLs and menu navigation.
+
+**Business value:** Confirms IAM permissions protect employee-only operations even when users know the route.
+
+**Prerequisites:**
+- Limited employee and admin employee accounts exist.
+- IAMService, AuthService, Intranet BFF, and target domain services are healthy.
+- Restricted modules include examples from finance, IAM admin, HR, procurement, manufacturing, and customer documents where implemented.
+
+**User path:**
+1. Sign in as limited employee.
+2. Verify restricted menu items are hidden or disabled.
+3. Navigate directly to restricted URLs such as IAM role management, compensation, invoice issue/payment, supplier management, or production scheduling.
+4. Attempt restricted mutations through UI or direct BFF calls where safe test support exists.
+5. Sign in as admin/authorized employee and verify the same route/action is allowed.
+
+**Features covered:**
+- Intranet IAM enforcement.
+- Direct URL protection.
+- Restricted mutation protection.
+- Navigation shaping.
+- Audit/security logging.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `IAMService`
+- `AuthService`
+- Restricted target services such as `InvoiceService`, `CompensationService`, `SupplierService`, `JobService`, `CustomerService`, `UploadService`
+
+**Data created or mutated:**
+- None from denied attempts.
+- Optional audit/security log records.
+
+**Verification checklist:**
+- Limited employee cannot see restricted navigation.
+- Direct restricted route shows forbidden/not-authorized state without rendering sensitive content.
+- BFF endpoint returns denied response for restricted mutation attempts.
+- Authorized employee can access the same route/action, proving the test target is valid.
+- Denied attempts do not create, update, or delete domain records.
+
+**Observability checks:**
+- IAMService/AuthService traces show permission evaluation.
+- Intranet BFF logs denied action with route/action and correlation id.
+- Target domain service is not called for denied mutations unless policy intentionally performs authorization there too.
+
+**Current implementation status:** Ready to automate for implemented restricted routes and permissions.
+
+**Product direction implied by story:** UI navigation shaping is helpful, but every protected action must also be enforced at BFF/service boundaries.
+
+**Known product gaps:** Maintain a route-to-permission catalog so future modules are not missed.
+
+## SEC-003: Expired sessions redirect safely and preserve intended return URL
+
+**Persona:** Customer or employee returning to a long-running browser session.
+
+**Entry point:** Maliev.Web account/checkout, Maliev.QuoteEngine workspace, and Maliev.Intranet protected pages.
+
+**Business value:** Confirms expired sessions fail safely without data loss, broken loops, or accidental access.
+
+**Prerequisites:**
+- Protected page is available in each target app.
+- AuthService, Web BFF, QuoteEngine BFF, Intranet BFF, and IAMService are healthy.
+- Test can simulate expired access token/refresh token or use a short-lived test token.
+
+**User path:**
+1. Sign in and open a protected page with unsaved or in-progress context where supported.
+2. Expire or invalidate the session/token.
+3. Trigger navigation, refresh, BFF call, or autosave.
+4. Verify redirect to login or safe session-expired page.
+5. Sign in again and verify return URL restores the intended page when appropriate.
+6. Verify unsafe POST/mutation is not replayed automatically without explicit user action.
+
+**Features covered:**
+- Session expiration.
+- Return URL preservation.
+- Safe redirect.
+- BFF auth refresh behavior.
+- Unsaved-work handling.
+
+**Services involved:**
+- `Maliev.Web.Bff`
+- `Maliev.QuoteEngine.Bff`
+- `Maliev.Intranet.Bff`
+- `AuthService`
+- `IAMService`
+- Target domain service for the protected page
+
+**Data created or mutated:**
+- Session/token state.
+- No domain mutation expected during denied/re-auth redirect unless user explicitly resubmits.
+
+**Verification checklist:**
+- Expired GET request redirects safely and preserves intended return URL where product supports it.
+- Expired mutation request is denied or asks for re-auth without double-submitting.
+- UI shows clear session-expired/sign-in state and does not expose protected data after expiration.
+- Re-auth returns to the intended route and reloads current data.
+- Auth cookies/tokens are cleared or refreshed according to policy.
+
+**Observability checks:**
+- AuthService logs token expiration/revocation path.
+- BFF traces show 401/redirect handling with correlation id.
+- Target domain service does not receive unauthorized mutation after token expiration.
+- Aspire dashboard shows no auth retry loop or repeated failed requests.
+
+**Current implementation status:** Required production gate. Automate once test hooks can reliably expire sessions.
+
+**Product direction implied by story:** Long-running Web, QuoteEngine, and Intranet sessions must be safe and recoverable.
+
+**Known product gaps:** Define exact return URL and unsaved-work policies per app.
+
+## SEC-004: Employee-only pricing and operational fields remain hidden from customer-facing surfaces
+
+**Persona:** Customer viewing quote/order documents and portal pages; employee verifying internal data exists.
+
+**Entry point:** Maliev.Web customer account/order pages, Maliev.QuoteEngine quote/order pages, customer-facing PDFs, and Intranet internal quote/order pages.
+
+**Business value:** Confirms internal costing, outsourced pricing, margins, supplier details, and operational notes are never exposed to customers.
+
+**Prerequisites:**
+- Quote/order exists with both customer-facing price and employee-only internal fields.
+- PricingService, QuotationService, OrderService, PdfService, Web BFF, QuoteEngine BFF, and Intranet BFF are healthy.
+- Employee and customer test accounts exist.
+
+**User path:**
+1. Sign in as employee and open internal quote/order detail.
+2. Verify internal fields exist where authorized, such as cost, margin, outsourced/internal pricing, supplier, machine/work-center, and internal notes.
+3. Sign in as customer and open the related customer-facing quote/order page.
+4. Download or view customer-facing quote/order PDF.
+5. Verify all employee-only fields are absent while customer-facing totals and terms remain correct.
+
+**Features covered:**
+- Customer-safe DTO projection.
+- PDF redaction/field selection.
+- Pricing data separation.
+- Internal versus external notes.
+- Role-based visibility.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `Maliev.Web.Bff`
+- `Maliev.QuoteEngine.Bff`
+- `PricingService`
+- `QuotationService`
+- `OrderService`
+- `PdfService`
+- `CustomerService`
+- `IAMService`
+
+**Data created or mutated:**
+- None expected, except optional generated customer-facing PDF artifact.
+
+**Verification checklist:**
+- Internal Intranet route shows employee-only fields only to authorized employees.
+- Customer route/DTO omits internal cost, margin, supplier, outsourced price, internal notes, equipment/work-center, and employee-only statuses.
+- Customer-facing PDF omits employee-only fields and includes only approved quote/order fields.
+- BFF and service projections are verified, not just CSS-hidden UI labels.
+- Customer cannot retrieve internal fields through browser network calls or direct BFF endpoint.
+
+**Observability checks:**
+- PdfService trace identifies customer-facing document type.
+- BFF traces show customer-safe endpoint/projection paths.
+- Denied/internal-field attempts are logged safely.
+- Aspire health remains green for pricing, quote/order, and PDF services.
+
+**Current implementation status:** Required production gate. Ready to automate where customer-facing quote/order/PDF surfaces exist; partial for QuoteEngine prototype-backed pages.
+
+**Product direction implied by story:** Internal commercial data must be explicitly separated from customer-facing contracts, pages, and PDFs.
+
+**Known product gaps:** Maintain a documented allowlist of customer-facing quote/order/PDF fields.
 
 ---
 
@@ -2217,6 +4076,8 @@ Before production deployment, the E2E suite derived from these stories should pr
 - At least one passing employee sales/ProjectNew path through `Maliev.Intranet`.
 - At least one passing quote-to-order/payment/delivery path.
 - At least one passing commerce publish-to-storefront path.
+- Passing or intentionally skipped Web trust/conversion, customer portal, admin/master-data, finance, procurement, manufacturing execution, HR, and security negative-path stories according to their current status.
 - Explicit failing/skipped tests or tracked product gaps for email verification, password reset email delivery, and QuoteEngine prototype replacement until those flows are complete.
+- No passing criterion in this catalog depends on making ProjectNew and QuoteEngine share the same quote/project lifecycle model.
 
 The final gate should report stories by id, category, status, and linked failure evidence. A story that is intentionally not automated yet must remain visible as a required gap rather than disappearing from the gate.
