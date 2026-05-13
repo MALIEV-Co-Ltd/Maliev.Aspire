@@ -38,14 +38,14 @@ public sealed class AppHostReferenceTests
         var geometryBlockStart = appHostSource.IndexOf(
             "var geometryService = builder.AddDockerfile(",
             StringComparison.Ordinal);
-        var intranetBffReferenceCommentStart = appHostSource.IndexOf(
-            "// Wire GeometryService into IntranetBff for service discovery.",
+        var bffReferenceStart = appHostSource.IndexOf(
+            "intranetBff = intranetBff.WithReference(geometryService.GetEndpoint(\"http\"));",
             StringComparison.Ordinal);
 
         Assert.True(geometryBlockStart >= 0, "GeometryService resource declaration was not found.");
-        Assert.True(intranetBffReferenceCommentStart > geometryBlockStart, "GeometryService reference block was not found after GeometryService.");
+        Assert.True(bffReferenceStart > geometryBlockStart, "GeometryService reference block was not found after GeometryService.");
 
-        var geometryBlock = appHostSource[geometryBlockStart..intranetBffReferenceCommentStart];
+        var geometryBlock = appHostSource[geometryBlockStart..bffReferenceStart];
         Assert.Contains(".WithEnvironment(\"OTEL_EXPORTER_OTLP_ENDPOINT\", otelCollector.GetEndpoint(\"grpc\"))", geometryBlock, StringComparison.Ordinal);
         Assert.Contains(".WaitFor(otelCollector)", geometryBlock, StringComparison.Ordinal);
     }
@@ -60,6 +60,73 @@ public sealed class AppHostReferenceTests
 
         Assert.Contains(".SeedDatabase<EmployeeDatabaseSeeder>(databases.Employee", appHostSource, StringComparison.Ordinal);
         Assert.Contains(".SeedDatabase<IAMDatabaseSeeder>(databases.IAM", appHostSource, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// QuoteEngine BFF must be part of the Aspire AppHost project graph.
+    /// </summary>
+    [Fact]
+    public void AppHost_ProjectReferences_IncludeQuoteEngineBff()
+    {
+        var appHostProject = File.ReadAllText(FindAppHostProjectFile());
+
+        Assert.Contains("..\\..\\Maliev.QuoteEngine\\Maliev.QuoteEngine.Bff\\Maliev.QuoteEngine.Bff.csproj", appHostProject, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// QuoteEngine BFF must be registered with the downstream services needed by the customer quote journey.
+    /// </summary>
+    [Fact]
+    public void AppHost_QuoteEngineBff_ReferencesProductionQuoteJourneyServices()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var quoteEngineBlockStart = appHostSource.IndexOf(
+            "builder.AddProject<Projects.Maliev_QuoteEngine_Bff>(\"QuoteEngineBff\")",
+            StringComparison.Ordinal);
+        var webBlockStart = appHostSource.IndexOf(
+            "builder.AddProject<Projects.Maliev_Web_Bff>(\"WebBff\")",
+            StringComparison.Ordinal);
+
+        Assert.True(quoteEngineBlockStart >= 0, "QuoteEngineBff resource declaration was not found.");
+        Assert.True(webBlockStart > quoteEngineBlockStart, "WebBff resource declaration was not found after QuoteEngineBff.");
+
+        var quoteEngineBlock = appHostSource[quoteEngineBlockStart..webBlockStart];
+        foreach (var dependency in new[]
+        {
+            "infrastructure.RabbitMQ",
+            "infrastructure.Redis",
+            "authService",
+            "iamService",
+            "customerService",
+            "uploadService",
+            "materialService",
+            "pricingService",
+            "projectService",
+            "quotationService",
+            "pdfService",
+            "orderService",
+            "paymentService",
+            "deliveryService"
+        })
+        {
+            Assert.Contains($".WithReference({dependency})", quoteEngineBlock, StringComparison.Ordinal);
+        }
+
+        Assert.Contains(".WaitFor(infrastructure.RabbitMQ)", quoteEngineBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithUrlForEndpoint(\"http\", u => u.DisplayText = \"Quote Engine (HTTP)\")", quoteEngineBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithUrlForEndpoint(\"https\", u => u.DisplayText = \"Quote Engine (HTTPS)\")", quoteEngineBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithHttpHealthCheck(\"/quote/aspire-liveness\")", quoteEngineBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// QuoteEngine BFF must receive GeometryService endpoint discovery for CAD analysis flows.
+    /// </summary>
+    [Fact]
+    public void AppHost_QuoteEngineBff_ReferencesGeometryServiceEndpoint()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+
+        Assert.Contains("quoteEngineBff = quoteEngineBff.WithReference(geometryService.GetEndpoint(\"http\"));", appHostSource, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -82,8 +149,11 @@ public sealed class AppHostReferenceTests
         var webBlock = appHostSource[webBlockStart..inventoryBlockStart];
         foreach (var dependency in new[]
         {
+            "authService",
             "iamService",
             "customerService",
+            "countryService",
+            "contactService",
             "deliveryService",
             "materialService",
             "orderService",
@@ -193,6 +263,34 @@ public sealed class AppHostReferenceTests
         }
 
         throw new FileNotFoundException("Unable to locate Maliev.Aspire.AppHost/AppHost.cs.");
+    }
+
+    private static string FindAppHostProjectFile()
+    {
+        foreach (var startDirectory in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
+        {
+            var directory = new DirectoryInfo(startDirectory);
+            while (directory is not null)
+            {
+                var candidates = new[]
+                {
+                    Path.Combine(directory.FullName, "Maliev.Aspire.AppHost", "Maliev.Aspire.AppHost.csproj"),
+                    Path.Combine(directory.FullName, "Maliev.Aspire", "Maliev.Aspire.AppHost", "Maliev.Aspire.AppHost.csproj")
+                };
+
+                foreach (var candidate in candidates)
+                {
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+
+                directory = directory.Parent;
+            }
+        }
+
+        throw new FileNotFoundException("Unable to locate Maliev.Aspire.AppHost/Maliev.Aspire.AppHost.csproj.");
     }
 
     private static IEnumerable<int> ReadApplicationPorts(string launchSettingsPath)

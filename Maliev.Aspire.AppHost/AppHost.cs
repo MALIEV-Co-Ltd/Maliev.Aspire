@@ -868,10 +868,38 @@ static partial class Program
             otelCollector,
             environmentName);
 
-        _ = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_Web_Bff>("WebBff")
+        var quoteEngineBff = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_QuoteEngine_Bff>("QuoteEngineBff")
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(authService)
                 .WithReference(iamService)
                 .WithReference(customerService)
+                .WithReference(uploadService)
+                .WithReference(materialService)
+                .WithReference(pricingService)
+                .WithReference(projectService)
+                .WithReference(quotationService)
+                .WithReference(pdfService)
+                .WithReference(orderService)
+                .WithReference(paymentService)
+                .WithReference(deliveryService)
+                .WithUrlForEndpoint("http", u => u.DisplayText = "Quote Engine (HTTP)")
+                .WithUrlForEndpoint("https", u => u.DisplayText = "Quote Engine (HTTPS)")
+                .WithHttpHealthCheck("/quote/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        _ = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_Web_Bff>("WebBff")
+                .WithReference(authService)
+                .WithReference(iamService)
+                .WithReference(customerService)
+                .WithReference(countryService)
+                .WithReference(contactService)
                 .WithReference(deliveryService)
                 .WithReference(materialService)
                 .WithReference(orderService)
@@ -985,11 +1013,12 @@ static partial class Program
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
             .WithHttpHealthCheck("/geometry/aspire-liveness");
 
-        // Wire GeometryService into IntranetBff for service discovery.
+        // Wire GeometryService into BFFs for service discovery.
         // GeometryService is a Docker container (not a .NET project), so its endpoint is injected
         // via EndpointReference — which Aspire translates to the services__GeometryService__http__0
         // environment variable that AddServiceDiscovery() reads on the BFF side.
         intranetBff = intranetBff.WithReference(geometryService.GetEndpoint("http"));
+        quoteEngineBff = quoteEngineBff.WithReference(geometryService.GetEndpoint("http"));
     }
 
     /// <summary>
