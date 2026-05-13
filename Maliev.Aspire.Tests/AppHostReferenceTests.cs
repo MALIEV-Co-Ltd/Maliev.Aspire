@@ -115,7 +115,7 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".WaitFor(infrastructure.RabbitMQ)", quoteEngineBlock, StringComparison.Ordinal);
         Assert.Contains(".WithUrlForEndpoint(\"http\", u => u.DisplayText = \"Quote Engine (HTTP)\")", quoteEngineBlock, StringComparison.Ordinal);
         Assert.Contains(".WithUrlForEndpoint(\"https\", u => u.DisplayText = \"Quote Engine (HTTPS)\")", quoteEngineBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithHttpHealthCheck(\"/quote/aspire-liveness\")", quoteEngineBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/quote/aspire-liveness\")", quoteEngineBlock, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -166,7 +166,7 @@ public sealed class AppHostReferenceTests
             Assert.Contains($".WithReference({dependency})", webBlock, StringComparison.Ordinal);
         }
 
-        Assert.Contains(".WithHttpHealthCheck(\"/web/aspire-liveness\")", webBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/web/aspire-liveness\")", webBlock, StringComparison.Ordinal);
     }
 
     /// <summary>

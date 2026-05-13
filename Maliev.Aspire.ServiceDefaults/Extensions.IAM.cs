@@ -49,10 +49,10 @@ public static class IAMExtensions
             }
             else
             {
-                // Use service name for Aspire service discovery
-                // Service discovery will resolve "http://IAMService" to actual endpoint
-                logger.LogDebug("[IAM Client Config] Using service discovery with service name: http://IAMService");
-                client.BaseAddress = new Uri("http://IAMService");
+                // Prefer HTTPS service-discovery endpoints so service-account tokens are
+                // not stripped by an HTTP -> HTTPS redirect.
+                logger.LogDebug("[IAM Client Config] Using service discovery with service name: https+http://IAMService");
+                client.BaseAddress = new Uri("https+http://IAMService");
             }
 
             client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);

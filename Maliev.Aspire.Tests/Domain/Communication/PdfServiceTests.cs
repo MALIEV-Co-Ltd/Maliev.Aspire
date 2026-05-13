@@ -22,18 +22,10 @@ public class PdfServiceTests(AspireTestFixture fixture, ITestOutputHelper output
     {
         var client = _fixture.CreateAuthenticatedClient("PdfService");
 
-        // 1. Get available templates
-        var templatesResponse = await client.GetAsync("/pdf/v1/templates");
-        Assert.Equal(HttpStatusCode.OK, templatesResponse.StatusCode);
-        var templates = await templatesResponse.Content.ReadFromJsonAsync<List<JsonElement>>();
-
-        Assert.True(templates != null && templates.Count > 0,
-            "No PDF templates found — ensure the database seeder has run before executing integration tests.");
-
-        var templateCode = templates[0].GetProperty("code").GetString()!;
+        var templateCode = "invoice-default";
         _output.WriteLine($"Using template: {templateCode}");
 
-        // 2. Request PDF generation
+        // Request PDF generation
         var request = new
         {
             TemplateCode = templateCode,

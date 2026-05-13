@@ -1,93 +1,18 @@
-using Aspire.Hosting.Testing;
 using Maliev.Aspire.Tests.Infrastructure;
 using System.Net;
-using System.Net.Http.Json;
 using System.Text.Json;
 using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Integration;
 
 /// <summary>
-/// Shared fixture that starts the Aspire AppHost once for all service discovery tests.
-/// </summary>
-public class AspireAppHostFixture : IAsyncLifetime
-{
-    /// <summary>
-    /// The distributed application factory for creating test clients.
-    /// </summary>
-    public DistributedApplicationFactory AppFactory { get; private set; } = null!;
-    private string? _adminToken;
-
-    /// <summary>
-    /// Initializes the test fixture by starting the Aspire application.
-    /// </summary>
-    /// <returns>A task representing the asynchronous initialization.</returns>
-    public async Task InitializeAsync()
-    {
-        var appHostAssembly = typeof(Projects.Maliev_Aspire_AppHost).Assembly;
-        AppFactory = new DistributedApplicationFactory(appHostAssembly.EntryPoint!.DeclaringType!);
-        await AppFactory.StartAsync();
-    }
-
-    /// <summary>
-    /// Disposes of the test fixture by stopping the Aspire application.
-    /// </summary>
-    /// <returns>A task representing the asynchronous disposal.</returns>
-    public async Task DisposeAsync()
-    {
-        await AppFactory.DisposeAsync();
-    }
-
-    /// <summary>
-    /// Gets the admin JWT token for authenticated requests.
-    /// </summary>
-    /// <returns>The admin JWT token string.</returns>
-    public async Task<string> GetAdminTokenAsync()
-    {
-        if (!string.IsNullOrEmpty(_adminToken))
-            return _adminToken;
-
-        var authClient = AppFactory.CreateHttpClient("AuthService");
-        var exchangeRequest = new
-        {
-            email = "admin@maliev.com",
-            full_name = "Platform Owner",
-            google_user_id = "google-platform-owner-id"
-        };
-
-        var response = await authClient.PostAsJsonAsync("/auth/v1/exchange/google", exchangeRequest);
-        response.EnsureSuccessStatusCode();
-
-        var content = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(content);
-        _adminToken = doc.RootElement.GetProperty("access_token").GetString()
-            ?? throw new InvalidOperationException("access_token was null in auth response");
-
-        var iamClient = AppFactory.CreateHttpClient("IAMService");
-        iamClient.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _adminToken);
-        await iamClient.PostAsync("/iam/v1/principals/bootstrap/promote", null);
-
-        // Re-acquire token to get updated permissions
-        _adminToken = null;
-        return await GetAdminTokenAsync();
-    }
-}
-
-/// <summary>
-/// Collection definition for service discovery tests using the Aspire AppHost fixture.
-/// </summary>
-[CollectionDefinition("AspireAppHost")]
-public class AspireAppHostCollection : ICollectionFixture<AspireAppHostFixture>;
-
-/// <summary>
 /// Integration tests verifying all services are discoverable and respond to health checks.
-/// Uses a shared AppHost fixture to avoid starting the full stack per test case.
+/// Uses the shared AppHost fixture so the full stack starts once for the suite.
 /// </summary>
-[Collection("AspireAppHost")]
+[Collection("AspireDomainTests")]
 public class ServiceDiscoveryTests
 {
-    private readonly AspireAppHostFixture _fixture;
+    private readonly AspireTestFixture _fixture;
     private readonly ITestOutputHelper _output;
 
     /// <summary>
@@ -95,7 +20,7 @@ public class ServiceDiscoveryTests
     /// </summary>
     /// <param name="fixture">The shared AppHost fixture.</param>
     /// <param name="output">The test output helper.</param>
-    public ServiceDiscoveryTests(AspireAppHostFixture fixture, ITestOutputHelper output)
+    public ServiceDiscoveryTests(AspireTestFixture fixture, ITestOutputHelper output)
     {
         _fixture = fixture;
         _output = output;
@@ -110,10 +35,23 @@ public class ServiceDiscoveryTests
     {
         _output.WriteLine($"Checking liveness: {resourceName} at {healthPath}");
 
-        var client = _fixture.AppFactory.CreateHttpClient(resourceName);
-        client.Timeout = TimeSpan.FromSeconds(15);
+        var client = _fixture.CreateClient(resourceName);
 
-        var response = await client.GetAsync(healthPath);
+        var response = await TestHelpers.WaitForAsync(
+            async () => await TryGetAsync(client, healthPath),
+            until: result =>
+            {
+                if (result.IsSuccessStatusCode)
+                {
+                    return true;
+                }
+
+                _output.WriteLine($"  {resourceName}: {result.StatusCode}, retrying...");
+                return false;
+            },
+            timeout: TimeSpan.FromSeconds(resourceName == "GeometryService" ? 120 : 45),
+            interval: TimeSpan.FromSeconds(2),
+            message: $"{resourceName} liveness check did not become healthy within timeout");
 
         _output.WriteLine($"  {resourceName}: {response.StatusCode}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -127,8 +65,7 @@ public class ServiceDiscoveryTests
     {
         _output.WriteLine("Checking BFF liveness...");
 
-        var client = _fixture.AppFactory.CreateHttpClient("IntranetBff");
-        client.Timeout = TimeSpan.FromSeconds(15);
+        var client = _fixture.CreateClient("IntranetBff");
 
         var response = await client.GetAsync("/intranet/aspire-liveness");
 
@@ -143,19 +80,47 @@ public class ServiceDiscoveryTests
     public async Task IntranetBff_SystemHealth_ReportsAllServicesReachable()
     {
         _output.WriteLine("Checking BFF system health...");
+        await WaitForGeometryServiceLivenessAsync();
 
-        var token = await _fixture.GetAdminTokenAsync();
-        var client = _fixture.AppFactory.CreateHttpClient("IntranetBff");
-        client.Timeout = TimeSpan.FromSeconds(60);
-        client.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var client = _fixture.CreateAuthenticatedClient("IntranetBff");
 
-        var response = await client.GetAsync("/api/system-health");
+        var healthResult = await TestHelpers.WaitForAsync(
+            async () =>
+            {
+                var r = await client.GetAsync("/api/v1/system-health");
+                var c = await r.Content.ReadAsStringAsync();
+                return (Response: r, Content: c);
+            },
+            until: result =>
+            {
+                if (!result.Response.IsSuccessStatusCode)
+                {
+                    _output.WriteLine($"  BFF /api/v1/system-health: {result.Response.StatusCode}, retrying...");
+                    return false;
+                }
 
-        _output.WriteLine($"  BFF /api/system-health: {response.StatusCode}");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                if (ContainsUnreachableService(result.Content, out var serviceName))
+                {
+                    _output.WriteLine($"  {serviceName}: Unreachable, retrying...");
+                    return false;
+                }
 
-        var body = await response.Content.ReadAsStringAsync();
+                return true;
+            },
+            timeout: TimeSpan.FromSeconds(120),
+            interval: TimeSpan.FromSeconds(5),
+            message: "BFF system health did not report all downstream services reachable within timeout");
+
+        var response = healthResult.Response;
+        var body = healthResult.Content;
+        var authenticateHeaders = string.Join(
+            ", ",
+            response.Headers.WwwAuthenticate.Select(header => header.ToString()));
+
+        _output.WriteLine($"  BFF /api/v1/system-health: {response.StatusCode}");
+        Assert.True(response.StatusCode == HttpStatusCode.OK,
+            $"BFF /api/v1/system-health returned {response.StatusCode}. WWW-Authenticate: {authenticateHeaders}. Body: {body}");
+
         using var doc = JsonDocument.Parse(body);
         var services = doc.RootElement.GetProperty("services");
 
@@ -165,7 +130,7 @@ public class ServiceDiscoveryTests
             var status = service.GetProperty("status").GetString();
             _output.WriteLine($"  {name}: {status}");
             Assert.True(status != "Unreachable",
-                $"Service '{name}' was unreachable — missing WithReference in AppHost?");
+                $"Service '{name}' was unreachable. {DescribeServiceHealth(service)}");
         }
     }
 
@@ -179,8 +144,7 @@ public class ServiceDiscoveryTests
     {
         _output.WriteLine($"Checking readiness: {resourceName} at {readinessPath}");
 
-        var client = _fixture.AppFactory.CreateHttpClient(resourceName);
-        client.Timeout = TimeSpan.FromSeconds(30);
+        var client = _fixture.CreateClient(resourceName);
 
         var response = await TestHelpers.WaitForAsync(
             async () =>
@@ -193,10 +157,9 @@ public class ServiceDiscoveryTests
             {
                 if (result.Response.IsSuccessStatusCode)
                     return true;
-                // Only retry for IAM registration pending — other failures are real errors
-                if (!result.Content.Contains("IAM registration pending"))
+                if (!IsTransientReadinessFailure(result.Content))
                     return true; // Stop polling, let assertion below handle failure
-                _output.WriteLine($"  {resourceName}: IAM registration pending, retrying...");
+                _output.WriteLine($"  {resourceName}: readiness pending, retrying...");
                 return false;
             },
             timeout: TimeSpan.FromSeconds(100),
@@ -209,6 +172,112 @@ public class ServiceDiscoveryTests
 
         Assert.True(response.Response.IsSuccessStatusCode,
             $"{resourceName} readiness failed with {response.Response.StatusCode}: {response.Content}");
+    }
+
+    private async Task WaitForGeometryServiceLivenessAsync()
+    {
+        _output.WriteLine("Waiting for GeometryService liveness before checking BFF aggregate health...");
+
+        var client = _fixture.CreateClient("GeometryService");
+
+        var response = await TestHelpers.WaitForAsync(
+            async () => await TryGetAsync(client, "/geometry/liveness"),
+            until: result =>
+            {
+                if (result.IsSuccessStatusCode)
+                {
+                    return true;
+                }
+
+                _output.WriteLine($"  GeometryService: {result.StatusCode}, retrying...");
+                return false;
+            },
+            timeout: TimeSpan.FromSeconds(120),
+            interval: TimeSpan.FromSeconds(2),
+            message: "GeometryService liveness did not become healthy before BFF system health check");
+
+        _output.WriteLine($"  GeometryService: {response.StatusCode}");
+    }
+
+    private static async Task<HttpResponseMessage> TryGetAsync(HttpClient client, string requestUri)
+    {
+        try
+        {
+            return await client.GetAsync(requestUri);
+        }
+        catch (HttpRequestException ex)
+        {
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = ex.Message
+            };
+        }
+        catch (TaskCanceledException ex)
+        {
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                ReasonPhrase = ex.Message
+            };
+        }
+    }
+
+    private static string DescribeServiceHealth(JsonElement service)
+    {
+        var parts = new List<string>();
+
+        if (service.TryGetProperty("status", out var status))
+        {
+            parts.Add($"Status: {status.GetString()}.");
+        }
+
+        if (service.TryGetProperty("errorMessage", out var errorMessage) &&
+            errorMessage.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(errorMessage.GetString()))
+        {
+            parts.Add($"Error: {errorMessage.GetString()}.");
+        }
+
+        if (service.TryGetProperty("lastChecked", out var lastChecked))
+        {
+            parts.Add($"Last checked: {lastChecked}.");
+        }
+
+        return string.Join(" ", parts);
+    }
+
+    private static bool IsTransientReadinessFailure(string content)
+    {
+        return content.Contains("IAM registration pending", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("Not ready", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("start faulted", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("ReceiveTransport faulted", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("BrokerUnreachable", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("connection.start was never received", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsUnreachableService(string body, out string? serviceName)
+    {
+        serviceName = null;
+
+        using var document = JsonDocument.Parse(body);
+        if (!document.RootElement.TryGetProperty("services", out var services))
+        {
+            return false;
+        }
+
+        foreach (var service in services.EnumerateArray())
+        {
+            var status = service.GetProperty("status").GetString();
+            if (!string.Equals(status, "Unreachable", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            serviceName = service.GetProperty("serviceName").GetString();
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -245,7 +314,7 @@ public class ServiceDiscoveryTests
         { "PdfService", "/pdf/aspire-liveness" },
         { "PurchaseOrderService", "/purchase-order/aspire-liveness" },
         { "ReceiptService", "/receipt/aspire-liveness" },
-        { "maliev-geometryservice", "/geometry/aspire-liveness" },
+        { "GeometryService", "/geometry/aspire-liveness" },
     };
 
     /// <summary>

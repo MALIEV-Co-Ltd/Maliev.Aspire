@@ -21,32 +21,25 @@ public class DeliveryWorkflowTests(AspireTestFixture fixture, ITestOutputHelper 
     [Fact]
     public async Task FullDeliveryWorkflow_CreateAndUpdateStatus()
     {
-        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
         var deliveryClient = _fixture.CreateAuthenticatedClient("DeliveryService");
 
         // 1. Create Customer
-        var createCustomerRequest = new
-        {
-            FirstName = "Delivery",
-            LastName = "Test",
-            Email = $"delivery.test.{Guid.NewGuid():N}@example.com",
-            Type = "Corporate",
-            TaxId = "8888888888888"
-        };
-        var custResponse = await customerClient.PostAsJsonAsync("/customer/v1/customers", createCustomerRequest);
-        var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var customer = await AspireTestData.CreateCustomerAsync(_fixture, "delivery");
         var customerId = customer.GetProperty("id").GetGuid();
+        var customerName = customer.GetProperty("name").GetString();
 
         // 2. Create Delivery Note
         var createRequest = new
         {
             OrderId = Guid.NewGuid().ToString(),
             CustomerId = customerId,
+            CustomerName = customerName,
             DeliveryDate = DateTime.UtcNow.AddDays(1),
             Items = new[]
             {
                 new
                 {
+                    ProductCode = "DELIVERY-TEST",
                     ProductName = "Delivery Test Product",
                     QuantityOrdered = 10m,
                     QuantityManufactured = 10m,

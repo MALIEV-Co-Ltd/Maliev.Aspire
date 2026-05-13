@@ -1,5 +1,6 @@
 using Maliev.Aspire.Tests.Infrastructure;
 using Maliev.Intranet.Shared;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -49,7 +50,9 @@ public class CustomerOnboardingTests(AspireTestFixture fixture, ITestOutputHelpe
             NewCompany = new CreateCompanyRequest
             {
                 Name = "Manual Company " + testId,
-                VatNumber = "TH-1234567890123",
+                VatNumber = "TH-" + Random.Shared
+                    .NextInt64(1_000_000_000_000, 9_999_999_999_999)
+                    .ToString(CultureInfo.InvariantCulture),
                 RegistrationNumber = "REG-" + testId,
                 Segment = "Retail",
                 Tier = "Bronze"
@@ -61,6 +64,7 @@ public class CustomerOnboardingTests(AspireTestFixture fixture, ITestOutputHelpe
                     Type = "Billing",
                     AddressLine1 = "123 Test St",
                     City = "Bangkok",
+                    StateProvince = "Bangkok",
                     PostalCode = "10110",
                     CountryId = country.Id
                 }
@@ -68,7 +72,7 @@ public class CustomerOnboardingTests(AspireTestFixture fixture, ITestOutputHelpe
         };
 
         _output.WriteLine($"\n[Step 2] Sending onboarding request via BFF...");
-        var response = await bffClient.PostAsJsonAsync("/api/customers/onboard", request);
+        var response = await bffClient.PostAsJsonAsync("/api/v1/customers/create-basic", request);
 
         var content = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == HttpStatusCode.Created || response.StatusCode == HttpStatusCode.OK,
@@ -97,9 +101,19 @@ public class CustomerOnboardingTests(AspireTestFixture fixture, ITestOutputHelpe
     {
         var countryClient = _fixture.CreateAuthenticatedClient("CountryService");
 
-        // Check if exists
-        var existing = await countryClient.GetFromJsonAsync<PagedResponse<CountryDto>>($"/country/v1/countries/search?query={iso2}");
-        if (existing?.Data.Any() == true) return existing.Data.First();
+        var existingResponse = await countryClient.GetAsync($"/country/v1/countries/iso2/{iso2}");
+        if (existingResponse.StatusCode == HttpStatusCode.OK)
+        {
+            return await existingResponse.Content.ReadFromJsonAsync<CountryDto>()
+                   ?? throw new InvalidOperationException($"Country {iso2} lookup returned an empty body");
+        }
+
+        if (existingResponse.StatusCode != HttpStatusCode.NotFound)
+        {
+            var content = await existingResponse.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(
+                $"Expected OK or NotFound while looking up country {iso2} but got {existingResponse.StatusCode}: {content}");
+        }
 
         // Seed if not exists
         var seedRequest = new
@@ -126,8 +140,6 @@ public class CustomerOnboardingTests(AspireTestFixture fixture, ITestOutputHelpe
         return await seedResponse.Content.ReadFromJsonAsync<CountryDto>()
                ?? throw new InvalidOperationException("Failed to seed country");
     }
-
-    private class PagedResponse<T> { public List<T> Data { get; set; } = new(); }
 
     private class AddressSummaryDto
     {

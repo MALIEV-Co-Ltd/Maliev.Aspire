@@ -22,15 +22,13 @@ public class LeaveWorkflowTests(AspireTestFixture fixture, ITestOutputHelper out
     [Fact]
     public async Task FullLeaveWorkflow_SubmitAndApprove()
     {
-        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
         var leaveClient = _fixture.CreateAuthenticatedClient("LeaveService");
+        await AspireTestData.EnsureAnnualLeavePolicyAsync(_fixture);
 
-        // 1. Get an employee
-        var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
-        var empResult = await empResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var employee = empResult.GetProperty("data")[0];
+        // 1. Create an employee
+        var employee = await AspireTestData.CreateEmployeeAsync(_fixture, "LEAVE");
         var employeeId = employee.GetProperty("id").GetGuid();
-        var employeeName = employee.GetProperty("name").GetString();
+        var employeeName = employee.GetProperty("message").GetString();
         _output.WriteLine($"Working with employee: {employeeName} ({employeeId})");
 
         // 2. Submit Leave Request
@@ -43,8 +41,9 @@ public class LeaveWorkflowTests(AspireTestFixture fixture, ITestOutputHelper out
             Reason = "Integration Test Leave"
         };
 
-        var submitResponse = await leaveClient.PostAsJsonAsync($"/leave/v1/LeaveRequests/{employeeId}", submitRequest);
-        Assert.Equal(HttpStatusCode.Created, submitResponse.StatusCode);
+        var submitResponse = await leaveClient.PostAsJsonSnakeCaseAsync($"/leave/v1/LeaveRequests/{employeeId}", submitRequest);
+        var submitContent = await submitResponse.Content.ReadAsStringAsync();
+        Assert.True(submitResponse.StatusCode == HttpStatusCode.Created, $"Expected Created but got {submitResponse.StatusCode}: {submitContent}");
 
         var submittedResult = await submitResponse.Content.ReadFromJsonAsync<JsonElement>();
         var requestId = submittedResult.GetProperty("id").GetGuid();
@@ -69,7 +68,7 @@ public class LeaveWorkflowTests(AspireTestFixture fixture, ITestOutputHelper out
             Comments = "Approved by Integration Test"
         };
 
-        var approveResponse = await leaveClient.PostAsJsonAsync($"/leave/v1/LeaveRequests/{requestId}/decision?approverId={adminId}", approveRequest);
+        var approveResponse = await leaveClient.PostAsJsonSnakeCaseAsync($"/leave/v1/LeaveRequests/{requestId}/decision?approverId={adminId}", approveRequest);
         Assert.Equal(HttpStatusCode.OK, approveResponse.StatusCode);
 
         // 5. Verify status is Approved (2)

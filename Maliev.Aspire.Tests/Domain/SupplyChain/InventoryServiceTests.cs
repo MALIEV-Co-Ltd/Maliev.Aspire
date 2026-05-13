@@ -48,6 +48,7 @@ public class InventoryServiceTests(AspireTestFixture fixture, ITestOutputHelper 
             ExpirationDate = DateTime.UtcNow.AddYears(1),
             UnitCost = 25.00m,
             Currency = "THB",
+            Location = "Integration Test Shelf",
             Notes = "Integration test batch"
         };
 
@@ -106,7 +107,8 @@ public class InventoryServiceTests(AspireTestFixture fixture, ITestOutputHelper 
             PurchaseDate = DateTime.UtcNow,
             ExpirationDate = DateTime.UtcNow.AddYears(1),
             UnitCost = 15.00m,
-            Currency = "THB"
+            Currency = "THB",
+            Location = "Integration Test Shelf"
         };
 
         var createResponse = await inventoryClient.PostAsJsonAsync("/inventory/v1/stock/batches", createBatchRequest);

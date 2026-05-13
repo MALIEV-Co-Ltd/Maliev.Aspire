@@ -26,21 +26,12 @@ public class EmployeeLifecycleWorkflowTests(AspireTestFixture fixture, ITestOutp
         var iamClient = _fixture.CreateAuthenticatedClient("IAMService");
         var leaveClient = _fixture.CreateAuthenticatedClient("LeaveService");
         var careerClient = _fixture.CreateAuthenticatedClient("CareerService");
+        await AspireTestData.EnsureAnnualLeavePolicyAsync(_fixture);
 
         var testId = Guid.NewGuid().ToString("N")[..8];
         var testEmail = $"lifecycle.{testId}@maliev.com";
 
-        var hireResponse = await employeeClient.PostAsJsonAsync("/employee/v1/employees", new
-        {
-            FirstName = "Lifecycle",
-            LastName = $"Test {testId}",
-            Email = testEmail,
-            Department = "Engineering",
-            Title = "Test Engineer",
-            StartDate = DateTime.UtcNow
-        });
-        Assert.Equal(HttpStatusCode.Created, hireResponse.StatusCode);
-        var employee = await hireResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var employee = await AspireTestData.CreateEmployeeAsync(_fixture, "LIFECYCLE", testEmail);
         var employeeId = employee.GetProperty("id").GetGuid();
         _output.WriteLine($"[1] Employee hired: {employeeId}");
 
@@ -58,7 +49,7 @@ public class EmployeeLifecycleWorkflowTests(AspireTestFixture fixture, ITestOutp
         var principalsResponse = await TestHelpers.WaitForAsync(
             async () =>
             {
-                var r = await iamClient.GetAsync($"/iam/v1/principals?search={testEmail}");
+                var r = await iamClient.GetAsync($"/iam/v1/principals/by-email/{Uri.EscapeDataString(testEmail)}");
                 return (Response: r, Content: await r.Content.ReadAsStringAsync());
             },
             until: result =>
@@ -66,25 +57,36 @@ public class EmployeeLifecycleWorkflowTests(AspireTestFixture fixture, ITestOutp
                 if (!result.Response.IsSuccessStatusCode) return false;
                 using var doc = JsonDocument.Parse(result.Content);
                 var root = doc.RootElement;
-                if (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 0) return true;
-                if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data))
-                    return data.GetArrayLength() > 0;
-                return false;
+                return root.ValueKind == JsonValueKind.Object && root.TryGetProperty("principalId", out _);
             },
             timeout: TimeSpan.FromSeconds(15),
             interval: TimeSpan.FromSeconds(2),
             message: $"IAM principal for {testEmail} not found within timeout");
         _output.WriteLine($"[3] IAM principal found");
 
-        var leaveResponse = await leaveClient.GetAsync($"/leave/v1/leave-balances?employeeId={employeeId}");
-        _output.WriteLine($"[4] Leave balance response: {leaveResponse.StatusCode}");
-        Assert.True(leaveResponse.IsSuccessStatusCode,
-            $"Leave balance check failed: {await leaveResponse.Content.ReadAsStringAsync()}");
+        var leaveResponse = await leaveClient.PostAsJsonSnakeCaseAsync($"/leave/v1/LeaveRequests/{employeeId}", new
+        {
+            LeaveType = 1,
+            StartDate = DateTimeOffset.UtcNow.AddDays(14),
+            EndDate = DateTimeOffset.UtcNow.AddDays(14),
+            HalfDayPeriod = 0,
+            Reason = "Lifecycle smoke test"
+        });
+        var leaveContent = await leaveResponse.Content.ReadAsStringAsync();
+        _output.WriteLine($"[4] Leave request response: {leaveResponse.StatusCode} - {leaveContent}");
+        Assert.True(leaveResponse.StatusCode == HttpStatusCode.Created, $"Expected Created but got {leaveResponse.StatusCode}: {leaveContent}");
 
-        var careerResponse = await careerClient.GetAsync($"/career/v1/careers?employeeId={employeeId}");
-        _output.WriteLine($"[5] Career record response: {careerResponse.StatusCode}");
-        Assert.True(careerResponse.IsSuccessStatusCode,
-            $"Career record check failed: {await careerResponse.Content.ReadAsStringAsync()}");
+        var careerResponse = await TestHelpers.WaitForAsync(
+            async () =>
+            {
+                var r = await careerClient.GetAsync($"/career/v1/employees/{employeeId}/training-records");
+                return (Response: r, Content: await r.Content.ReadAsStringAsync());
+            },
+            until: result => result.Response.IsSuccessStatusCode,
+            timeout: TimeSpan.FromSeconds(20),
+            interval: TimeSpan.FromSeconds(2),
+            message: $"Career training record surface for employee {employeeId} was not reachable within timeout");
+        _output.WriteLine($"[5] Career record response: {careerResponse.Response.StatusCode}");
 
         Assert.NotEqual(Guid.Empty, employeeId);
     }
@@ -95,32 +97,22 @@ public class EmployeeLifecycleWorkflowTests(AspireTestFixture fixture, ITestOutp
     [Fact]
     public async Task EmployeeCreation_CompensationRecord_CanBeCreated()
     {
-        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
         var compensationClient = _fixture.CreateAuthenticatedClient("CompensationService");
 
         var testId = Guid.NewGuid().ToString("N")[..8];
 
-        var hireResponse = await employeeClient.PostAsJsonAsync("/employee/v1/employees", new
-        {
-            FirstName = "Comp",
-            LastName = $"Test {testId}",
-            Email = $"comp.{testId}@maliev.com",
-            Department = "Production",
-            Title = "3D Print Operator",
-            StartDate = DateTime.UtcNow
-        });
-        Assert.Equal(HttpStatusCode.Created, hireResponse.StatusCode);
-        var employee = await hireResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var employee = await AspireTestData.CreateEmployeeAsync(_fixture, "PAY", $"comp.{testId}@maliev.com");
         var employeeId = employee.GetProperty("id").GetGuid();
         _output.WriteLine($"[1] Employee hired: {employeeId}");
 
-        var compensationResponse = await compensationClient.PostAsJsonAsync("/compensation/v1/compensations", new
+        var compensationResponse = await compensationClient.PostAsJsonSnakeCaseAsync($"/compensation/v1/employees/{employeeId}/compensation", new
         {
-            EmployeeId = employeeId,
-            BaseSalary = 25000.00m,
+            NewBaseSalary = 25000.00m,
             Currency = "THB",
+            CompensationType = 0,
             EffectiveDate = DateTime.UtcNow,
-            PayFrequency = "Monthly"
+            ChangeType = "Initial",
+            ChangeReason = "Initial compensation setup"
         });
         var compContent = await compensationResponse.Content.ReadAsStringAsync();
         _output.WriteLine($"[2] Compensation response: {compensationResponse.StatusCode} - {compContent}");

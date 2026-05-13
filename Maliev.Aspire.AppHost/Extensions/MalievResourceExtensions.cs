@@ -9,6 +9,23 @@ namespace Maliev.Aspire.AppHost.Extensions;
 public static class MalievResourceExtensions
 {
     /// <summary>
+    /// Adds a dashboard HTTP health check outside Testing. Aspire system tests use targeted
+    /// fixture liveness waits to avoid probing every local service concurrently.
+    /// </summary>
+    public static IResourceBuilder<TResource> WithTestingSafeHttpHealthCheck<TResource>(
+        this IResourceBuilder<TResource> resource,
+        string path)
+        where TResource : IResourceWithEndpoints
+    {
+        if (resource.ApplicationBuilder.Environment.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+        {
+            return resource;
+        }
+
+        return resource.WithHttpHealthCheck(path);
+    }
+
+    /// <summary>
     /// Injects shared platform secrets and standard environment variables into a project resource.
     /// </summary>
     public static IResourceBuilder<ProjectResource> WithSharedSecrets(
@@ -17,7 +34,11 @@ public static class MalievResourceExtensions
         IResourceBuilder<ContainerResource> grafana,
         IResourceBuilder<IResource> otelCollector)
     {
+        var environmentName = project.ApplicationBuilder.Environment.EnvironmentName;
+
         return project
+            .WithEnvironment("ASPNETCORE_ENVIRONMENT", environmentName)
+            .WithEnvironment("DOTNET_ENVIRONMENT", environmentName)
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
             .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
             .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)

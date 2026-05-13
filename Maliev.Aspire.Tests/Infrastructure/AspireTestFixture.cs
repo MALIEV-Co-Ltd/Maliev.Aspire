@@ -14,7 +14,54 @@ namespace Maliev.Aspire.Tests.Infrastructure;
 /// </summary>
 public class AspireTestFixture : IAsyncLifetime
 {
+    private static readonly IReadOnlyDictionary<string, string> ServiceLivenessPaths =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["AccountingService"] = "/accounting/aspire-liveness",
+            ["AuthService"] = "/auth/aspire-liveness",
+            ["CareerService"] = "/career/aspire-liveness",
+            ["ChatbotService"] = "/chatbot/aspire-liveness",
+            ["CommerceService"] = "/commerce/aspire-liveness",
+            ["CompensationService"] = "/compensation/aspire-liveness",
+            ["ComplianceService"] = "/compliance/aspire-liveness",
+            ["ContactService"] = "/contact/aspire-liveness",
+            ["CountryService"] = "/country/aspire-liveness",
+            ["CurrencyService"] = "/currency/aspire-liveness",
+            ["CustomerService"] = "/customer/aspire-liveness",
+            ["DeliveryService"] = "/delivery/aspire-liveness",
+            ["EmployeeService"] = "/employee/aspire-liveness",
+            ["FacilityService"] = "/facility/aspire-liveness",
+            ["GeometryService"] = "/geometry/aspire-liveness",
+            ["IAMService"] = "/iam/aspire-liveness",
+            ["InventoryService"] = "/inventory/aspire-liveness",
+            ["InvoiceService"] = "/invoice/aspire-liveness",
+            ["IntranetBff"] = "/intranet/aspire-liveness",
+            ["JobService"] = "/job/aspire-liveness",
+            ["LeaveService"] = "/leave/aspire-liveness",
+            ["LifecycleService"] = "/lifecycle/aspire-liveness",
+            ["MaterialService"] = "/material/aspire-liveness",
+            ["NotificationService"] = "/notification/aspire-liveness",
+            ["OrderService"] = "/order/aspire-liveness",
+            ["PaymentService"] = "/payment/aspire-liveness",
+            ["PdfService"] = "/pdf/aspire-liveness",
+            ["PerformanceService"] = "/performance/aspire-liveness",
+            ["PredictionService"] = "/predictionservice/aspire-liveness",
+            ["PricingService"] = "/pricing/aspire-liveness",
+            ["ProjectService"] = "/project/aspire-liveness",
+            ["PurchaseOrderService"] = "/purchase-order/aspire-liveness",
+            ["QuoteEngineBff"] = "/quote/aspire-liveness",
+            ["QuotationService"] = "/quotation/aspire-liveness",
+            ["ReceiptService"] = "/receipt/aspire-liveness",
+            ["RegistryService"] = "/registry/aspire-liveness",
+            ["SearchService"] = "/search/aspire-liveness",
+            ["SupplierService"] = "/supplier/aspire-liveness",
+            ["UploadService"] = "/upload/aspire-liveness",
+            ["WebBff"] = "/web/aspire-liveness"
+        };
+
     private readonly ConcurrentDictionary<string, Uri> _httpsBaseAddresses = new();
+    private readonly ConcurrentDictionary<string, object> _serviceLivenessLocks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, bool> _serviceLivenessConfirmed = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// The distributed application factory for creating test clients.
@@ -41,6 +88,7 @@ public class AspireTestFixture : IAsyncLifetime
         var sw = Stopwatch.StartNew();
 
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
+        Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Testing");
 
         var appHostAssembly = typeof(Projects.Maliev_Aspire_AppHost).Assembly;
 
@@ -92,6 +140,8 @@ public class AspireTestFixture : IAsyncLifetime
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", token);
 
+        EnsureServiceLiveness(projectName, client);
+
         return client;
     }
 
@@ -116,7 +166,78 @@ public class AspireTestFixture : IAsyncLifetime
             Timeout = TimeSpan.FromSeconds(100)
         };
 
+        EnsureServiceLiveness(projectName, client);
+
         return client;
+    }
+
+    private void EnsureServiceLiveness(string projectName, HttpClient client)
+    {
+        if (_serviceLivenessConfirmed.ContainsKey(projectName))
+        {
+            return;
+        }
+
+        if (!ServiceLivenessPaths.TryGetValue(projectName, out var livenessPath))
+        {
+            Console.WriteLine($"[AspireTestFixture] {projectName}: no liveness path registered; skipping startup wait");
+            return;
+        }
+
+        var gate = _serviceLivenessLocks.GetOrAdd(projectName, _ => new object());
+        lock (gate)
+        {
+            if (_serviceLivenessConfirmed.ContainsKey(projectName))
+            {
+                return;
+            }
+
+            WaitForServiceLiveness(projectName, client, livenessPath);
+            _serviceLivenessConfirmed[projectName] = true;
+        }
+    }
+
+    private static void WaitForServiceLiveness(string projectName, HttpClient client, string livenessPath)
+    {
+        var timeout = TimeSpan.FromMinutes(3);
+        var deadline = DateTime.UtcNow.Add(timeout);
+        var attempts = 0;
+        HttpStatusCode? lastStatus = null;
+        string? lastContent = null;
+        Exception? lastException = null;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            attempts++;
+
+            try
+            {
+                using var probeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                using var response = client.GetAsync(livenessPath, probeTimeout.Token).GetAwaiter().GetResult();
+                lastStatus = response.StatusCode;
+                lastContent = response.Content.ReadAsStringAsync(probeTimeout.Token).GetAwaiter().GetResult();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine(
+                        $"[AspireTestFixture] {projectName}: liveness ready at {livenessPath} after {attempts} attempt(s)");
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+            }
+
+            Thread.Sleep(TimeSpan.FromSeconds(1));
+        }
+
+        var detail = lastException is not null
+            ? lastException.Message
+            : $"last status {(int?)lastStatus} {lastStatus}: {lastContent}";
+
+        throw new TimeoutException(
+            $"{projectName} did not become live at {livenessPath} within {timeout.TotalSeconds:N0}s; {detail}");
     }
 
     /// <summary>
@@ -140,6 +261,17 @@ public class AspireTestFixture : IAsyncLifetime
     /// <returns>The resolved base address URI.</returns>
     private Uri ResolveHttpsBaseAddressCore(string projectName)
     {
+        try
+        {
+            var httpsEndpoint = AppFactory!.GetEndpoint(projectName, "https");
+            Console.WriteLine($"[AspireTestFixture] {projectName}: using HTTPS endpoint {httpsEndpoint}");
+            return httpsEndpoint;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AspireTestFixture] HTTPS endpoint lookup failed for {projectName}: {ex.Message}");
+        }
+
         var baseClient = AppFactory!.CreateHttpClient(projectName);
         var httpBase = baseClient.BaseAddress!;
 

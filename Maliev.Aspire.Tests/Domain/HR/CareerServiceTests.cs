@@ -52,10 +52,22 @@ public class CareerServiceTests(AspireTestFixture fixture, ITestOutputHelper out
     {
         var client = _fixture.CreateAuthenticatedClient("CareerService");
 
-        // 1. Get an active job posting
-        var postingsResponse = await client.GetAsync("/career/v1/job-postings");
-        var postingsResult = await postingsResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var posting = postingsResult.GetProperty("items")[0];
+        // 1. Create an active job posting
+        var postingResponse = await client.PostAsJsonAsync("/career/v1/job-postings", new
+        {
+            PositionTitle = "Integration Test Applicant Role",
+            PositionCode = $"APP-{Guid.NewGuid().ToString("N")[..8].ToUpper()}",
+            Department = "Engineering",
+            Location = "Bangkok",
+            EmploymentType = "Full-time",
+            Description = "Test Description",
+            Requirements = "Test Requirements",
+            Responsibilities = "Test Responsibilities",
+            ApplicationDeadline = DateTime.UtcNow.AddDays(30),
+            PublishImmediately = true
+        });
+        Assert.Equal(HttpStatusCode.Created, postingResponse.StatusCode);
+        var posting = await postingResponse.Content.ReadFromJsonAsync<JsonElement>();
         var postingId = posting.GetProperty("id").GetGuid();
 
         // 2. Submit application with dummy file ID

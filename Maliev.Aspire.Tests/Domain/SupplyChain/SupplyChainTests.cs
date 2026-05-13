@@ -1,8 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Maliev.Aspire.Tests.Infrastructure;
-using Maliev.Intranet.Shared;
-using Maliev.Intranet.Shared.Dtos;
+using System.Text.Json;
 using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.SupplyChain;
@@ -11,7 +10,7 @@ namespace Maliev.Aspire.Tests.Domain.SupplyChain;
 /// Tests for supply chain domain workflows. Uses shared AspireTestFixture for performance.
 /// </summary>
 [Collection("AspireDomainTests")]
-public class SupplyChainTests : IClassFixture<AspireTestFixture>
+public class SupplyChainTests
 {
     private readonly AspireTestFixture _fixture;
     private readonly ITestOutputHelper _output;
@@ -37,15 +36,31 @@ public class SupplyChainTests : IClassFixture<AspireTestFixture>
         var supplierClient = _fixture.CreateAuthenticatedClient("SupplierService");
         var materialClient = _fixture.CreateAuthenticatedClient("MaterialService");
         var poClient = _fixture.CreateAuthenticatedClient("PurchaseOrderService");
+        var customer = await AspireTestData.CreateCorporateCustomerAsync(_fixture, "supply-chain");
+        var customerId = customer.GetProperty("id").GetGuid();
+        var order = await AspireTestData.CreateOrderAsync(_fixture, customerId, "Supply chain procurement workflow");
+        var orderId = order.GetProperty("orderId").GetString()
+            ?? throw new InvalidOperationException("OrderService did not return orderId.");
 
         // 2. Onboard Supplier
         _output.WriteLine("Scenario: Onboard Supplier");
         var createSupplierRequest = new
         {
-            name = "TechSteel Inc",
-            email = $"sales.{Guid.NewGuid()}@techsteel.com",
+            companyName = "TechSteel Inc",
+            taxId = $"TAX-{Guid.NewGuid():N}"[..18],
+            address = "123 Steel Road",
+            city = "Bangkok",
             country = "USA",
-            status = "Active"
+            postalCode = "10110",
+            capabilities = new[] { "CNC", "SheetMetal" },
+            primaryContact = new
+            {
+                name = "Steel Contact",
+                email = $"sales.{Guid.NewGuid():N}@techsteel.com",
+                role = "Sales",
+                phone = "+66812345678",
+                isPrimary = true
+            }
         };
 
         var supplierResponse = await supplierClient.PostAsJsonAsync("/supplier/v1/suppliers", createSupplierRequest);
@@ -58,9 +73,8 @@ public class SupplyChainTests : IClassFixture<AspireTestFixture>
 
         Assert.Equal(HttpStatusCode.Created, supplierResponse.StatusCode);
 
-        var supplier = await supplierResponse.Content.ReadFromJsonAsync<SupplierSummaryDto>();
-        Assert.NotNull(supplier);
-        var supplierId = supplier.Id;
+        var supplier = await supplierResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var supplierId = supplier.GetProperty("id").GetGuid();
         _output.WriteLine($"✓ Supplier onboarded with ID: {supplierId}");
 
         // 3. Define Material
@@ -68,47 +82,60 @@ public class SupplyChainTests : IClassFixture<AspireTestFixture>
         var createMaterialRequest = new
         {
             name = "Steel Rod",
-            sku = $"SKU-{Guid.NewGuid().ToString()[..8]}",
-            category = "Raw Materials",
-            unitPrice = 150.00m,
-            unit = "pcs"
+            code = $"SKU-{Guid.NewGuid().ToString()[..8]}",
+            pricePerUnit = 150.00m,
+            stockLevel = 1000
         };
 
         var materialResponse = await materialClient.PostAsJsonAsync("/material/v1/materials", createMaterialRequest);
         Assert.Equal(HttpStatusCode.Created, materialResponse.StatusCode);
 
-        var material = await materialResponse.Content.ReadFromJsonAsync<MaterialSummaryDto>();
-        Assert.NotNull(material);
-        _output.WriteLine($"✓ Material defined: {material.Name} ({material.SKU})");
+        var material = await materialResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var materialName = material.GetProperty("name").GetString();
+        var materialCode = material.GetProperty("code").GetString();
+        _output.WriteLine($"✓ Material defined: {materialName} ({materialCode})");
 
         // 4. Create Purchase Order
         _output.WriteLine("Scenario: Create Purchase Order");
-        var createPoRequest = new CreatePurchaseOrderRequest
+        var createPoRequest = new
         {
-            SupplierServiceId = supplierId,
-            OrderId = 1,
-            CurrencyCode = "THB",
-            ExpectedDeliveryDate = DateTime.UtcNow.AddDays(14),
-            Items =
-            [
-                new PurchaseOrderLineItemDto
+            supplierID = 1,
+            supplierServiceId = supplierId,
+            orderID = 1,
+            sourceOrderId = orderId,
+            currencyID = 1,
+            currencyCode = "THB",
+            orderType = 1,
+            whtRate = 0m,
+            expectedDeliveryDate = DateTime.UtcNow.AddDays(14),
+            shippingAddress = new
+            {
+                addressType = 0,
+                contactName = "Warehouse",
+                addressLine1 = "123 Test Road",
+                city = "Bangkok",
+                postalCode = "10110",
+                country = "TH"
+            },
+            items = new[]
+            {
+                new
                 {
-                    ExternalOrderItemId = 1,
-                    ProductCode = material.SKU,
-                    ProductName = material.Name,
-                    Quantity = 100,
-                    UnitPrice = 150.00m
+                    externalOrderItemId = 1,
+                    sourceOrderItemId = "primary",
+                    quantity = 100m
                 }
-            ]
+            }
         };
 
         var poResponse = await poClient.PostAsJsonAsync("/purchase-order/v1/purchase-orders", createPoRequest);
-        Assert.Equal(HttpStatusCode.Created, poResponse.StatusCode);
+        var poContent = await poResponse.Content.ReadAsStringAsync();
+        _output.WriteLine($"PO response: {poResponse.StatusCode} - {poContent}");
+        Assert.True(poResponse.StatusCode == HttpStatusCode.Created, $"Expected Created but got {poResponse.StatusCode}: {poContent}");
 
-        var po = await poResponse.Content.ReadFromJsonAsync<PurchaseOrderDto>();
-        Assert.NotNull(po);
-        Assert.Equal(supplierId, po.SupplierServiceId);
-        Assert.Single(po.Items);
-        _output.WriteLine($"✓ Purchase Order created: {po.PoNumber}");
+        var po = await poResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(supplierId, po.GetProperty("supplierServiceId").GetGuid());
+        Assert.Single(po.GetProperty("items").EnumerateArray());
+        _output.WriteLine($"✓ Purchase Order created: {po.GetProperty("orderNumber").GetString()}");
     }
 }

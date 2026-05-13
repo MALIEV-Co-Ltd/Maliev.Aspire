@@ -15,19 +15,20 @@ public class AccountingWorkflowTests(AspireTestFixture fixture, ITestOutputHelpe
     private readonly AspireTestFixture _fixture = fixture;
     private readonly ITestOutputHelper _output = output;
     /// <summary>
-    /// Tests that the chart of accounts returns seeded data.
+    /// Tests that the chart of accounts returns created data.
     /// </summary>
     [Fact]
-    public async Task GetChartOfAccounts_ReturnsSeededData()
+    public async Task GetChartOfAccounts_ReturnsCreatedData()
     {
         var client = _fixture.CreateAuthenticatedClient("AccountingService");
+        await AspireTestData.CreateChartAccountAsync(_fixture, "Asset", "Cash");
 
         var response = await client.GetAsync("/accounting/v1/chart-of-accounts");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<List<JsonElement>>();
         Assert.NotNull(result);
-        Assert.True(result.Count > 0, "Chart of accounts should be seeded.");
+        Assert.True(result.Count > 0, "Chart of accounts should include created accounts.");
         _output.WriteLine($"Found {result.Count} accounts in CoA.");
     }
 
@@ -39,11 +40,11 @@ public class AccountingWorkflowTests(AspireTestFixture fixture, ITestOutputHelpe
     {
         var client = _fixture.CreateAuthenticatedClient("AccountingService");
 
-        // 1. Get two accounts to use
-        var coaResponse = await client.GetAsync("/accounting/v1/chart-of-accounts");
-        var accounts = await coaResponse.Content.ReadFromJsonAsync<List<JsonElement>>();
-        var acc1 = accounts![0].GetProperty("id").GetGuid();
-        var acc2 = accounts![1].GetProperty("id").GetGuid();
+        // 1. Create two accounts to use
+        var debitAccount = await AspireTestData.CreateChartAccountAsync(_fixture, "Asset", "Integration Debit");
+        var creditAccount = await AspireTestData.CreateChartAccountAsync(_fixture, "Revenue", "Integration Credit");
+        var acc1 = debitAccount.GetProperty("id").GetGuid();
+        var acc2 = creditAccount.GetProperty("id").GetGuid();
 
         // 2. Create balanced journal entry
         var request = new

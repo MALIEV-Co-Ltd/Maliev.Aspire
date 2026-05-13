@@ -21,13 +21,10 @@ public class LifecycleServiceTests(AspireTestFixture fixture, ITestOutputHelper 
     [Fact]
     public async Task GetOnboardingChecklist_ForNewEmployee_ReturnsChecklist()
     {
-        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
         var lifecycleClient = _fixture.CreateAuthenticatedClient("LifecycleService");
 
-        // 1. Get an employee
-        var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
-        var empResult = await empResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var employee = empResult.GetProperty("data")[0];
+        // 1. Create an employee
+        var employee = await AspireTestData.CreateEmployeeAsync(_fixture, "LIFE");
         var employeeId = employee.GetProperty("id").GetGuid();
 
         // 2. Poll lifecycle endpoint for status (onboarding may be triggered by event)

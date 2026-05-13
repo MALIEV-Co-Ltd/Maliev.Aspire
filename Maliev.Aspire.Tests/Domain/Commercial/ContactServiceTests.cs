@@ -22,14 +22,16 @@ public class ContactServiceTests(AspireTestFixture fixture, ITestOutputHelper ou
     public async Task CreateContactMessage_AsAnonymous_ReturnsCreated()
     {
         var client = _fixture.CreateClient("ContactService");
+        var country = await AspireTestData.EnsureCountryAsync(_fixture);
 
         var request = new
         {
-            Name = $"Test User {Guid.NewGuid():N}"[..20],
+            FullName = $"Test User {Guid.NewGuid():N}"[..20],
             Email = $"contact.{Guid.NewGuid():N}@example.com",
             Subject = "Integration Test Inquiry",
             Message = "This is a test contact message from integration tests.",
-            ContactType = "General"
+            CountryId = country.GetProperty("id").GetGuid(),
+            ContactType = 0
         };
 
         var response = await client.PostAsJsonAsync("/contact/v1/contacts", request);
@@ -63,20 +65,22 @@ public class ContactServiceTests(AspireTestFixture fixture, ITestOutputHelper ou
     {
         var anonymousClient = _fixture.CreateClient("ContactService");
         var adminClient = _fixture.CreateAuthenticatedClient("ContactService");
+        var country = await AspireTestData.EnsureCountryAsync(_fixture);
 
         var request = new
         {
-            Name = "Workflow Test",
+            FullName = "Workflow Test",
             Email = $"workflow.{Guid.NewGuid():N}@example.com",
             Subject = "Workflow Test Subject",
             Message = "Testing create → get → update status workflow.",
-            ContactType = "Support"
+            CountryId = country.GetProperty("id").GetGuid(),
+            ContactType = 0
         };
 
         var createResponse = await anonymousClient.PostAsJsonAsync("/contact/v1/contacts", request);
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
         var contact = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var contactId = contact.GetProperty("id").GetString();
+        var contactId = contact.GetProperty("id").GetInt32();
         _output.WriteLine($"Contact created: {contactId}");
 
         var getResponse = await adminClient.GetAsync($"/contact/v1/contacts/{contactId}");
@@ -86,7 +90,7 @@ public class ContactServiceTests(AspireTestFixture fixture, ITestOutputHelper ou
 
         var updateResponse = await adminClient.PutAsJsonAsync($"/contact/v1/contacts/{contactId}/status", new
         {
-            Status = "InProgress"
+            Status = 1
         });
         _output.WriteLine($"Update status response: {updateResponse.StatusCode}");
         Assert.True(updateResponse.IsSuccessStatusCode,
@@ -100,7 +104,7 @@ public class ContactServiceTests(AspireTestFixture fixture, ITestOutputHelper ou
     public async Task GetContact_ByNonExistentId_Returns404()
     {
         var client = _fixture.CreateAuthenticatedClient("ContactService");
-        var fakeId = Guid.NewGuid().ToString();
+        const int fakeId = int.MaxValue;
 
         var response = await client.GetAsync($"/contact/v1/contacts/{fakeId}");
 

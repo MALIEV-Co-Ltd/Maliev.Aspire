@@ -1,3 +1,6 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+
 namespace Maliev.Aspire.Tests.Infrastructure;
 
 /// <summary>
@@ -5,6 +8,34 @@ namespace Maliev.Aspire.Tests.Infrastructure;
 /// </summary>
 public static class TestHelpers
 {
+    private static readonly JsonSerializerOptions SnakeCaseJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DictionaryKeyPolicy = JsonNamingPolicy.SnakeCaseLower
+    };
+
+    /// <summary>
+    /// Posts JSON using snake_case naming for services that explicitly expose snake_case contracts.
+    /// </summary>
+    public static Task<HttpResponseMessage> PostAsJsonSnakeCaseAsync<T>(
+        this HttpClient client,
+        string requestUri,
+        T value,
+        CancellationToken cancellationToken = default)
+    {
+        return client.PostAsJsonAsync(requestUri, value, SnakeCaseJsonOptions, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads JSON using snake_case naming for services that explicitly expose snake_case contracts.
+    /// </summary>
+    public static Task<T?> ReadFromJsonSnakeCaseAsync<T>(
+        this HttpContent content,
+        CancellationToken cancellationToken = default)
+    {
+        return content.ReadFromJsonAsync<T>(SnakeCaseJsonOptions, cancellationToken);
+    }
+
     /// <summary>
     /// Polls an async action until the predicate returns true or timeout expires.
     /// Use this instead of hardcoded Task.Delay for eventual consistency assertions.

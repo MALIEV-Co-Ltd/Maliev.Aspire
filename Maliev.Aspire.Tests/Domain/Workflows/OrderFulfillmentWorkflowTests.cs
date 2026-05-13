@@ -21,7 +21,6 @@ public class OrderFulfillmentWorkflowTests(AspireTestFixture fixture, ITestOutpu
     [Fact]
     public async Task FullOrderFulfillment_CustomerToOrderToPaymentToDelivery()
     {
-        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
         var orderClient = _fixture.CreateAuthenticatedClient("OrderService");
         var invoiceClient = _fixture.CreateAuthenticatedClient("InvoiceService");
         var paymentClient = _fixture.CreateAuthenticatedClient("PaymentService");
@@ -30,17 +29,7 @@ public class OrderFulfillmentWorkflowTests(AspireTestFixture fixture, ITestOutpu
 
         var testId = Guid.NewGuid().ToString("N")[..8];
 
-        var custResponse = await customerClient.PostAsJsonAsync("/customer/v1/customers", new
-        {
-            FirstName = "Order",
-            LastName = $"Flow {testId}",
-            Email = $"orderflow.{testId}@example.com",
-            Phone = "0812345678",
-            Type = "Corporate",
-            TaxId = "1111111111111"
-        });
-        Assert.Equal(HttpStatusCode.Created, custResponse.StatusCode);
-        var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var customer = await AspireTestData.CreateCorporateCustomerAsync(_fixture, "orderflow");
         var customerId = customer.GetProperty("id").GetGuid();
         var customerName = customer.GetProperty("name").GetString();
         _output.WriteLine($"[1] Customer created: {customerName} ({customerId})");
@@ -85,7 +74,8 @@ public class OrderFulfillmentWorkflowTests(AspireTestFixture fixture, ITestOutpu
         Assert.Equal(HttpStatusCode.Created, invResponse.StatusCode);
         var invoice = await invResponse.Content.ReadFromJsonAsync<JsonElement>();
         var invoiceId = invoice.GetProperty("id").GetGuid();
-        var totalAmount = invoice.GetProperty("totalAmount").GetDecimal();
+        invoice = await AspireTestData.FinalizeInvoiceAsync(_fixture, invoiceId);
+        var totalAmount = invoice.GetProperty("grandTotal").GetDecimal();
         _output.WriteLine($"[3] Invoice created: {invoiceId} for {totalAmount} THB");
 
         var paymentIdempotencyKey = Guid.NewGuid().ToString();
@@ -97,7 +87,9 @@ public class OrderFulfillmentWorkflowTests(AspireTestFixture fixture, ITestOutpu
                 Currency = "THB",
                 CustomerId = customerId.ToString(),
                 OrderId = orderId,
-                Description = $"Payment for order {orderId}"
+                Description = $"Payment for order {orderId}",
+                ReturnUrl = "https://example.com/payment/success",
+                CancelUrl = "https://example.com/payment/cancel"
             })
         };
         paymentRequest.Headers.Add("Idempotency-Key", paymentIdempotencyKey);
@@ -111,10 +103,8 @@ public class OrderFulfillmentWorkflowTests(AspireTestFixture fixture, ITestOutpu
         var receiptResponse = await receiptClient.PostAsJsonAsync("/receipt/v1/receipts", new
         {
             InvoiceId = invoiceId,
-            PaymentTransactionId = transactionId,
-            PaymentMethod = "BankTransfer",
-            AmountPaid = totalAmount,
-            Currency = "THB"
+            Amount = totalAmount,
+            PaymentMethod = "BankTransfer"
         });
         Assert.Equal(HttpStatusCode.Created, receiptResponse.StatusCode);
         var receipt = await receiptResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -130,6 +120,7 @@ public class OrderFulfillmentWorkflowTests(AspireTestFixture fixture, ITestOutpu
             {
                 new
                 {
+                    ProductCode = "FDM-PART",
                     ProductName = "FDM 3D Printed Part",
                     QuantityOrdered = 5m,
                     QuantityManufactured = 5m,

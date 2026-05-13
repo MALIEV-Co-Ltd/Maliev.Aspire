@@ -258,7 +258,7 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
-                .WithHttpHealthCheck("/iam/aspire-liveness"),
+                .WithTestingSafeHttpHealthCheck("/iam/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -274,7 +274,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/country/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/country/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -288,7 +289,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/registry/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/registry/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -302,7 +304,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/facility/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/facility/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -316,7 +319,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/upload/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/upload/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -335,7 +339,8 @@ static partial class Program
                 .WithReference(uploadService)
                 .WaitFor(uploadService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/customer/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/customer/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -349,7 +354,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/employee/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/employee/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -366,7 +372,8 @@ static partial class Program
                 .WithReference(customerService)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/auth/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/auth/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -381,7 +388,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/accounting/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/accounting/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -398,7 +406,8 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(customerService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/notification/aspire-liveness")
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/notification/aspire-liveness")
                 .WithEnvironment("Encryption__DataProtectionKey", config.NotificationEncryptionKey),
             config,
             grafana,
@@ -419,7 +428,8 @@ static partial class Program
                 .WithReference(notificationService)
                 .WaitFor(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/career/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/career/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -434,7 +444,8 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/compensation/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/compensation/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -449,7 +460,8 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/compliance/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/compliance/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -466,7 +478,8 @@ static partial class Program
                 .WithReference(notificationService)
                 .WaitFor(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/leave/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/leave/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -481,7 +494,8 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/lifecycle/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/lifecycle/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -498,7 +512,8 @@ static partial class Program
                 .WithReference(notificationService)
                 .WaitFor(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/performance/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/performance/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -515,7 +530,8 @@ static partial class Program
                 .WaitFor(uploadService)
                 .WithReference(countryService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/contact/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/contact/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -529,7 +545,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/currency/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/currency/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -543,8 +560,9 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WaitFor(iamService)
                 .WithReference(customerService)
-                .WithHttpHealthCheck("/quotation/aspire-liveness"),
+                .WithTestingSafeHttpHealthCheck("/quotation/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -559,8 +577,10 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(currencyService)
                 .WithReference(quotationService)
+                .WithReference(customerService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/invoice/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/invoice/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -574,7 +594,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/material/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/material/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -590,7 +611,8 @@ static partial class Program
                 .WithReference(materialService)
                 .WithReference(currencyService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/pricing/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/pricing/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -612,7 +634,8 @@ static partial class Program
                 .WithReference(notificationService)
                 .WaitFor(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/order/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/order/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -628,7 +651,8 @@ static partial class Program
                 .WithReference(orderService)
                 .WithReference(customerService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/delivery/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/delivery/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -642,7 +666,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/payment/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/payment/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -656,8 +681,9 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WaitFor(iamService)
                 .WithReference(customerService)
-                .WithHttpHealthCheck("/commerce/aspire-liveness"),
+                .WithTestingSafeHttpHealthCheck("/commerce/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -673,8 +699,10 @@ static partial class Program
                 .WithReference(uploadService)
                 .WaitFor(uploadService)
                 .WithReference(deliveryService)
+                .WithReference(invoiceService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/pdf/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/pdf/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -688,7 +716,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/purchase-order/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/purchase-order/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -703,7 +732,8 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(invoiceService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/receipt/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/receipt/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -720,7 +750,8 @@ static partial class Program
                 .WithReference(invoiceService)
                 .WithReference(materialService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/supplier/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/supplier/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -742,6 +773,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WaitFor(iamService)
                 .WithReference(countryService)
                 .WithReference(registryService)
                 .WithReference(uploadService)
@@ -769,7 +801,7 @@ static partial class Program
                 .WithReference(purchaseOrderService)
                 .WithReference(receiptService)
                 .WithReference(supplierService)
-                .WithHttpHealthCheck("/chatbot/aspire-liveness"),
+                .WithTestingSafeHttpHealthCheck("/chatbot/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -783,12 +815,13 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WaitFor(iamService)
                 .WithReference(customerService)
                 .WithReference(pricingService)
                 .WithReference(quotationService)
                 .WithReference(orderService)
                 .WithReference(notificationService)
-                .WithHttpHealthCheck("/project/aspire-liveness"),
+                .WithTestingSafeHttpHealthCheck("/project/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -802,9 +835,10 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WaitFor(iamService)
                 .WithUrlForEndpoint("http", u => { u.Url = "/search/scalar"; u.DisplayText = "Scalar Documentation"; })
                 .WithUrlForEndpoint("https", u => { u.Url = "/search/scalar"; u.DisplayText = "Scalar Documentation"; })
-                .WithHttpHealthCheck("/search/aspire-liveness"),
+                .WithTestingSafeHttpHealthCheck("/search/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -822,6 +856,7 @@ static partial class Program
                 .WithReference(orderService)
                 .WithReference(deliveryService)
                 .WithReference(iamService)
+                .WaitFor(iamService)
                 .WithReference(countryService)
                 .WithReference(registryService)
                 .WithReference(uploadService)
@@ -852,7 +887,7 @@ static partial class Program
                 .WithReference(commerceService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
-                .WithHttpHealthCheck("/intranet/aspire-liveness")
+                .WithTestingSafeHttpHealthCheck("/intranet/aspire-liveness")
                 .WithHttpCommand(
                     path: "/api/v1/seed/customers",
                     displayName: "Seed Customer Data",
@@ -875,6 +910,7 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(authService)
                 .WithReference(iamService)
+                .WaitFor(iamService)
                 .WithReference(customerService)
                 .WithReference(uploadService)
                 .WithReference(materialService)
@@ -887,7 +923,7 @@ static partial class Program
                 .WithReference(deliveryService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Quote Engine (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Quote Engine (HTTPS)")
-                .WithHttpHealthCheck("/quote/aspire-liveness"),
+                .WithTestingSafeHttpHealthCheck("/quote/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -897,6 +933,7 @@ static partial class Program
             builder.AddProject<Projects.Maliev_Web_Bff>("WebBff")
                 .WithReference(authService)
                 .WithReference(iamService)
+                .WaitFor(iamService)
                 .WithReference(customerService)
                 .WithReference(countryService)
                 .WithReference(contactService)
@@ -909,7 +946,7 @@ static partial class Program
                 .WithReference(commerceService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Customer Web (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Customer Web (HTTPS)")
-                .WithHttpHealthCheck("/web/aspire-liveness"),
+                .WithTestingSafeHttpHealthCheck("/web/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -923,7 +960,9 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/inventory/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithReference(materialService)
+                .WithTestingSafeHttpHealthCheck("/inventory/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -937,12 +976,13 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
+                .WaitFor(iamService)
                 .WithReference(orderService)
                 .WithReference(facilityService)
                 .WithReference(materialService)
                 .WithReference(notificationService)
                 .WaitFor(notificationService)
-                .WithHttpHealthCheck("/job/aspire-liveness"),
+                .WithTestingSafeHttpHealthCheck("/job/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -965,7 +1005,8 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis, "Redis")
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/predictionservice/aspire-liveness"),
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/predictionservice/aspire-liveness"),
             config,
             grafana,
             otelCollector,
@@ -1011,7 +1052,7 @@ static partial class Program
             .WithExternalHttpEndpoints()
             .WithHttpEndpoint(port: 8081, targetPort: 8081, env: "PORT")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
-            .WithHttpHealthCheck("/geometry/aspire-liveness");
+            .WithTestingSafeHttpHealthCheck("/geometry/aspire-liveness");
 
         // Wire GeometryService into BFFs for service discovery.
         // GeometryService is a Docker container (not a .NET project), so its endpoint is injected
@@ -1033,6 +1074,7 @@ static partial class Program
     {
         return project
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", environmentName)
+            .WithEnvironment("DOTNET_ENVIRONMENT", environmentName)
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
             .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
             .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)

@@ -22,42 +22,21 @@ public class ComplianceServiceTests(AspireTestFixture fixture, ITestOutputHelper
     public async Task RecordWorkAuthorization_WithValidData_ReturnsCreated()
     {
         var complianceClient = _fixture.CreateAuthenticatedClient("ComplianceService");
-        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
-
-        var empResponse = await employeeClient.GetAsync("/employee/v1/employees?pageSize=1");
-        Assert.Equal(HttpStatusCode.OK, empResponse.StatusCode);
-        var empResult = await empResponse.Content.ReadFromJsonAsync<JsonElement>();
-
-        JsonElement firstEmployee;
-        if (empResult.ValueKind == JsonValueKind.Object && empResult.TryGetProperty("data", out var data))
-        {
-            if (data.GetArrayLength() == 0)
-            {
-                _output.WriteLine("No employees found — skipping test");
-                return;
-            }
-            firstEmployee = data[0];
-        }
-        else
-        {
-            _output.WriteLine("Unexpected employee response format — skipping test");
-            return;
-        }
-
+        var firstEmployee = await AspireTestData.CreateEmployeeAsync(_fixture, "COMP");
         var employeeId = firstEmployee.GetProperty("id").GetGuid();
         _output.WriteLine($"Using employee: {employeeId}");
 
         var recordRequest = new
         {
-            AuthorizationType = "WorkPermit",
+            AuthorizationType = 2, // WorkVisa
             DocumentNumber = $"WP-{Guid.NewGuid():N}"[..15],
-            IssuingCountry = "TH",
             IssueDate = DateTime.UtcNow.AddDays(-30),
             ExpirationDate = DateTime.UtcNow.AddYears(1),
-            Status = "Active"
+            IssuingAuthority = "MALIEV Integration Test",
+            SponsorshipStatus = 1 // Sponsored
         };
 
-        var response = await complianceClient.PostAsJsonAsync(
+        var response = await complianceClient.PostAsJsonSnakeCaseAsync(
             $"/compliance/v1/work-authorizations/employees/{employeeId}", recordRequest);
         var content = await response.Content.ReadAsStringAsync();
         _output.WriteLine($"Record auth response: {response.StatusCode} - {content}");

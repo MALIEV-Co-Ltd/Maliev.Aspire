@@ -21,39 +21,28 @@ public class QuotationToInvoiceWorkflowTests(AspireTestFixture fixture, ITestOut
     [Fact]
     public async Task FullCommercialWorkflow_QuotationToOrderToInvoice()
     {
-        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
         var materialClient = _fixture.CreateAuthenticatedClient("MaterialService");
         var quotationClient = _fixture.CreateAuthenticatedClient("QuotationService");
         var orderClient = _fixture.CreateAuthenticatedClient("OrderService");
         var invoiceClient = _fixture.CreateAuthenticatedClient("InvoiceService");
 
         // 1. Create Customer
-        var createCustomerRequest = new
-        {
-            FirstName = "Commercial",
-            LastName = "Test",
-            Email = $"comm.test.{Guid.NewGuid():N}@example.com",
-            Phone = "0812345678",
-            Type = "Corporate",
-            TaxId = "1234567890123"
-        };
-        var custResponse = await customerClient.PostAsJsonAsync("/customer/v1/customers", createCustomerRequest);
-        Assert.Equal(HttpStatusCode.Created, custResponse.StatusCode);
-        var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var customer = await AspireTestData.CreateCorporateCustomerAsync(_fixture, "commercial");
         var customerId = customer.GetProperty("id").GetGuid();
-        var customerName = customer.GetProperty("name").GetString();
+        var customerName = GetOptionalString(customer, "name") ?? "Commercial Test";
         _output.WriteLine($"Customer created: {customerName} ({customerId})");
 
         // 2. Get a Material
         var matResponse = await materialClient.GetAsync("/material/v1/materials?pageSize=1");
         var matResult = await matResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var materials = matResult.GetProperty("items");
+        var materials = GetPagedItems(matResult);
         Assert.True(materials.GetArrayLength() > 0,
             "No materials found in MaterialService catalog — ensure the database seeder has run before executing integration tests.");
         var material = materials[0];
         var materialId = material.GetProperty("id").GetGuid();
-        var materialPrice = material.GetProperty("unitPrice").GetDecimal();
-        _output.WriteLine($"Using material: {material.GetProperty("code").GetString()} @ {materialPrice}");
+        var materialPrice = GetRequiredDecimal(material, "pricePerUnit", "unitPrice");
+        var materialCode = GetOptionalString(material, "code") ?? GetOptionalString(material, "name") ?? materialId.ToString();
+        _output.WriteLine($"Using material: {materialCode} @ {materialPrice}");
 
         // 3. Create Quotation
         var createQuotationRequest = new
@@ -123,8 +112,12 @@ public class QuotationToInvoiceWorkflowTests(AspireTestFixture fixture, ITestOut
             }
         };
         var invResponse = await invoiceClient.PostAsJsonAsync("/invoice/v1/invoices", createInvoiceRequest);
-        Assert.Equal(HttpStatusCode.Created, invResponse.StatusCode);
-        var invoice = await invResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var invoiceContent = await invResponse.Content.ReadAsStringAsync();
+        Assert.True(
+            invResponse.StatusCode == HttpStatusCode.Created,
+            $"Expected Created but got {invResponse.StatusCode}: {invoiceContent}");
+        using var invoiceDocument = JsonDocument.Parse(invoiceContent);
+        var invoice = invoiceDocument.RootElement.Clone();
         var invoiceId = invoice.GetProperty("id").GetGuid();
         _output.WriteLine($"Invoice created: {invoiceId}");
 
@@ -132,5 +125,44 @@ public class QuotationToInvoiceWorkflowTests(AspireTestFixture fixture, ITestOut
         Assert.NotEqual(Guid.Empty, quotationId);
         Assert.False(string.IsNullOrEmpty(orderId));
         Assert.NotEqual(Guid.Empty, invoiceId);
+    }
+
+    private static JsonElement GetPagedItems(JsonElement result)
+    {
+        if (result.ValueKind == JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        if (result.TryGetProperty("items", out var items))
+        {
+            return items;
+        }
+
+        if (result.TryGetProperty("data", out var data))
+        {
+            return data;
+        }
+
+        throw new InvalidOperationException("MaterialService response did not contain an items or data collection.");
+    }
+
+    private static decimal GetRequiredDecimal(JsonElement element, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (element.TryGetProperty(propertyName, out var value))
+            {
+                return value.GetDecimal();
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"MaterialService response did not contain any of these decimal properties: {string.Join(", ", propertyNames)}.");
+    }
+
+    private static string? GetOptionalString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var value) ? value.GetString() : null;
     }
 }

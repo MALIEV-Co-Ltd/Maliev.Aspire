@@ -21,23 +21,12 @@ public class PaymentReceiptWorkflowTests(AspireTestFixture fixture, ITestOutputH
     [Fact]
     public async Task FullPaymentWorkflow_InvoiceToPaymentToReceipt()
     {
-        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
         var invoiceClient = _fixture.CreateAuthenticatedClient("InvoiceService");
         var paymentClient = _fixture.CreateAuthenticatedClient("PaymentService");
         var receiptClient = _fixture.CreateAuthenticatedClient("ReceiptService");
 
         // 1. Create Customer
-        var createCustomerRequest = new
-        {
-            FirstName = "Payment",
-            LastName = "Workflow",
-            Email = $"pay.test.{Guid.NewGuid():N}@example.com",
-            Type = "Corporate",
-            TaxId = "9999999999999"
-        };
-        var custResponse = await customerClient.PostAsJsonAsync("/customer/v1/customers", createCustomerRequest);
-        Assert.Equal(HttpStatusCode.Created, custResponse.StatusCode);
-        var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var customer = await AspireTestData.CreateCorporateCustomerAsync(_fixture, "payment");
         var customerId = customer.GetProperty("id").GetGuid();
         var customerName = customer.GetProperty("name").GetString();
 
@@ -66,10 +55,14 @@ public class PaymentReceiptWorkflowTests(AspireTestFixture fixture, ITestOutputH
             }
         };
         var invResponse = await invoiceClient.PostAsJsonAsync("/invoice/v1/invoices", createInvoiceRequest);
-        Assert.Equal(HttpStatusCode.Created, invResponse.StatusCode);
+        var invoiceContent = await invResponse.Content.ReadAsStringAsync();
+        Assert.True(
+            invResponse.StatusCode == HttpStatusCode.Created,
+            $"Invoice creation failed: {invResponse.StatusCode}: {invoiceContent}");
         var invoice = await invResponse.Content.ReadFromJsonAsync<JsonElement>();
         var invoiceId = invoice.GetProperty("id").GetGuid();
-        var totalAmount = invoice.GetProperty("totalAmount").GetDecimal();
+        invoice = await AspireTestData.FinalizeInvoiceAsync(_fixture, invoiceId);
+        var totalAmount = invoice.GetProperty("grandTotal").GetDecimal();
         _output.WriteLine($"Invoice created: {invoiceId} for {totalAmount} THB");
 
         // 3. Create Payment
@@ -80,7 +73,9 @@ public class PaymentReceiptWorkflowTests(AspireTestFixture fixture, ITestOutputH
             Currency = "THB",
             CustomerId = customerId.ToString(),
             OrderId = Guid.NewGuid().ToString(), // Dummy order link
-            Description = $"Payment for invoice {invoiceId}"
+            Description = $"Payment for invoice {invoiceId}",
+            ReturnUrl = "https://example.com/payment/success",
+            CancelUrl = "https://example.com/payment/cancel"
         };
 
         var payReqMsg = new HttpRequestMessage(HttpMethod.Post, "/payment/v1/payments")
@@ -99,11 +94,8 @@ public class PaymentReceiptWorkflowTests(AspireTestFixture fixture, ITestOutputH
         var createReceiptRequest = new
         {
             InvoiceId = invoiceId,
-            PaymentTransactionId = transactionId,
+            Amount = totalAmount,
             PaymentMethod = "BankTransfer",
-            AmountPaid = totalAmount,
-            Currency = "THB",
-            Notes = "Receipt from integration test"
         };
         var receiptResponse = await receiptClient.PostAsJsonAsync("/receipt/v1/receipts", createReceiptRequest);
         Assert.Equal(HttpStatusCode.Created, receiptResponse.StatusCode);

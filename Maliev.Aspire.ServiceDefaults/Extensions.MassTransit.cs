@@ -94,10 +94,11 @@ public static class MassTransitExtensions
             }
         });
 
-        // Configure MassTransit to wait until fully started before accepting requests
-        // This prevents race conditions in tests and ensures reliability in production
+        // Production waits for the bus before accepting requests. System tests start the
+        // whole platform in one AppHost, so blocking every service on its RabbitMQ bus can
+        // create a local socket storm before tests can even exercise HTTP boundaries.
         var skipBusWait = builder.Environment.IsEnvironment("Testing") &&
-            builder.Configuration["MassTransit:SkipBusWait"]?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+            builder.Configuration["MassTransit:SkipBusWait"]?.Equals("false", StringComparison.OrdinalIgnoreCase) != true;
 
         builder.Services.Configure<MassTransitHostOptions>(options =>
         {

@@ -28,13 +28,28 @@ public class ProcurementWorkflowTests(AspireTestFixture fixture, ITestOutputHelp
         var paymentClient = _fixture.CreateAuthenticatedClient("PaymentService");
 
         var testId = Guid.NewGuid().ToString("N")[..8];
+        var customer = await AspireTestData.CreateCorporateCustomerAsync(_fixture, "procurement");
+        var customerId = customer.GetProperty("id").GetGuid();
+        var order = await AspireTestData.CreateOrderAsync(_fixture, customerId, $"Procurement workflow test {testId}");
+        var orderId = order.GetProperty("orderId").GetString()
+            ?? throw new InvalidOperationException("OrderService did not return orderId.");
 
         var supplierResponse = await supplierClient.PostAsJsonAsync("/supplier/v1/suppliers", new
         {
-            Name = $"SteelCo {testId}",
-            Email = $"sales.{testId}@steelco.com",
+            CompanyName = $"SteelCo {testId}",
+            TaxId = $"CN-{testId}",
+            Address = "88 Supply Road",
+            City = "Shanghai",
             Country = "China",
-            Status = "Active"
+            PostalCode = "200000",
+            Capabilities = new[] { "Filament supply" },
+            PrimaryContact = new
+            {
+                Name = "Procurement Contact",
+                Email = $"sales.{testId}@steelco.com",
+                Role = "Sales",
+                Phone = "+862112345678"
+            }
         });
         Assert.Equal(HttpStatusCode.Created, supplierResponse.StatusCode);
         var supplier = await supplierResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -44,27 +59,42 @@ public class ProcurementWorkflowTests(AspireTestFixture fixture, ITestOutputHelp
         var materialResponse = await materialClient.PostAsJsonAsync("/material/v1/materials", new
         {
             Name = $"PLA Filament {testId}",
-            Sku = $"SKU-{testId}",
-            Category = "Raw Materials",
-            UnitPrice = 750.00m,
-            Unit = "kg"
+            Code = $"PLA-{testId}",
+            PricePerUnit = 750.00m,
+            StockLevel = 50
         });
         Assert.Equal(HttpStatusCode.Created, materialResponse.StatusCode);
         var material = await materialResponse.Content.ReadFromJsonAsync<JsonElement>();
         var materialId = material.GetProperty("id").GetGuid();
         _output.WriteLine($"[2] Material created: {materialId}");
 
-        var poResponse = await poClient.PostAsJsonAsync("/purchase-order/v1/orders", new
+        var poResponse = await poClient.PostAsJsonAsync("/purchase-order/v1/purchase-orders", new
         {
-            SupplierId = supplierId,
-            Date = DateTime.UtcNow,
+            OrderType = 0,
+            SupplierID = 1,
+            SupplierServiceId = supplierId,
+            OrderID = 1,
+            SourceOrderId = orderId,
+            CurrencyID = 1,
+            CurrencyCode = "THB",
+            WHTRate = 0m,
+            ExpectedDeliveryDate = DateTime.UtcNow.AddDays(14),
+            ShippingAddress = new
+            {
+                AddressType = 0,
+                CompanyName = "MALIEV",
+                ContactName = "Procurement",
+                AddressLine1 = "123 Integration Test Road",
+                City = "Bangkok",
+                PostalCode = "10110",
+                Country = "Thailand"
+            },
             Items = new[]
             {
                 new
                 {
-                    MaterialId = materialId,
-                    Quantity = 50,
-                    UnitPrice = 750.00m
+                    SourceOrderItemId = "primary",
+                    Quantity = 1m
                 }
             }
         });
@@ -72,35 +102,39 @@ public class ProcurementWorkflowTests(AspireTestFixture fixture, ITestOutputHelp
         _output.WriteLine($"[3] PO response: {poResponse.StatusCode} - {poContent}");
         Assert.Equal(HttpStatusCode.Created, poResponse.StatusCode);
         var po = await poResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var poOrderNumber = po.GetProperty("orderNumber").GetString()
+            ?? throw new InvalidOperationException("PurchaseOrderService did not return orderNumber.");
         _output.WriteLine($"[3] Purchase Order created");
 
         var invResponse = await invoiceClient.PostAsJsonAsync("/invoice/v1/invoices", new
         {
-            CustomerId = Guid.NewGuid(),
-            BillingIdentityType = 2,
-            CustomerName = $"SteelCo {testId}",
-            CustomerTaxId = "CN-9999",
-            BillingAddress = "Shanghai, China",
-            Currency = "THB",
-            IssueDate = DateTime.UtcNow,
-            DueDate = DateTime.UtcNow.AddDays(30),
-            Lines = new[]
+            customerId,
+            billingIdentityType = 1,
+            customerName = $"Procurement customer {testId}",
+            customerTaxId = "0999999999999",
+            billingAddress = "123 Integration Test Road, Bangkok",
+            currency = "THB",
+            issueDate = DateTime.UtcNow,
+            dueDate = DateTime.UtcNow.AddDays(30),
+            lines = new[]
             {
                 new
                 {
-                    LineNumber = 1,
-                    Description = "PLA Filament x50 kg",
-                    Quantity = 50,
-                    UnitPrice = 750.00m,
-                    TaxCategory = "VAT",
-                    TaxRate = 7.00m
+                    lineNumber = 1,
+                    description = "PLA Filament x50 kg",
+                    quantity = 50m,
+                    unitPrice = 750.00m,
+                    taxCategory = "VAT",
+                    taxRate = 7.00m
                 }
             }
         });
-        Assert.Equal(HttpStatusCode.Created, invResponse.StatusCode);
+        var invContent = await invResponse.Content.ReadAsStringAsync();
+        _output.WriteLine($"[4] Invoice response: {invResponse.StatusCode} - {invContent}");
+        Assert.True(invResponse.StatusCode == HttpStatusCode.Created, $"Expected Created but got {invResponse.StatusCode}: {invContent}");
         var invoice = await invResponse.Content.ReadFromJsonAsync<JsonElement>();
         var invoiceId = invoice.GetProperty("id").GetGuid();
-        var totalAmount = invoice.GetProperty("totalAmount").GetDecimal();
+        var totalAmount = invoice.GetProperty("grandTotal").GetDecimal();
         _output.WriteLine($"[4] Invoice created: {invoiceId} for {totalAmount} THB");
 
         var paymentIdempotencyKey = Guid.NewGuid().ToString();
@@ -111,7 +145,10 @@ public class ProcurementWorkflowTests(AspireTestFixture fixture, ITestOutputHelp
                 Amount = totalAmount,
                 Currency = "THB",
                 CustomerId = supplierId.ToString(),
-                Description = $"Payment for PO to supplier SteelCo"
+                OrderId = poOrderNumber,
+                Description = $"Payment for PO to supplier SteelCo",
+                ReturnUrl = "https://example.com/payment/success",
+                CancelUrl = "https://example.com/payment/cancel"
             })
         };
         payRequest.Headers.Add("Idempotency-Key", paymentIdempotencyKey);

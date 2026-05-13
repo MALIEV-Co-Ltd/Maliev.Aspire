@@ -13,6 +13,8 @@ namespace Microsoft.Extensions.Hosting;
 /// </summary>
 public static class AuthenticationExtensions
 {
+    private const string TestSymmetricSecurityKey = "test-key-at-least-32-characters-long-for-integration-tests";
+
     /// <summary>
     /// Adds JWT Bearer authentication with RSA public key validation.
     /// Reads configuration from:
@@ -34,10 +36,16 @@ public static class AuthenticationExtensions
 
         if (builder.Environment.IsEnvironment("Testing"))
         {
+            var testingSigningKeys = CreateTestingSigningKeys(publicKeyBase64, securityKey);
+
             builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 .AddJwtBearer(options =>
                 {
                     options.MapInboundClaims = false;
+                    // Testing uses JwtSecurityTokenHandler's SignatureValidator hook for local tokens.
+#pragma warning disable CS0618
+                    options.UseSecurityTokenValidators = true;
+#pragma warning restore CS0618
 
                     options.TokenValidationParameters = new TokenValidationParameters
                     {
@@ -45,6 +53,9 @@ public static class AuthenticationExtensions
                         ValidateAudience = false,
                         ValidateLifetime = false,
                         ValidateIssuerSigningKey = false,
+                        IssuerSigningKeys = testingSigningKeys,
+                        NameClaimType = System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub,
+                        RoleClaimType = "role",
                         SignatureValidator = delegate (string token, TokenValidationParameters parameters)
                         {
                             var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
@@ -200,5 +211,33 @@ public static class AuthenticationExtensions
         }
 
         return builder.Configuration.GetValue("Jwt:AllowSymmetricValidation", true);
+    }
+
+    private static IReadOnlyCollection<SecurityKey> CreateTestingSigningKeys(
+        string? publicKeyBase64,
+        string? securityKey)
+    {
+        var keys = new List<SecurityKey>
+        {
+            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestSymmetricSecurityKey))
+            {
+                KeyId = "test-symmetric-key"
+            }
+        };
+
+        if (!string.IsNullOrWhiteSpace(securityKey))
+        {
+            keys.Add(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(publicKeyBase64))
+        {
+            var publicKeyPem = Encoding.UTF8.GetString(Convert.FromBase64String(publicKeyBase64));
+            var rsa = RSA.Create();
+            rsa.ImportFromPem(publicKeyPem);
+            keys.Add(new RsaSecurityKey(rsa));
+        }
+
+        return keys;
     }
 }

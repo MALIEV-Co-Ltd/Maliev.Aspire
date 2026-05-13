@@ -22,25 +22,17 @@ public class ProjectServiceTests(AspireTestFixture fixture, ITestOutputHelper ou
     public async Task CreateProject_WithValidData_ReturnsCreated()
     {
         var projectClient = _fixture.CreateAuthenticatedClient("ProjectService");
-        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
-
-        var custResponse = await customerClient.PostAsJsonAsync("/customer/v1/customers", new
-        {
-            FirstName = "Project",
-            LastName = "Test",
-            Email = $"project.test.{Guid.NewGuid():N}@example.com",
-            Type = "Corporate",
-            TaxId = "7777777777777"
-        });
-        Assert.Equal(HttpStatusCode.Created, custResponse.StatusCode);
-        var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var customer = await AspireTestData.CreateCustomerAsync(_fixture, "project");
         var customerId = customer.GetProperty("id").GetGuid();
+        var customerName = customer.GetProperty("name").GetString() ?? "Project Test";
 
         var createProjectRequest = new
         {
-            Name = $"Test Project {Guid.NewGuid():N}"[..30],
+            Title = $"Test Project {Guid.NewGuid():N}"[..30],
             CustomerId = customerId,
-            Description = "Integration test project"
+            CustomerName = customerName,
+            Description = "Integration test project",
+            Currency = "THB"
         };
 
         var response = await projectClient.PostAsJsonAsync("/project/v1/projects", createProjectRequest);
@@ -99,23 +91,17 @@ public class ProjectServiceTests(AspireTestFixture fixture, ITestOutputHelper ou
     public async Task CreateProject_AddPart_ReturnsOk()
     {
         var projectClient = _fixture.CreateAuthenticatedClient("ProjectService");
-        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
-
-        var custResponse = await customerClient.PostAsJsonAsync("/customer/v1/customers", new
-        {
-            FirstName = "Part",
-            LastName = "Test",
-            Email = $"part.test.{Guid.NewGuid():N}@example.com",
-            Type = "Retail"
-        });
-        var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var customer = await AspireTestData.CreateCustomerAsync(_fixture, "part");
         var customerId = customer.GetProperty("id").GetGuid();
+        var customerName = customer.GetProperty("name").GetString() ?? "Part Test";
 
         var createProjectResponse = await projectClient.PostAsJsonAsync("/project/v1/projects", new
         {
-            Name = $"Part Test {Guid.NewGuid():N}"[..25],
+            Title = $"Part Test {Guid.NewGuid():N}"[..25],
             CustomerId = customerId,
-            Description = "Part test project"
+            CustomerName = customerName,
+            Description = "Part test project",
+            Currency = "THB"
         });
         Assert.Equal(HttpStatusCode.Created, createProjectResponse.StatusCode);
         var project = await createProjectResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -123,7 +109,7 @@ public class ProjectServiceTests(AspireTestFixture fixture, ITestOutputHelper ou
 
         var addPartResponse = await projectClient.PostAsJsonAsync($"/project/v1/projects/{projectId}/parts", new
         {
-            Name = "Test Part",
+            FileName = "test-part.step",
             Description = "A test part"
         });
 

@@ -22,7 +22,7 @@ public class CurrencyServiceTests(AspireTestFixture fixture, ITestOutputHelper o
     {
         var client = _fixture.CreateAuthenticatedClient("CurrencyService");
 
-        var response = await client.GetAsync("/currency/v1/currencies");
+        var response = await client.GetAsync("/currency/v1/currencies?pageSize=200");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();

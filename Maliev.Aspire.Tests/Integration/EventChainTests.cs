@@ -21,23 +21,13 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
     [Fact]
     public async Task OrderPaymentWorkflow_NotificationDelivered()
     {
-        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
         var orderClient = _fixture.CreateAuthenticatedClient("OrderService");
         var paymentClient = _fixture.CreateAuthenticatedClient("PaymentService");
         var notificationClient = _fixture.CreateAuthenticatedClient("NotificationService");
 
         var testId = Guid.NewGuid().ToString("N")[..8];
 
-        var custResponse = await customerClient.PostAsJsonAsync("/customer/v1/customers", new
-        {
-            FirstName = "Event",
-            LastName = $"Chain {testId}",
-            Email = $"eventchain.{testId}@example.com",
-            Type = "Corporate",
-            TaxId = "5555555555555"
-        });
-        Assert.Equal(HttpStatusCode.Created, custResponse.StatusCode);
-        var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var customer = await AspireTestData.CreateCustomerAsync(_fixture, "eventchain");
         var customerId = customer.GetProperty("id").GetGuid();
         _output.WriteLine($"[1] Customer: {customerId}");
 
@@ -64,7 +54,9 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
                 Currency = "THB",
                 CustomerId = customerId.ToString(),
                 OrderId = orderId,
-                Description = $"Event chain payment {testId}"
+                Description = $"Event chain payment {testId}",
+                ReturnUrl = "https://example.com/payment/success",
+                CancelUrl = "https://example.com/payment/cancel"
             })
         };
         paymentRequest.Headers.Add("Idempotency-Key", paymentIdempotencyKey);
@@ -75,22 +67,27 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
         var transactionId = payment.GetProperty("transactionId").GetGuid();
         _output.WriteLine($"[3] Payment: {transactionId}");
 
+        var eventOrderId = Guid.NewGuid();
         var paymentTestResponse = await paymentClient.PostAsJsonAsync(
             "/payment/v1/test/publish-payment-completed", new
             {
-                OrderId = Guid.Parse(orderId!),
+                OrderId = eventOrderId,
                 PaymentId = transactionId,
                 Amount = 1500.00,
                 Currency = "THB"
             });
-        paymentTestResponse.EnsureSuccessStatusCode();
+        var publishContent = await paymentTestResponse.Content.ReadAsStringAsync();
+        Assert.True(paymentTestResponse.IsSuccessStatusCode,
+            $"Publish payment completed failed: {paymentTestResponse.StatusCode}: {publishContent}");
+        using var publishDoc = JsonDocument.Parse(publishContent);
+        var eventId = publishDoc.RootElement.GetProperty("eventId").GetGuid();
         _output.WriteLine("[4] PaymentCompletedEvent published");
 
-        var deliveryLogResponse = await TestHelpers.WaitForAsync(
+        _ = await TestHelpers.WaitForAsync(
             async () =>
             {
                 var r = await notificationClient.GetAsync(
-                    $"/notification/v1/delivery-logs?userId={orderId}&channelType=rabbitmq-event");
+                    $"/notification/v1/delivery-logs?eventId={eventId}&channelType=rabbitmq-event");
                 return (Response: r, Content: await r.Content.ReadAsStringAsync());
             },
             until: result =>
@@ -116,20 +113,11 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
     [Fact]
     public async Task CustomerCreated_CustomerResolvableInOrderService()
     {
-        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
         var orderClient = _fixture.CreateAuthenticatedClient("OrderService");
 
         var testId = Guid.NewGuid().ToString("N")[..8];
 
-        var custResponse = await customerClient.PostAsJsonAsync("/customer/v1/customers", new
-        {
-            FirstName = "Propagation",
-            LastName = $"Test {testId}",
-            Email = $"propagation.{testId}@example.com",
-            Type = "Retail"
-        });
-        Assert.Equal(HttpStatusCode.Created, custResponse.StatusCode);
-        var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var customer = await AspireTestData.CreateCustomerAsync(_fixture, "propagation");
         var customerId = customer.GetProperty("id").GetGuid();
         _output.WriteLine($"[1] Customer created: {customerId}");
 
@@ -152,30 +140,19 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
     [Fact]
     public async Task EmployeeCreated_IamPrincipalProvisioned()
     {
-        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
         var iamClient = _fixture.CreateAuthenticatedClient("IAMService");
 
         var testId = Guid.NewGuid().ToString("N")[..8];
         var testEmail = $"iamchain.{testId}@maliev.com";
 
-        var hireResponse = await employeeClient.PostAsJsonAsync("/employee/v1/employees", new
-        {
-            FirstName = "IAM Chain",
-            LastName = $"Test {testId}",
-            Email = testEmail,
-            Department = "Operations",
-            Title = "Machine Operator",
-            StartDate = DateTime.UtcNow
-        });
-        Assert.Equal(HttpStatusCode.Created, hireResponse.StatusCode);
-        var employee = await hireResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var employee = await AspireTestData.CreateEmployeeAsync(_fixture, "IAM", testEmail);
         var employeeId = employee.GetProperty("id").GetGuid();
         _output.WriteLine($"[1] Employee created: {employeeId}");
 
-        var principalsResponse = await TestHelpers.WaitForAsync(
+        _ = await TestHelpers.WaitForAsync(
             async () =>
             {
-                var r = await iamClient.GetAsync($"/iam/v1/principals?search={testEmail}");
+                var r = await iamClient.GetAsync($"/iam/v1/principals/by-email/{Uri.EscapeDataString(testEmail)}");
                 return (Response: r, Content: await r.Content.ReadAsStringAsync());
             },
             until: result =>
@@ -183,10 +160,7 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
                 if (!result.Response.IsSuccessStatusCode) return false;
                 using var doc = JsonDocument.Parse(result.Content);
                 var root = doc.RootElement;
-                if (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 0) return true;
-                if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data))
-                    return data.GetArrayLength() > 0;
-                return false;
+                return root.ValueKind == JsonValueKind.Object && root.TryGetProperty("principalId", out _);
             },
             timeout: TimeSpan.FromSeconds(20),
             interval: TimeSpan.FromSeconds(2),
@@ -200,22 +174,10 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
     [Fact]
     public async Task InvoiceFinalized_PdfGenerationTriggered()
     {
-        var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
         var invoiceClient = _fixture.CreateAuthenticatedClient("InvoiceService");
         var pdfClient = _fixture.CreateAuthenticatedClient("PdfService");
 
-        var testId = Guid.NewGuid().ToString("N")[..8];
-
-        var custResponse = await customerClient.PostAsJsonAsync("/customer/v1/customers", new
-        {
-            FirstName = "PDF",
-            LastName = $"Chain {testId}",
-            Email = $"pdfchain.{testId}@example.com",
-            Type = "Corporate",
-            TaxId = "3333333333333"
-        });
-        Assert.Equal(HttpStatusCode.Created, custResponse.StatusCode);
-        var customer = await custResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var customer = await AspireTestData.CreateCorporateCustomerAsync(_fixture, "pdfchain");
         var customerId = customer.GetProperty("id").GetGuid();
         var customerName = customer.GetProperty("name").GetString();
 
@@ -251,7 +213,7 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
         var finalizeRequest = new HttpRequestMessage(HttpMethod.Post,
             $"/invoice/v1/invoices/{invoiceId}/finalize")
         {
-            Content = JsonContent.Create(new { })
+            Content = JsonContent.Create(new { FinalizedBy = "aspire-system-test" })
         };
         finalizeRequest.Headers.Add("Idempotency-Key", finalizeIdempotencyKey);
 
@@ -261,10 +223,10 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
         Assert.True(finalizeResponse.IsSuccessStatusCode,
             $"Finalize failed: {finalizeResponse.StatusCode}: {finalizeContent}");
 
-        var pdfResponse = await TestHelpers.WaitForAsync(
+        _ = await TestHelpers.WaitForAsync(
             async () =>
             {
-                var r = await pdfClient.GetAsync($"/pdf/v1/documents?referenceId={invoiceId}&documentType=Invoice");
+                var r = await pdfClient.GetAsync($"/pdf/v1/generations/latest?documentType=Invoice&referenceId={invoiceId}");
                 return (Response: r, Content: await r.Content.ReadAsStringAsync());
             },
             until: result =>
@@ -272,15 +234,12 @@ public class EventChainTests(AspireTestFixture fixture, ITestOutputHelper output
                 if (!result.Response.IsSuccessStatusCode) return false;
                 using var doc = JsonDocument.Parse(result.Content);
                 var root = doc.RootElement;
-                if (root.TryGetProperty("items", out var items))
-                    return items.GetArrayLength() > 0;
-                if (root.ValueKind == JsonValueKind.Array)
-                    return root.GetArrayLength() > 0;
-                return false;
+                return root.TryGetProperty("storageUrl", out var storageUrl)
+                    && !string.IsNullOrWhiteSpace(storageUrl.GetString());
             },
             timeout: TimeSpan.FromSeconds(30),
             interval: TimeSpan.FromSeconds(3),
-            message: $"PDF for invoice {invoiceId} not found within timeout — InvoiceGeneratedEvent consumer may not be wired");
+            message: $"PDF generation for invoice {invoiceId} not found within timeout");
         _output.WriteLine($"[3] PDF generated for invoice");
     }
 }

@@ -130,9 +130,9 @@ public static class HttpClientExtensions
             }
             else
             {
-                // Use service name for Aspire service discovery
-                // Service discovery will resolve "http://{serviceName}" to actual endpoint
-                client.BaseAddress = new Uri($"http://{serviceName}");
+                // Prefer HTTPS service-discovery endpoints so authenticated requests do not
+                // lose Authorization headers on an HTTP -> HTTPS redirect.
+                client.BaseAddress = new Uri($"https+http://{serviceName}");
             }
 
             client.Timeout = TimeSpan.FromSeconds(90);
@@ -187,9 +187,9 @@ public static class HttpClientExtensions
             }
             else
             {
-                // Use service name for Aspire service discovery
-                // Service discovery will resolve "http://{serviceName}" to actual endpoint
-                client.BaseAddress = new Uri($"http://{serviceName}");
+                // Prefer HTTPS service-discovery endpoints so clients do not
+                // lose Authorization headers on an HTTP -> HTTPS redirect.
+                client.BaseAddress = new Uri($"https+http://{serviceName}");
             }
 
             client.Timeout = TimeSpan.FromSeconds(90);
@@ -245,9 +245,9 @@ public static class HttpClientExtensions
             }
             else
             {
-                // Use service name for Aspire service discovery
-                // Service discovery will resolve "http://{serviceName}" to actual endpoint
-                client.BaseAddress = new Uri($"http://{serviceName}");
+                // Prefer HTTPS service-discovery endpoints so clients do not
+                // lose Authorization headers on an HTTP -> HTTPS redirect.
+                client.BaseAddress = new Uri($"https+http://{serviceName}");
             }
 
             client.Timeout = TimeSpan.FromSeconds(90);

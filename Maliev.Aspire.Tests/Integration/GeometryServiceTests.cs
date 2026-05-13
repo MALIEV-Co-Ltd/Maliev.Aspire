@@ -57,11 +57,10 @@ public class GeometryServiceTests(AspireTestFixture fixture, ITestOutputHelper o
     }
 
     /// <summary>
-    /// Verifies that GeometryService returns 404 for non-existent endpoints.
-    /// This validates that the FastAPI routing is configured correctly.
+    /// Verifies that GeometryService protects non-public endpoints before routing.
     /// </summary>
     [Fact]
-    public async Task GeometryService_NonExistentEndpoint_ReturnsNotFound()
+    public async Task GeometryService_NonExistentEndpoint_ReturnsUnauthorized()
     {
         // Arrange
         var client = _fixture.CreateAuthenticatedClient("GeometryService");
@@ -71,7 +70,7 @@ public class GeometryServiceTests(AspireTestFixture fixture, ITestOutputHelper o
         var response = await client.GetAsync("/geometry/non-existent");
 
         // Assert
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        _output.WriteLine($"[GeometryServiceTests] 404 check passed: {response.StatusCode}");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        _output.WriteLine($"[GeometryServiceTests] authorization check passed: {response.StatusCode}");
     }
 }

@@ -21,13 +21,10 @@ public class CompensationServiceTests(AspireTestFixture fixture, ITestOutputHelp
     [Fact]
     public async Task GetCompensationData_AsAdmin_ReturnsOk()
     {
-        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
         var compClient = _fixture.CreateAuthenticatedClient("CompensationService");
 
-        // 1. Get an employee
-        var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
-        var empResult = await empResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var employee = empResult.GetProperty("data")[0];
+        // 1. Create an employee
+        var employee = await AspireTestData.CreateEmployeeAsync(_fixture, "COMP");
         var employeeId = employee.GetProperty("id").GetGuid();
 
         // 2. Get compensation data

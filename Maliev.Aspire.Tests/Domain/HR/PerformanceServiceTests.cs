@@ -21,13 +21,10 @@ public class PerformanceServiceTests(AspireTestFixture fixture, ITestOutputHelpe
     [Fact]
     public async Task CreateReview_AsAdmin_Succeeds()
     {
-        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
         var perfClient = _fixture.CreateAuthenticatedClient("PerformanceService");
 
-        // 1. Get an employee
-        var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
-        var empResult = await empResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var employee = empResult.GetProperty("data")[0];
+        // 1. Create an employee
+        var employee = await AspireTestData.CreateEmployeeAsync(_fixture, "PERF");
         var employeeId = employee.GetProperty("id").GetGuid();
 
         // 2. Create review
@@ -39,11 +36,13 @@ public class PerformanceServiceTests(AspireTestFixture fixture, ITestOutputHelpe
             SelfAssessment = "Initial self-assessment from integration test."
         };
 
-        var response = await perfClient.PostAsJsonAsync($"/performance/v1/employees/{employeeId}/reviews", request);
+        var response = await perfClient.PostAsJsonSnakeCaseAsync($"/performance/v1/employees/{employeeId}/reviews", request);
 
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var content = await response.Content.ReadAsStringAsync();
+        _output.WriteLine($"Create review response: {response.StatusCode} - {content}");
+        Assert.True(response.StatusCode == HttpStatusCode.Created, $"Expected Created but got {response.StatusCode}: {content}");
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(employeeId, result.GetProperty("employeeId").GetGuid());
+        Assert.Equal(employeeId, result.GetProperty("employee_id").GetGuid());
     }
 
     /// <summary>
@@ -52,13 +51,10 @@ public class PerformanceServiceTests(AspireTestFixture fixture, ITestOutputHelpe
     [Fact]
     public async Task GetReviews_ReturnsData()
     {
-        var employeeClient = _fixture.CreateAuthenticatedClient("EmployeeService");
         var perfClient = _fixture.CreateAuthenticatedClient("PerformanceService");
 
-        // 1. Get an employee
-        var empResponse = await employeeClient.GetAsync("/employee/v1/employees");
-        var empResult = await empResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var employee = empResult.GetProperty("data")[0];
+        // 1. Create an employee
+        var employee = await AspireTestData.CreateEmployeeAsync(_fixture, "PERF");
         var employeeId = employee.GetProperty("id").GetGuid();
 
         // 2. Get reviews

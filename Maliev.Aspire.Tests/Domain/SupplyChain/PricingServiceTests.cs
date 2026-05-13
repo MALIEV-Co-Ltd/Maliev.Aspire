@@ -38,9 +38,9 @@ public class PricingServiceTests : IClassFixture<AspireTestFixture>
         {
             FileId = Guid.NewGuid(),
             CustomerId = Guid.NewGuid(),
-            MaterialId = Guid.NewGuid(),
+            MaterialId = Guid.Parse("8068f25e-0b7b-8a55-9b6c-1345e58ed9b4"),
             MaterialCode = "M-PLA-001",
-            ManufacturingProcessId = Guid.NewGuid(),
+            ManufacturingProcessId = Guid.Parse("5ef73574-8f61-5d53-8073-5c344bfd22ca"),
             ManufacturingProcessName = "FDM",
             Quantity = 10,
             Geometry = new
@@ -56,12 +56,12 @@ public class PricingServiceTests : IClassFixture<AspireTestFixture>
             }
         };
 
-        var response = await client.PostAsJsonAsync("/v1/pricing/calculate", request);
+        var response = await client.PostAsJsonAsync("/pricing/v1/calculate", request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
 
-        var totalPrice = result.GetProperty("totalPrice").GetDecimal();
+        var totalPrice = result.GetProperty("totalAmount").GetDecimal();
         _output.WriteLine($"Calculated Price: {totalPrice}");
         Assert.True(totalPrice > 0, "Calculated price should be positive.");
     }
