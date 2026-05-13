@@ -177,6 +177,17 @@ Maliev.Aspire.Tests/
 - Single-service business logic (covered by per-service unit tests)
 - Permission enforcement per endpoint (covered by per-service contract tests)
 
+#### Production-Gate E2E User Stories
+
+`Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_STORIES.md` is the source of truth for browser-level production gate coverage. Future agents must update it when user-facing customer or employee journeys change.
+
+Use these rules for the E2E story catalog:
+- Cover complete journeys through `Maliev.Web`, `Maliev.QuoteEngine`, `Maliev.Intranet`, their BFFs, and downstream services.
+- Document persona, entry point, business value, prerequisites, user path, services involved, data created or mutated, verification checklist, observability checks, current implementation status, and known product gaps.
+- Keep E2E stories above unit/integration scope. Do not restate endpoint CRUD or single-service behavior unless it proves the user-visible journey.
+- Mark missing or prototype-backed behavior explicitly as a product gap. Do not hide it by testing only direct APIs.
+- `Maliev.QuoteEngine` is part of the Aspire integrated environment and must remain wired into AppHost for dedicated quoting journeys.
+
 #### Assertions & Logging
 - **Assertions**: Use strict xUnit `Assert` (e.g., `Assert.NotNull`, `Assert.Equal`). FluentAssertions is banned.
 - **Logging**: Use `_output.WriteLine` for test diagnostics (injected via `ITestOutputHelper`).

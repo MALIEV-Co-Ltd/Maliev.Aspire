@@ -7,6 +7,10 @@ This directory contains the high-level system test specifications for the Maliev
 ## Structure
 The specifications are grouped by functional domain:
 
+### Production-Gate E2E Stories
+*   **[E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md)**
+    *   Browser-level customer and employee journeys for the Aspire integrated environment. Covers `Maliev.Web`, `Maliev.QuoteEngine`, `Maliev.Intranet`, and the downstream services that must be proven before production deployment.
+
 ### Domain Test Specs
 *   **[FOUNDATION_TESTS.md](./FOUNDATION_TESTS.md)**
     *   Identity (IAM), Authentication (Auth), Registry (Country/Currency), Notifications.
@@ -25,3 +29,5 @@ The specifications are grouped by functional domain:
 
 ## Usage
 These documents serve as the blueprint for implementing Integration Tests in the `Maliev.Aspire.Tests` project using `xUnit` and `Aspire.Hosting.Testing`.
+
+Use `E2E_USER_JOURNEY_STORIES.md` differently from the API/system specs: it is the production-gate catalog for future Playwright browser tests and should stay focused on complete user journeys rather than lower-level endpoint coverage.

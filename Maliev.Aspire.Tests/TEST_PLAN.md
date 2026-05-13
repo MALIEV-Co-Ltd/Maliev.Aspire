@@ -2,7 +2,7 @@
 
 > Living document defining the test strategy, coverage matrix, and governance for the Maliev microservices ecosystem.
 >
-> **Last updated**: 2026-04-16
+> **Last updated**: 2026-05-13
 
 ---
 
@@ -13,7 +13,7 @@
 ```
                     ┌─────────────┐
                     │     E2E     │  Playwright (Aspire AppHost + Browser)
-                    │    Tests    │  ~5 critical user journeys
+                    │    Tests    │  Production-gate user journey catalog
                     ├─────────────┤
                     │   System    │  Aspire AppHost (all 34 services)
                     │ Integration │  Cross-service workflows, event chains
@@ -33,7 +33,7 @@
 | **Unit** | `[Trait("Tier", "Unit")]` | None (mocks only) | Single class/method | <1s per test | `Maliev.*.Tests/` (per-service repos) |
 | **Service Integration** | `[Trait("Tier", "ServiceIntegration")]` | Testcontainers (Postgres + Redis + RabbitMQ) | Single service via `WebApplicationFactory` | <30s per test | `Maliev.*.Tests/` (per-service repos) |
 | **System Integration** | `[Trait("Tier", "SystemIntegration")]` | Full Aspire AppHost (all services) | Cross-service workflows, event chains | <2min per test | `Maliev.Aspire.Tests/` |
-| **E2E** | `[Trait("Tier", "E2E")]` | Aspire AppHost + Playwright browser | Full user journey through UI | <5min per test | `Maliev.Intranet.E2E/` (future) |
+| **E2E** | `[Trait("Tier", "E2E")]` | Aspire AppHost + Playwright browser | Full user journey through Web, QuoteEngine, Intranet, BFFs, and services | <5min per test | Story catalog: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_STORIES.md`; future Playwright suites |
 
 ### 1.3 What to Test at Each Tier
 
@@ -63,10 +63,13 @@
 - Single-service business logic validation
 - Permission enforcement per endpoint (covered by per-service contract tests)
 
-**E2E Tests** — future `Maliev.Intranet.E2E/`
-- Critical user journeys through the Blazor UI
-- Login/authentication flow
-- Core business workflows visible to end users
+**E2E Tests** — production-gate browser journeys
+- Critical customer journeys through `Maliev.Web`
+- Dedicated quote journeys through `Maliev.QuoteEngine`
+- Employee ERP/CRM journeys through `Maliev.Intranet`
+- Login/authentication/account recovery flows visible to end users
+- Quote-to-order, quote-to-payment, commerce publish-to-storefront, and operations workflows
+- Source of truth: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_STORIES.md`
 
 ### 1.4 Infrastructure Patterns
 
@@ -200,7 +203,8 @@ Maliev.Aspire.Tests/
 │   ├── COMMERCIAL_DOMAIN_TESTS.md
 │   ├── SUPPLY_CHAIN_TESTS.md
 │   ├── MESSAGING_TESTS.md   # Event chain specs (NEW)
-│   └── WORKFLOW_TESTS.md    # Cross-service workflow specs (NEW)
+│   ├── WORKFLOW_TESTS.md    # Cross-service workflow specs (NEW)
+│   └── E2E_USER_JOURNEY_STORIES.md # Production-gate browser journey catalog
 └── TEST_PLAN.md             # This document
 ```
 
@@ -322,7 +326,9 @@ dotnet test Maliev.OrderService.Tests/ -v n
 
 | Gap | Impact | Action |
 |-----|--------|--------|
-| No E2E browser tests | UI flows unverified | Create `Maliev.Intranet.E2E/` with Playwright |
+| No E2E browser automation | UI flows unverified | Use `specs/E2E_USER_JOURNEY_STORIES.md` as the required catalog, then create Playwright suites for Web, QuoteEngine, and Intranet |
+| QuoteEngine production integration | Dedicated customer quoting remains partial | QuoteEngine is wired into Aspire; replace prototype-backed BFF flows with real Upload/Geometry/Pricing/Project/Quotation/PDF/Order/Payment/Delivery journeys |
+| Customer email verification | Self-service account trust cannot be proven | Implement token issuance, email delivery, link redirect, token validation, and verified account status |
 | No load/performance tests | Performance regressions undetected | Consider k6 or NBomber |
 | GeometryService (Python) infrastructure | Python Docker build exceeds test timeout | Use pre-built images or optimize build; tests written at `GeometryServiceTests.cs` |
 | PricingService has low per-service coverage | Pricing logic gaps | Expand per-service tests |
@@ -337,6 +343,8 @@ dotnet test Maliev.OrderService.Tests/ -v n
 - **New MassTransit consumer**: Must have a consumer test using test harness (per-service repo)
 - **New cross-service workflow**: Should have an Aspire system integration test
 - **New Blazor page/component**: Should have a bUnit component test (Intranet.Tests)
+- **New customer/employee journey**: Must update `specs/E2E_USER_JOURNEY_STORIES.md` with persona, entry point, services, verification checklist, current status, and known gaps
+- **New E2E automation**: Must reference one or more story ids from `specs/E2E_USER_JOURNEY_STORIES.md` and must not duplicate endpoint CRUD tests already covered by lower tiers
 
 ### 6.2 Review Checklist for PRs
 
