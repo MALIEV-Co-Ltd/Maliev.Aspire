@@ -34,6 +34,10 @@ Extension method to configure the resilient IAM HTTP client.
 builder.Services.AddIAMClient(builder.Configuration, "MyService");
 ```
 
+The client attaches a service-account bearer token for trusted service-to-service calls.
+Outside Development and Testing, service-account tokens require `Jwt:PrivateKey` and are signed with RS256.
+The legacy `Jwt:SecurityKey` HS256 path is a local fallback only and is not accepted by production JWT validation.
+
 ## Configuration
 
 Add the following to your `appsettings.json`:
@@ -50,3 +54,18 @@ Add the following to your `appsettings.json`:
   }
 }
 ```
+
+JWT requirements:
+
+```json
+{
+  "Jwt": {
+    "PublicKey": "<base64-rsa-public-pem>",
+    "PrivateKey": "<base64-rsa-private-pem>",
+    "Issuer": "https://api.maliev.com",
+    "Audience": "https://api.maliev.com"
+  }
+}
+```
+
+Do not depend on `Jwt:SecurityKey` for staging or production token validation.

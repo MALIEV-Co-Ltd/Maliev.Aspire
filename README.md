@@ -36,6 +36,7 @@ To maintain high performance and low complexity, the following are **NOT** used:
 - ✅ **TreatWarningsAsErrors**: Enabled in all `.csproj` files.
 - ✅ **Shared Infrastructure**: Uses central PostgreSQL, RabbitMQ, and Redis instances.
 - ✅ **Secure Configuration**: Uses `sharedsecrets.json` for sensitive credentials (git-ignored).
+- ✅ **JWT Key Separation**: Services validate RS256 tokens outside dev/test; `Jwt:SecurityKey` is not a production verifier fallback.
 
 ---
 
@@ -71,6 +72,9 @@ To maintain high performance and low complexity, the following are **NOT** used:
    ```
    > [!TIP]
    > Use `sharedsecrets.json.template` as a starting point.
+   >
+   > Production-like runs must provide `Jwt:PublicKey` and `Jwt:PrivateKey` as Base64-encoded RSA PEM values.
+   > `Jwt:SecurityKey` is only a Development/Testing compatibility fallback.
 
 2. **Run the Orchestrator**
    ```bash

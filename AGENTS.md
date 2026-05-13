@@ -82,6 +82,8 @@ dotnet format Maliev.Aspire.slnx
 - **Service prefix**: Routes prefixed with service domain (e.g., `/auth`, `/customer`, `/job`)
 - **Scalar docs**: Configured at `/{service}/scalar`
 - **Secrets**: Never hardcoded. Use GCP Secret Manager or environment variables
+- **JWT validation**: `AddJwtAuthentication()` must validate RS256 tokens in staging/production. `Jwt:SecurityKey` HS256 validation is Development/Testing fallback only.
+- **Service accounts**: Service-account tokens are privileged. Prefer user-context forwarding for user-initiated calls, and require `Jwt:PrivateKey` RS256 signing outside Development/Testing.
 - **Async/await**: All the way down. Pass `CancellationToken`
 - **EF Core Design package**: Only in Infrastructure project, never in Api
 - **PostgreSQL xmin**: Shadow property only — `entity.Property<uint>("xmin").HasColumnType("xid").IsRowVersion()`. Never add entity property

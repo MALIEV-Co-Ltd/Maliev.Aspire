@@ -18,7 +18,7 @@ A comprehensive library of standardized infrastructure patterns and configuratio
     - **Database**: PostgreSQL with Entity Framework Core
     - **Caching**: Redis Distributed Cache
     - **Messaging**: RabbitMQ via MassTransit
-- **Security**: JWT (RSA/HMAC), IAM Integration, Secret Manager
+- **Security**: JWT RS256 validation, IAM Integration, Secret Manager
 - **API**: OpenAPI 3.1, Scalar UI, API Versioning
 
 ---
@@ -84,7 +84,7 @@ app.Run();
 | Feature | Extension Method | Description |
 |---------|------------------|-------------|
 | **Observability** | `AddServiceDefaults()` | Configures OTel logging, metrics, and tracing. |
-| **Authentication** | `AddJwtAuthentication()` | Configures RSA-2048/HMAC JWT validation. |
+| **Authentication** | `AddJwtAuthentication()` | Configures RSA-2048 JWT validation; HS256 is a Development/Testing fallback only. |
 | **Database** | `AddPostgresDbContext<T>()` | Pre-configured EF Core with resilience. |
 | **Caching** | `AddRedisDistributedCache()` | Redis setup with health checks and retries. |
 | **Messaging** | `AddMassTransitWithRabbitMq()` | MassTransit configuration with standard bus setup. |
@@ -99,6 +99,15 @@ Standardized health probes for Kubernetes orchestration:
 - **Liveness**: `GET /[prefix]/liveness` (Returns 200)
 - **Readiness**: `GET /[prefix]/readiness` (Checks DB, Redis, RabbitMQ)
 - **Metrics**: `GET /[prefix]/metrics` (Prometheus format)
+
+---
+
+## Security Assumptions
+
+- Production and staging services must configure `Jwt:PublicKey` and validate RS256 tokens only.
+- `Jwt:SecurityKey` is accepted by `AddJwtAuthentication()` only in Development or Testing for local compatibility.
+- Service-account tokens prefer `Jwt:PrivateKey` and are signed with RS256. HS256 service-account signing is limited to Development or Testing fallback.
+- Service-account tokens are privileged and must be used only for trusted service-to-service clients. User-initiated calls should forward the user context instead of minting a service-account token.
 
 ---
 

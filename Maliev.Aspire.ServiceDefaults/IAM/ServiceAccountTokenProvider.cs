@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Maliev.Aspire.ServiceDefaults.IAM;
@@ -44,9 +45,8 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
     /// </summary>
     public string GetToken()
     {
-        var securityKey = _configuration["Jwt:SecurityKey"]
-            ?? throw new InvalidOperationException(
-                "Jwt:SecurityKey not configured. Required for service account token generation.");
+        var privateKey = _configuration["Jwt:PrivateKey"];
+        var securityKey = _configuration["Jwt:SecurityKey"];
 
         // Standard issuer/audience for all Maliev services
         var issuer = _configuration["Jwt:Issuer"] ?? "https://api.maliev.com";
@@ -57,20 +57,24 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
 
         return GenerateToken(
             serviceName: _serviceName,
+            privateKey: privateKey,
             securityKey: securityKey,
             issuer: issuer,
             audience: audience,
             expirationMinutes: expirationMinutes,
+            symmetricFallbackAllowed: IsSymmetricSigningAllowed(),
             subOverride: _subOverride
         );
     }
 
     private static string GenerateToken(
         string serviceName,
-        string securityKey,
+        string? privateKey,
+        string? securityKey,
         string issuer,
         string audience,
         int expirationMinutes,
+        bool symmetricFallbackAllowed,
         string? subOverride = null)
     {
         var serviceNameLower = serviceName.ToLowerInvariant().Replace("service", "");
@@ -88,14 +92,7 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
             new Claim("permissions", "*") // Full access for service accounts in platform
         };
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey));
-
-        if (key.KeySize < 256)
-        {
-            throw new InvalidOperationException("Jwt:SecurityKey must be at least 256 bits (32 characters) for HMAC-SHA256.");
-        }
-
-        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var credentials = CreateSigningCredentials(privateKey, securityKey, symmetricFallbackAllowed);
 
         var token = new JwtSecurityToken(
             issuer: issuer,
@@ -107,6 +104,83 @@ public class ServiceAccountTokenProvider : IServiceAccountTokenProvider
         );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private bool IsSymmetricSigningAllowed()
+    {
+        var environmentName = _configuration["ASPNETCORE_ENVIRONMENT"]
+            ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+            ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+            ?? "Production";
+
+        return string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(environmentName, "Testing", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static SigningCredentials CreateSigningCredentials(
+        string? privateKey,
+        string? securityKey,
+        bool symmetricFallbackAllowed)
+    {
+        if (!string.IsNullOrWhiteSpace(privateKey))
+        {
+            return new SigningCredentials(CreateRsaSecurityKey(privateKey), SecurityAlgorithms.RsaSha256);
+        }
+
+        if (!symmetricFallbackAllowed)
+        {
+            throw new InvalidOperationException(
+                "Jwt:PrivateKey not configured. Service account tokens require RS256 signing outside Development or Testing.");
+        }
+
+        if (string.IsNullOrWhiteSpace(securityKey))
+        {
+            throw new InvalidOperationException(
+                "Jwt:SecurityKey not configured. Required for development/test service account token fallback.");
+        }
+
+        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey));
+
+        if (key.KeySize < 256)
+        {
+            throw new InvalidOperationException("Jwt:SecurityKey must be at least 256 bits (32 characters) for HMAC-SHA256.");
+        }
+
+        return new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+    }
+
+    private static RsaSecurityKey CreateRsaSecurityKey(string privateKey)
+    {
+        var rsa = RSA.Create();
+
+        try
+        {
+            rsa.ImportFromPem(DecodePem(privateKey));
+        }
+        catch (ArgumentException)
+        {
+            var keyBytes = Convert.FromBase64String(privateKey);
+            rsa.ImportPkcs8PrivateKey(keyBytes, out _);
+        }
+
+        return new RsaSecurityKey(rsa);
+    }
+
+    private static string DecodePem(string configuredKey)
+    {
+        if (configuredKey.Contains("BEGIN", StringComparison.Ordinal))
+        {
+            return configuredKey;
+        }
+
+        try
+        {
+            return Encoding.UTF8.GetString(Convert.FromBase64String(configuredKey));
+        }
+        catch (FormatException)
+        {
+            return configuredKey;
+        }
     }
 }
 

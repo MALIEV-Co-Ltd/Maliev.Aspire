@@ -1,5 +1,6 @@
 using Maliev.Aspire.ServiceDefaults;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Cryptography;
@@ -60,12 +61,14 @@ public static class AuthenticationExtensions
 
         if (string.IsNullOrEmpty(publicKeyBase64))
         {
-            if (!string.IsNullOrEmpty(securityKey))
+            if (!string.IsNullOrEmpty(securityKey) && IsSymmetricValidationAllowed(builder))
             {
                 return builder.AddJwtAuthenticationSymmetric(configureOptions);
             }
 
-            throw new InvalidOperationException("JWT PublicKey not configured. Set Jwt:PublicKey in configuration.");
+            throw new InvalidOperationException(
+                "JWT PublicKey not configured. Set Jwt:PublicKey in configuration. " +
+                "Symmetric Jwt:SecurityKey validation is allowed only in Development or Testing.");
         }
 
         // Decode Base64 PEM public key
@@ -86,8 +89,7 @@ public static class AuthenticationExtensions
             RoleClaimType = "role"
         };
 
-        // Check if we have a symmetric fallback key (e.g. for tests)
-        if (!string.IsNullOrEmpty(securityKey))
+        if (!string.IsNullOrEmpty(securityKey) && IsSymmetricValidationAllowed(builder))
         {
             var symmetricKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey));
             tokenValidationParameters.IssuerSigningKeys = new SecurityKey[]
@@ -142,6 +144,13 @@ public static class AuthenticationExtensions
         var issuer = builder.Configuration["Jwt:Issuer"];
         var audience = builder.Configuration["Jwt:Audience"];
 
+        if (!IsSymmetricValidationAllowed(builder))
+        {
+            throw new InvalidOperationException(
+                "Symmetric JWT validation is allowed only in Development or Testing. " +
+                "Configure Jwt:PublicKey and use AddJwtAuthentication() for shared service authentication.");
+        }
+
         if (string.IsNullOrEmpty(securityKey))
         {
             throw new InvalidOperationException("JWT SecurityKey not configured. Set Jwt:SecurityKey in configuration.");
@@ -176,5 +185,20 @@ public static class AuthenticationExtensions
         builder.Services.AddPermissionAuthorization();
 
         return builder;
+    }
+
+    private static bool IsSymmetricValidationAllowed(IHostApplicationBuilder builder)
+    {
+        if (builder.Environment.IsEnvironment("Testing"))
+        {
+            return true;
+        }
+
+        if (!builder.Environment.IsDevelopment())
+        {
+            return false;
+        }
+
+        return builder.Configuration.GetValue("Jwt:AllowSymmetricValidation", true);
     }
 }
