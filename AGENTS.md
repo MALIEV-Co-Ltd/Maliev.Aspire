@@ -187,6 +187,11 @@ Use these rules for the E2E story catalog:
 - Keep E2E stories above unit/integration scope. Do not restate endpoint CRUD or single-service behavior unless it proves the user-visible journey.
 - Mark missing or prototype-backed behavior explicitly as a product gap. Do not hide it by testing only direct APIs.
 - `Maliev.QuoteEngine` is part of the Aspire integrated environment and must remain wired into AppHost for dedicated quoting journeys.
+- Quote/project stories must preserve the production contract: Project is the mutable workspace for files, parts, configuration, DFM acknowledgement, pricing, and attachments; Quotation is the project quote family; QuotationVersion is an immutable commercial snapshot with snapshot hash, generated-by identity, change summary, generated timestamp, and exact PDF artifact.
+- Do not treat `ProjectNew` as a product concept. It is the Blazor page name for the Intranet employee new project editor/project quote workspace.
+- QuoteEngine has two E2E modes: anonymous demo mode is non-mutating and uses MALIEV-owned sample files; signed customer project mode must use server-resolved customer identity and real service-backed Project/Upload/Geometry/Pricing/Quotation/PDF/Order/Payment/Delivery workflows.
+- Reorder or major customer changes after acceptance must start from Duplicate Project linked to the source project. Accepted projects, quotation versions, PDFs, orders, and payments must remain immutable evidence.
+- Version-aware E2E assertions must prove one quotation per project, multiple immutable quotation versions, exact version PDF links, current-version marker, source-project linkage, and acceptance/order creation against the selected quotation version.
 
 #### Assertions & Logging
 - **Assertions**: Use strict xUnit `Assert` (e.g., `Assert.NotNull`, `Assert.Equal`). FluentAssertions is banned.

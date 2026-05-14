@@ -2,7 +2,7 @@
 
 > Living document defining the test strategy, coverage matrix, and governance for the Maliev microservices ecosystem.
 >
-> **Last updated**: 2026-05-13
+> **Last updated**: 2026-05-14
 
 ---
 
@@ -65,10 +65,11 @@
 
 **E2E Tests** — production-gate browser journeys
 - Critical customer journeys through `Maliev.Web`
-- Dedicated quote journeys through `Maliev.QuoteEngine`
-- Employee ERP/CRM journeys through `Maliev.Intranet`
+- Dedicated quote journeys through `Maliev.QuoteEngine`, including anonymous demo mode and signed customer project mode
+- Employee ERP/CRM journeys through `Maliev.Intranet`, including the employee project quote workspace
 - Login/authentication/account recovery flows visible to end users
-- Quote-to-order, quote-to-payment, commerce publish-to-storefront, and operations workflows
+- Project-based quote revision, quote-to-order, quote-to-payment, commerce publish-to-storefront, and operations workflows
+- One quotation per project with immutable quotation versions, exact version PDF artifacts, source project linkage, and version-aware acceptance/order creation
 - Source of truth: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_STORIES.md`
 
 ### 1.4 Infrastructure Patterns
@@ -327,7 +328,7 @@ dotnet test Maliev.OrderService.Tests/ -v n
 | Gap | Impact | Action |
 |-----|--------|--------|
 | No E2E browser automation | UI flows unverified | Use `specs/E2E_USER_JOURNEY_STORIES.md` as the required catalog, then create Playwright suites for Web, QuoteEngine, and Intranet |
-| QuoteEngine production integration | Dedicated customer quoting remains partial | QuoteEngine is wired into Aspire; replace prototype-backed BFF flows with real Upload/Geometry/Pricing/Project/Quotation/PDF/Order/Payment/Delivery journeys |
+| QuoteEngine production integration | Dedicated customer quoting remains partial | QuoteEngine is wired into Aspire; keep anonymous demo mode non-mutating, then replace prototype-backed signed project flows with real Upload/Geometry/Pricing/Project/QuotationVersion/PDF/Order/Payment/Delivery journeys |
 | Customer email verification | Self-service account trust cannot be proven | Implement token issuance, email delivery, link redirect, token validation, and verified account status |
 | No load/performance tests | Performance regressions undetected | Consider k6 or NBomber |
 | GeometryService (Python) infrastructure | Python Docker build exceeds test timeout | Use pre-built images or optimize build; tests written at `GeometryServiceTests.cs` |
@@ -345,6 +346,7 @@ dotnet test Maliev.OrderService.Tests/ -v n
 - **New Blazor page/component**: Should have a bUnit component test (Intranet.Tests)
 - **New customer/employee journey**: Must update `specs/E2E_USER_JOURNEY_STORIES.md` with persona, entry point, services, verification checklist, current status, and known gaps
 - **New E2E automation**: Must reference one or more story ids from `specs/E2E_USER_JOURNEY_STORIES.md` and must not duplicate endpoint CRUD tests already covered by lower tiers
+- **New quote/project journey**: Must preserve the project-based contract: Project is mutable workspace; Quotation is the project quote family; QuotationVersion is immutable snapshot/PDF/change-summary evidence; accepted orders reference a specific quotation version
 
 ### 6.2 Review Checklist for PRs
 
