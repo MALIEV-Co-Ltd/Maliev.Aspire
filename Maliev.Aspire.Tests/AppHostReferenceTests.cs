@@ -170,6 +170,30 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
+    /// PaymentService must receive Omise credentials from Aspire secrets instead of tracked source.
+    /// </summary>
+    [Fact]
+    public void AppHost_PaymentService_ReceivesOmiseSecretConfiguration()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var paymentBlockStart = appHostSource.IndexOf(
+            "var paymentService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+        var commerceBlockStart = appHostSource.IndexOf(
+            "var commerceService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+
+        Assert.True(paymentBlockStart >= 0, "PaymentService resource declaration was not found.");
+        Assert.True(commerceBlockStart > paymentBlockStart, "CommerceService resource declaration was not found after PaymentService.");
+
+        var paymentBlock = appHostSource[paymentBlockStart..commerceBlockStart];
+        Assert.Contains(".WithEnvironment(\"PaymentProviders__Omise__PublicKey\", config.OmisePublicKey)", paymentBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"PaymentProviders__Omise__SecretKey\", config.OmiseSecretKey)", paymentBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"PaymentProviders__Omise__WebhookSecret\", config.OmiseWebhookSecret)", paymentBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("PayPal", paymentBlock, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// CommerceService must be available to the Intranet catalog manager.
     /// </summary>
     [Fact]

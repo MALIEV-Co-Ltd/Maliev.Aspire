@@ -94,6 +94,10 @@ static partial class Program
         var gcpProjectId = builder.AddParameterFromConfig("GcpProjectId", "GCP:ProjectId", secret: true);
         var gcpServiceAccountKeyBase64 = builder.AddParameterFromConfig("GcpServiceAccountKeyBase64", "GCP:ServiceAccountKeyBase64", secret: true);
 
+        var omisePublicKey = builder.AddParameterFromConfig("OmisePublicKey", "PaymentProviders:Omise:PublicKey", secret: true);
+        var omiseSecretKey = builder.AddParameterFromConfig("OmiseSecretKey", "PaymentProviders:Omise:SecretKey", secret: true);
+        var omiseWebhookSecret = builder.AddParameterFromConfig("OmiseWebhookSecret", "PaymentProviders:Omise:WebhookSecret", secret: true);
+
         const string devNotificationEncryptionKey = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
         var notificationEncryptionKey = builder.AddParameter("NotificationEncryptionKey", secret: true);
         builder.Configuration["Parameters:NotificationEncryptionKey"] =
@@ -112,6 +116,9 @@ static partial class Program
             CorsAllowedOrigins: corsAllowedOrigins,
             GcpProjectId: gcpProjectId,
             GcpServiceAccountKeyBase64: gcpServiceAccountKeyBase64,
+            OmisePublicKey: omisePublicKey,
+            OmiseSecretKey: omiseSecretKey,
+            OmiseWebhookSecret: omiseWebhookSecret,
             NotificationEncryptionKey: notificationEncryptionKey
             );
     }
@@ -671,7 +678,11 @@ static partial class Program
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .WithEnvironment("PaymentProviders__Omise__PublicKey", config.OmisePublicKey)
+            .WithEnvironment("PaymentProviders__Omise__SecretKey", config.OmiseSecretKey)
+            .WithEnvironment("PaymentProviders__Omise__WebhookSecret", config.OmiseWebhookSecret)
+            .WithEnvironment("PaymentProviders__Omise__ApiBaseUrl", "https://api.omise.co");
 
         var commerceService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CommerceService_Api>("CommerceService")
@@ -1111,6 +1122,9 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,
     IResourceBuilder<ParameterResource> GcpProjectId,
     IResourceBuilder<ParameterResource> GcpServiceAccountKeyBase64,
+    IResourceBuilder<ParameterResource> OmisePublicKey,
+    IResourceBuilder<ParameterResource> OmiseSecretKey,
+    IResourceBuilder<ParameterResource> OmiseWebhookSecret,
     IResourceBuilder<ParameterResource> NotificationEncryptionKey);
 
 /// <summary>
