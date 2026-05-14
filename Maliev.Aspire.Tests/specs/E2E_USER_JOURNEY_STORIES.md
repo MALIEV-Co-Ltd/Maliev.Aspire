@@ -1584,6 +1584,473 @@ Use this document as the source of truth when creating future Playwright E2E sui
 
 **Product direction implied by story:** QuoteEngine should feel live and trustworthy for long-running customer operations.
 
+## QUOTE-016: Customer completes a multi-part quote workspace
+
+**Persona:** Customer quoting an assembly or several manufacturing parts at once.
+
+**Entry point:** `Maliev.QuoteEngine` `/quotes/new`.
+
+**Business value:** Confirms QuoteEngine can handle a realistic customer quote, not only a single-file demo.
+
+**Prerequisites:**
+- QuoteEngine is running in Aspire.
+- Test files include at least two valid CAD files with different process/material expectations.
+- Reference data for processes, materials, and lead times is available.
+
+**User path:**
+1. Open a new quote workspace.
+2. Upload multiple CAD files in one selection.
+3. Verify each file becomes a separate part row with independent status.
+4. Select each part and configure process, material, quantity, and DFM acknowledgement independently.
+5. Calculate estimate.
+6. Verify every line contributes to the quote total.
+7. Change one part quantity and verify only affected line/totals update.
+
+**Features covered:**
+- Multi-file upload.
+- Multi-part navigation.
+- Per-part process/material/quantity configuration.
+- Quote-line total aggregation.
+- Part-scoped status.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `UploadService` in production.
+- `GeometryService` in production.
+- `MaterialService`
+- `PricingService`
+- `ProjectService` or quote-draft owner.
+- `QuoteEnginePrototypeStore` while prototype-backed.
+
+**Data created or mutated:**
+- Quote workspace/session.
+- Multiple part draft records.
+- Upload/artifact references.
+- Pricing estimate lines and total.
+
+**Verification checklist:**
+- Browser route remains `/quotes/new` and shows the expected part count.
+- Each part has distinct file id/upload id and independent status.
+- Per-part configuration persists while switching between parts.
+- Estimate response includes one line per part.
+- Quote total equals the visible sum of line totals after discounts/lead-time effects.
+- Changing one part does not reset unrelated part configuration.
+
+**Observability checks:**
+- BFF logs one upload initiation/completion per file.
+- Production path shows one geometry terminal state per uploaded part.
+- PricingService receives all configured parts in one deterministic estimate request where implemented.
+
+**Current implementation status:** Partial. The visible multi-part workspace exists, but durable backend behavior is prototype-backed until real service workflows replace `QuoteEnginePrototypeStore`.
+
+**Product direction implied by story:** QuoteEngine must support real multi-part customer requests before it can become production quoting.
+
+**Known product gaps:** Define assembly-level grouping, shared notes, and whether customers can rename parts.
+
+## QUOTE-017: Customer handles upload failure, resumable retry, and unsupported files
+
+**Persona:** Customer uploading large or imperfect CAD files.
+
+**Entry point:** QuoteEngine upload dropzone on `/quotes/new`.
+
+**Business value:** Prevents customers from abandoning the quote flow when upload or validation fails.
+
+**Prerequisites:**
+- Test files include one valid CAD file, one unsupported file, and one file that can simulate an interrupted upload.
+- Quote upload endpoints are reachable.
+
+**User path:**
+1. Open QuoteEngine quote workspace.
+2. Attempt upload without required resumable upload metadata where test tooling can safely exercise the endpoint.
+3. Upload an unsupported file type.
+4. Simulate network interruption or failed upload.
+5. Retry with a valid file.
+6. Verify failed file state does not corrupt successful quote parts.
+
+**Features covered:**
+- Resumable upload contract.
+- Content-Range validation.
+- Unsupported file validation.
+- Upload failure display.
+- Retry/recovery path.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `UploadService` in production.
+- `GeometryService` only for valid CAD files.
+- `QuoteEnginePrototypeStore` while prototype-backed.
+
+**Data created or mutated:**
+- Failed upload attempt.
+- Successful upload artifact for retry.
+- Part status/error state.
+
+**Verification checklist:**
+- Missing `Content-Range` returns a clear validation error at the BFF boundary.
+- Unsupported file shows visible user-facing error and is not sent to geometry analysis.
+- Failed upload row is marked failed and does not block valid later uploads.
+- Retried valid upload reaches terminal analyzed state.
+- No orphaned failed part is included in quote estimate or formal quote request unless product explicitly allows it.
+
+**Observability checks:**
+- BFF logs failed upload validation without leaking file contents.
+- Production UploadService records failed/successful states distinctly.
+- GeometryService receives no message for unsupported/non-CAD documents.
+
+**Current implementation status:** Partial. BFF prototype has resumable endpoint validation; production retry behavior still needs real UploadService-backed coverage.
+
+**Product direction implied by story:** Upload recovery must be self-service and trustworthy for large manufacturing files.
+
+**Known product gaps:** Define customer-facing retry controls, max size messaging, resumable continuation across browser refresh, and cleanup of abandoned uploads.
+
+## QUOTE-018: Customer reviews and acknowledges DFM warnings before formal quote
+
+**Persona:** Customer receiving manufacturability feedback.
+
+**Entry point:** QuoteEngine DFM panel and part configuration sidebar.
+
+**Business value:** Ensures risky parts are not submitted as production-ready without customer awareness.
+
+**Prerequisites:**
+- Quote workspace has at least one analyzed part with warning-level DFM findings.
+- QuoteEngine can calculate an estimate.
+
+**User path:**
+1. Upload a part that returns at least one warning.
+2. Open the DFM tab/panel.
+3. Read the warning details.
+4. Try to request quote before acknowledgement if policy requires acknowledgement.
+5. Acknowledge DFM review.
+6. Request estimate/formal quote and verify DFM state is included.
+
+**Features covered:**
+- DFM warning visibility.
+- Warning acknowledgement.
+- Quote readiness gating.
+- Customer-safe DFM language.
+- Part-scoped DFM state.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `GeometryService`
+- `PricingService`
+- `QuotationService` in production.
+- `QuoteEnginePrototypeStore` while prototype-backed.
+
+**Data created or mutated:**
+- DFM result.
+- DFM acknowledgement flag.
+- Quote part readiness state.
+
+**Verification checklist:**
+- DFM warning is visible on the correct part only.
+- Acknowledgement state persists while switching parts and recalculating estimate.
+- Formal quote request is blocked or marked for employee review according to policy when unacknowledged warnings exist.
+- Customer-facing wording does not expose internal manufacturing jargon unnecessarily.
+- Generated quote request carries DFM acknowledgement/review state.
+
+**Observability checks:**
+- GeometryService result correlation matches the displayed part.
+- QuotationService or quote-draft owner receives DFM acknowledgement state in production.
+- Logs distinguish warning acknowledgement from warning resolution.
+
+**Current implementation status:** Partial. UI has prototype DFM findings and acknowledgement; production persistence and quote gating must be service-backed.
+
+**Product direction implied by story:** QuoteEngine should reduce employee review load without hiding manufacturability risk from customers.
+
+**Known product gaps:** Decide which DFM severities block quote submission, require acknowledgement, or require employee review.
+
+## QUOTE-019: Customer compares lead time options with deterministic totals
+
+**Persona:** Customer choosing between price and delivery speed.
+
+**Entry point:** QuoteEngine lead-time selector in the quote summary bar.
+
+**Business value:** Lets customers understand the commercial effect of lead time without calling sales.
+
+**Prerequisites:**
+- Quote workspace has at least one configured part.
+- Economy, standard, and express lead-time options are available.
+- PricingService is healthy in production.
+
+**User path:**
+1. Configure part and calculate estimate with standard lead time.
+2. Record visible line total and quote total.
+3. Switch to economy and calculate again.
+4. Switch to express and calculate again.
+5. Return to standard and verify the original standard total returns.
+6. Submit formal quote from the selected lead time.
+
+**Features covered:**
+- Lead-time options.
+- Deterministic pricing.
+- Price recalculation.
+- Quote total explanation.
+- Selected lead-time persistence.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `PricingService`
+- `MaterialService`
+- `DeliveryService` if delivery promise affects lead time.
+- `QuotationService` in production.
+
+**Data created or mutated:**
+- Quote estimate.
+- Selected lead-time code.
+- Formal quote lead-time terms.
+
+**Verification checklist:**
+- Same configured inputs and same lead-time option return the same total.
+- Changing lead time changes only lead-time-sensitive price/terms.
+- Quote total and line totals stay internally consistent.
+- Selected lead time appears in formal quote request/PDF where implemented.
+- No employee-only markup internals are exposed.
+
+**Observability checks:**
+- PricingService logs include lead-time code and correlation id.
+- No stale cached estimate is reused after lead-time change.
+- Generated quote/PDF trace includes selected lead-time terms.
+
+**Current implementation status:** Partial. Prototype calculation is deterministic, but production must use PricingService.
+
+**Product direction implied by story:** QuoteEngine pricing must be explainable and deterministic, not a black box.
+
+**Known product gaps:** Define customer-visible lead-time language, cutoff times, delivery/calendar rules, and expiry behavior.
+
+## QUOTE-020: Customer edits quote draft before formal submission
+
+**Persona:** Customer iterating before requesting an official quote.
+
+**Entry point:** QuoteEngine quote workspace before formal quote generation.
+
+**Business value:** Prevents unnecessary duplicate quote requests when customers make normal pre-submission changes.
+
+**Prerequisites:**
+- Quote workspace has at least one uploaded and estimated part.
+- Customer is signed in or anonymous draft state is recoverable.
+
+**User path:**
+1. Upload and configure a part.
+2. Calculate estimate.
+3. Change quantity/material/process/lead time.
+4. Verify formal quote and order actions reset or require recalculation as appropriate.
+5. Recalculate estimate.
+6. Submit formal quote with the latest inputs.
+
+**Features covered:**
+- Draft editing.
+- Estimate invalidation.
+- Recalculation.
+- Formal quote readiness.
+- Stale-state prevention.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `PricingService`
+- `ProjectService` or quote-draft owner.
+- `QuotationService`
+- `QuoteEnginePrototypeStore` while prototype-backed.
+
+**Data created or mutated:**
+- Quote draft configuration.
+- Estimate revision.
+- Formal quote request using latest draft.
+
+**Verification checklist:**
+- UI clearly invalidates old estimate after pricing input changes.
+- Formal quote cannot be generated from stale totals.
+- Latest part configuration is reflected in the estimate and formal quote request.
+- Existing generated quote/order state is cleared or versioned when draft changes.
+- Refresh behavior matches durable draft policy.
+
+**Observability checks:**
+- PricingService receives recalculation after every meaningful input change.
+- QuotationService receives latest draft revision only.
+- Logs show revision/version id where production implementation supports it.
+
+**Current implementation status:** Partial. The prototype clears estimates locally; durable revision handling is still required.
+
+**Product direction implied by story:** QuoteEngine needs explicit draft revision semantics before production.
+
+**Known product gaps:** Define whether editing after formal quote creates a new quote version, cancels the old quote, or requires employee review.
+
+## QUOTE-021: Customer responds to employee review request
+
+**Persona:** Customer whose quote needs clarification before approval.
+
+**Entry point:** QuoteEngine quote detail, notifications, or workspace message/action surface.
+
+**Business value:** Turns employee review into a closed customer feedback loop instead of an offline email chain.
+
+**Prerequisites:**
+- Quote exists in a review-needed state.
+- Employee can mark quote as needing customer input in Intranet or test fixture.
+- NotificationService or QuoteEngine notification path is available.
+
+**User path:**
+1. Customer submits a quote that needs employee review.
+2. Employee marks quote as needing customer input and writes a customer-safe request.
+3. Customer receives notification or sees quote status.
+4. Customer opens quote detail and responds with notes or updated file/configuration.
+5. Employee sees the response in Intranet.
+
+**Features covered:**
+- Review-needed quote status.
+- Customer-safe employee request.
+- Customer response.
+- Notification.
+- Intranet visibility.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `Maliev.Intranet.Bff`
+- `QuotationService`
+- `ProjectService` or quote-draft owner.
+- `UploadService` if revised files are uploaded.
+- `NotificationService`
+
+**Data created or mutated:**
+- Quote review status.
+- Customer response/comment.
+- Optional revised upload/configuration.
+- Notification/read state.
+
+**Verification checklist:**
+- Customer sees only customer-safe review message, not internal employee notes.
+- Response is linked to the correct quote/revision.
+- Employee can see customer response and continue review.
+- Revised file/configuration does not overwrite prior evidence without versioning.
+- Notification/read state updates after customer opens/responds.
+
+**Observability checks:**
+- QuotationService logs review status transition and response.
+- NotificationService emits customer and employee notifications where configured.
+- Upload/Geometry traces run only if customer reuploads files.
+
+**Current implementation status:** Required gap unless review-request UI already exists. Prototype store does not model this production workflow.
+
+**Product direction implied by story:** QuoteEngine should support customer collaboration for non-instant quotes without leaking internal notes.
+
+**Known product gaps:** Define message model, review statuses, file revision behavior, and SLA indicators.
+
+## QUOTE-022: Customer accepts a formal quote with customer PO and terms confirmation
+
+**Persona:** Customer approving an official quote for manufacturing.
+
+**Entry point:** QuoteEngine formal quote detail/approval action.
+
+**Business value:** Ensures quote acceptance captures the commercial intent needed for order creation.
+
+**Prerequisites:**
+- Customer owns a valid formal quote.
+- Quote has PDF/terms, total, validity, and delivery/payment requirements.
+- OrderService and PaymentService are healthy in production.
+
+**User path:**
+1. Open formal quote detail.
+2. Review quote number, PDF, validity, total, line items, lead time, and terms.
+3. Enter customer PO number if required.
+4. Confirm billing/delivery contact or address.
+5. Accept quote.
+6. Verify manufacturing order is created exactly once.
+
+**Features covered:**
+- Formal quote approval.
+- Customer PO capture.
+- Terms confirmation.
+- Order creation idempotency.
+- Customer order visibility.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `QuotationService`
+- `OrderService`
+- `PaymentService`
+- `DeliveryService`
+- `CustomerService`
+- `PdfService`/`UploadService`
+
+**Data created or mutated:**
+- Accepted quote state.
+- Customer PO/reference.
+- Order record.
+- Payment/delivery intent where implemented.
+
+**Verification checklist:**
+- Expired or superseded quote cannot be accepted.
+- Double-click/retry creates only one order.
+- Customer PO/reference is stored and visible on order/detail where policy allows.
+- Order total and line items match accepted quote.
+- Accepted quote PDF remains available and immutable.
+
+**Observability checks:**
+- QuotationService and OrderService share correlation id.
+- Payment/Delivery initialization events appear where configured.
+- Duplicate acceptance attempt is logged as idempotent/no-op rather than creating a second order.
+
+**Current implementation status:** Partial. Prototype can create an order record, but production idempotency, PO capture, payment, and delivery are required.
+
+**Product direction implied by story:** Quote acceptance should be a controlled commercial contract step, not just a button that creates a placeholder order.
+
+**Known product gaps:** Define customer PO requirement, acceptance terms text, quote expiry policy, and payment timing.
+
+## QUOTE-023: Customer downloads quote, order, and manufacturing artifacts safely
+
+**Persona:** Customer retrieving official documents and approved manufacturing files.
+
+**Entry point:** QuoteEngine quote detail, order detail, documents, and PDF/download actions.
+
+**Business value:** Confirms customer-facing artifacts remain available without exposing internal documents.
+
+**Prerequisites:**
+- Customer owns quote/order with customer-facing PDF and allowed artifacts.
+- UploadService and PdfService are healthy.
+- Employee-only/internal artifacts also exist for negative verification where possible.
+
+**User path:**
+1. Sign in as customer.
+2. Open quote detail and download quote PDF.
+3. Open order detail and download allowed customer-facing artifacts.
+4. Attempt to access internal employee-only artifact or another customer's artifact by URL.
+5. Verify denied access is safe.
+
+**Features covered:**
+- Customer artifact downloads.
+- PDF access.
+- Upload authorization.
+- Internal artifact hiding.
+- Cross-customer denial.
+
+**Services involved:**
+- `Maliev.QuoteEngine.Bff`
+- `UploadService`
+- `PdfService`
+- `QuotationService`
+- `OrderService`
+- `IAMService` or authorization boundary.
+
+**Data created or mutated:**
+- None expected, except optional access/audit log.
+
+**Verification checklist:**
+- Customer can open/download their own quote PDF.
+- Downloaded PDF/document is not corrupted and matches visible quote/order context.
+- Internal drawings, cost sheets, supplier files, and employee-only PDFs are hidden.
+- Direct URL probing for another customer's or internal artifact returns denied/not-found without data leakage.
+- Signed URLs, if used, are scoped and time-limited according to policy.
+
+**Observability checks:**
+- UploadService/PdfService logs customer-scoped artifact access.
+- Denied artifact attempts are logged safely.
+- Aspire dashboard remains healthy after denied downloads.
+
+**Current implementation status:** Partial. Production artifact authorization must replace prototype/static PDF links.
+
+**Product direction implied by story:** QuoteEngine artifact access must be customer-safe by design.
+
+**Known product gaps:** Define the artifact taxonomy and customer-facing allowlist for quote/order documents.
+
 ---
 
 # Employee Intranet Sales And CRM Stories
@@ -2461,6 +2928,727 @@ Use this document as the source of truth when creating future Playwright E2E sui
 **Known product gaps:** Define supported assistant tools, approval policy for mutating actions, retention policy, and redaction rules.
 
 ---
+
+## INT-016: Employee starts ProjectNew draft and resumes autosaved work
+
+**Persona:** Sales engineer starting a quote but not finishing it in one sitting.
+
+**Entry point:** Intranet `/sales/projects/new`.
+
+**Business value:** Protects employee quoting work from refresh, navigation, and interrupted sessions.
+
+**Prerequisites:**
+- Employee is signed in with project/quote create permission.
+- CustomerService, ProjectService, UploadService, MaterialService, PricingService, and Intranet BFF are healthy.
+- ProjectNew local/server draft support is enabled.
+
+**User path:**
+1. Open ProjectNew.
+2. Edit project title.
+3. Select customer from the quote summary customer picker.
+4. Upload at least one valid CAD file or create a draft with pending quote fields where supported.
+5. Configure one part enough to trigger autosave.
+6. Refresh the page or navigate away and back.
+7. Verify title, customer, files, configuration, quote terms, and last-saved state are restored.
+
+**Features covered:**
+- ProjectNew title editing.
+- Customer selection.
+- Autosave.
+- Server/local draft restore.
+- Draft ownership and permissions.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `CustomerService`
+- `ProjectService`
+- `UploadService`
+- `MaterialService`
+- `PricingService`
+- `IAMService`
+
+**Data created or mutated:**
+- Project draft.
+- Customer reference.
+- Part draft/configuration.
+- Autosave timestamp/state.
+
+**Verification checklist:**
+- Browser route remains `/sales/projects/new` or resumes with the expected draft context.
+- Title/customer/configuration survive refresh.
+- Last-saved indicator updates after a meaningful change.
+- Draft belongs to the signed-in employee/customer context and is not visible to unauthorized employees.
+- Restored draft does not duplicate parts or lose selected process/material.
+
+**Observability checks:**
+- Intranet BFF logs draft save/restore correlation id.
+- ProjectService receives draft mutation where server-backed.
+- Aspire dashboard shows no health degradation during refresh/resume.
+
+**Current implementation status:** Ready to automate for current ProjectNew draft behavior.
+
+**Product direction implied by story:** ProjectNew remains the employee quoting cockpit and must protect in-progress work.
+
+**Known product gaps:** Define retention and cleanup policy for abandoned employee quote drafts.
+
+## INT-017: Employee uploads multiple CAD files with part-scoped resumable progress
+
+**Persona:** Sales engineer quoting several customer files.
+
+**Entry point:** ProjectNew file upload dropzone.
+
+**Business value:** Confirms the core employee quoting workflow handles real multi-file jobs without blocking unrelated parts.
+
+**Prerequisites:**
+- Employee has upload/project create permissions.
+- Test files include multiple valid CAD files plus one unsupported/oversized file if feasible.
+- UploadService, GeometryService, RabbitMQ, and Intranet BFF are healthy.
+
+**User path:**
+1. Open ProjectNew.
+2. Select multiple CAD files.
+3. Verify each part appears immediately with queued/uploading status.
+4. Watch each resumable upload progress independently.
+5. Verify successful files complete and start analysis.
+6. Verify failed/unsupported file shows part-specific error without disabling successful parts.
+7. Refresh after terminal states and verify successful parts remain.
+
+**Features covered:**
+- Multi-file upload.
+- Resumable upload contract.
+- Part-scoped progress.
+- Upload error isolation.
+- File-size/type validation.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `UploadService`
+- `GeometryService`
+- RabbitMQ
+- `ProjectService`
+- `IAMService`
+
+**Data created or mutated:**
+- Upload sessions.
+- CAD artifacts.
+- Project part draft records.
+- Upload failure/error state.
+
+**Verification checklist:**
+- Every selected valid file maps to one visible part row/card.
+- Upload progress belongs to the correct part and does not freeze unrelated parts.
+- Resumable upload uses `Content-Range` and completes through UploadService.
+- Unsupported/oversized files show clear errors and are not sent to GeometryService.
+- Refresh does not recreate completed parts or lose artifact references.
+
+**Observability checks:**
+- UploadService logs one initiation/completion per valid file.
+- GeometryService receives analysis requests only for valid CAD artifacts.
+- RabbitMQ events correlate to the correct storage path/file id.
+- No part remains indefinitely in `Analyze your model...` after a terminal backend state.
+
+**Current implementation status:** Ready to automate for current ProjectNew upload path, with long-running geometry waits handled by polling.
+
+**Product direction implied by story:** Employee upload must be resilient and part-scoped because customer jobs often contain many files.
+
+**Known product gaps:** Define user-facing retry/resume behavior across browser restart, not only within one active session.
+
+## INT-018: Employee reviews ProjectNew viewer, thumbnails, drawings, and DFM artifacts
+
+**Persona:** Sales engineer validating uploaded manufacturing evidence.
+
+**Entry point:** ProjectNew part detail, viewer, Drawing tab, and DFM tab.
+
+**Business value:** Ensures employees can inspect technical quote evidence before pricing or sending a quotation.
+
+**Prerequisites:**
+- ProjectNew draft has at least one analyzed CAD part.
+- GeometryService has generated viewer/thumbnail/DFM artifacts where supported.
+- UploadService can store drawing/supporting attachments.
+
+**User path:**
+1. Open ProjectNew with analyzed part.
+2. Select the part.
+3. Verify viewer preview renders and thumbnail appears in part list/PDF-ready state.
+4. Open DFM tab and review issues.
+5. Upload a drawing attachment for the selected part.
+6. Switch to another part and verify drawing upload state is part-scoped.
+7. Refresh and verify viewer, thumbnail, DFM, and drawing attachment remain accessible.
+
+**Features covered:**
+- 3D viewer/preview.
+- Thumbnail artifact.
+- DFM issue display.
+- Drawing attachment upload.
+- Artifact persistence.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `UploadService`
+- `GeometryService`
+- `ProjectService`
+- RabbitMQ
+
+**Data created or mutated:**
+- Viewer/thumbnail artifact references.
+- DFM result.
+- Drawing attachment artifact.
+- Part artifact metadata.
+
+**Verification checklist:**
+- Viewer area is non-empty for valid model artifacts.
+- Thumbnail appears in part list and is available for quotation PDF payload.
+- Drawing attachment belongs to the selected part and does not disable uploads for other parts.
+- DFM issue count/details match the selected part.
+- Artifact links remain valid after refresh.
+
+**Observability checks:**
+- GeometryService logs artifact generation.
+- UploadService logs drawing attachment with part id and kind.
+- ProjectService persists artifact references used by ProjectNew.
+
+**Current implementation status:** Ready to automate where viewer/artifact endpoints are available in Aspire.
+
+**Product direction implied by story:** Technical artifacts are quote evidence and must remain tied to the correct part.
+
+**Known product gaps:** Add explicit E2E fixtures for multibody/viewer artifact edge cases and attachment authorization.
+
+## INT-019: Employee configures ProjectNew part details and receives deterministic pricing
+
+**Persona:** Sales engineer pricing a manufacturing part.
+
+**Entry point:** ProjectNew part configuration sidebar and quote summary.
+
+**Business value:** Converts part analysis and employee selections into repeatable commercial pricing.
+
+**Prerequisites:**
+- At least one ProjectNew part is analyzed.
+- Material, Pricing, and catalog endpoints are healthy.
+- Process/material/finish/tolerance options are seeded.
+
+**User path:**
+1. Select a part.
+2. Choose process.
+3. Choose material, finish, tolerance, quantity, inspection, roughness, threaded holes, inserts, and notes where supported.
+4. Wait for pricing.
+5. Change one pricing input and verify price changes.
+6. Revert to original values and verify original price returns.
+
+**Features covered:**
+- Part configuration.
+- Process-specific catalog options.
+- Pricing debounce.
+- Deterministic pricing.
+- Route/lead-time data where supported.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `MaterialService`
+- `PricingService`
+- `ProjectService`
+- `CurrencyService`
+- `FacilityService` or routing source where implemented.
+
+**Data created or mutated:**
+- Part configuration.
+- Pricing result.
+- Lead-time/routing context.
+- Draft quote totals.
+
+**Verification checklist:**
+- Required fields are visible and validation prevents quoting incomplete parts.
+- Process change refreshes compatible material/finish/tolerance options.
+- Same inputs return same unit price and line total.
+- Pricing failure shows recoverable state without corrupting previous saved draft.
+- Employee-only internal pricing fields do not leak to customer-facing surfaces.
+
+**Observability checks:**
+- PricingService receives expected geometry/material/settings payload.
+- MaterialService service discovery resolves through Aspire.
+- Pricing logs include correlation id and do not expose sensitive CAD payloads.
+
+**Current implementation status:** Ready to automate for current ProjectNew configuration/pricing UI.
+
+**Product direction implied by story:** ProjectNew pricing must remain deterministic and explainable for employee quoting.
+
+**Known product gaps:** Define which process-specific fields must appear in PDFs and customer-facing quote summaries.
+
+## INT-020: Employee applies ProjectNew bulk edits across selected parts
+
+**Persona:** Sales engineer configuring many similar parts.
+
+**Entry point:** ProjectNew bulk parts table.
+
+**Business value:** Reduces repetitive quoting work while preserving per-part correctness.
+
+**Prerequisites:**
+- ProjectNew draft has at least two analyzed/configurable parts.
+- PricingService and catalog endpoints are healthy.
+
+**User path:**
+1. Open ProjectNew with multiple parts.
+2. Select several parts in the bulk table.
+3. Apply bulk process, material, finish, tolerance, quantity, inspection, roughness, inserts, threaded holes, or notes where supported.
+4. Verify every selected part updates.
+5. Verify unselected parts remain unchanged.
+6. Wait for pricing/DFM refresh on affected parts.
+
+**Features covered:**
+- Bulk selection.
+- Bulk process/material/configuration edit.
+- Multi-part price recalculation.
+- DFM refresh for process changes.
+- Unselected-part isolation.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `MaterialService`
+- `PricingService`
+- `GeometryService`
+- `ProjectService`
+
+**Data created or mutated:**
+- Multiple part configurations.
+- Multiple pricing results.
+- DFM state for process-sensitive checks.
+- Draft autosave state.
+
+**Verification checklist:**
+- Bulk edit applies only to selected parts.
+- Process-specific incompatible selections are blocked or reset safely.
+- Pricing recalculates for all affected selected parts.
+- DFM acknowledgement resets or revalidates when process changes require it.
+- Autosave captures the final bulk-edited state.
+
+**Observability checks:**
+- PricingService receives affected part requests.
+- GeometryService receives reanalysis only when required by process/DFM rules.
+- BFF logs no duplicate unintended saves for unselected parts.
+
+**Current implementation status:** Ready to automate for current bulk table behavior.
+
+**Product direction implied by story:** Bulk editing should make ProjectNew faster without hiding per-part risk.
+
+**Known product gaps:** Define preview/undo behavior for large bulk edits if employees need safety before applying changes.
+
+## INT-021: Employee reviews, retries, and acknowledges ProjectNew DFM issues before quote
+
+**Persona:** Sales engineer handling manufacturability warnings.
+
+**Entry point:** ProjectNew DFM badges, DFM overlay/panel, and quote action.
+
+**Business value:** Prevents quotes from being issued while material manufacturing risks are unresolved or unacknowledged.
+
+**Prerequisites:**
+- ProjectNew draft includes part with warning or timeout-capable DFM state.
+- GeometryService can produce terminal success, warning, or timeout/failure state.
+
+**User path:**
+1. Upload/analyze part with DFM warning or timeout state.
+2. Open DFM review from part row/card.
+3. Retry analysis if timed out.
+4. Acknowledge warning where employee decides quote can continue.
+5. Attempt quote before and after acknowledgement.
+6. Verify quote button/gating reflects DFM readiness.
+
+**Features covered:**
+- DFM warning review.
+- Timeout terminal state.
+- Retry action.
+- Employee acknowledgement.
+- Quote readiness gating.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `GeometryService`
+- `ProjectService`
+- `PricingService`
+- RabbitMQ
+
+**Data created or mutated:**
+- DFM terminal status.
+- DFM acknowledgement flag.
+- Reanalysis request/result.
+- Quote readiness state.
+
+**Verification checklist:**
+- DFM issue belongs to the selected/current part revision.
+- Timed-out analysis never leaves the part stuck in indefinite analyzing state.
+- Retry produces a new terminal state or clear error.
+- Quote action is blocked while required DFM acknowledgement is missing.
+- Acknowledgement persists after refresh and appears in quote/PDF payload where applicable.
+
+**Observability checks:**
+- GeometryService publishes terminal DFM result for success/failure/timeout.
+- RabbitMQ/SignalR events correlate to current storage path.
+- ProjectService persists acknowledgement state.
+
+**Current implementation status:** Ready to automate for current DFM acknowledgement and terminal-state behavior.
+
+**Product direction implied by story:** DFM is a production-gate control, not just a visual warning.
+
+**Known product gaps:** Define severity-specific policy for employee override, customer disclosure, and required manager approval.
+
+## INT-022: Employee sets ProjectNew commercial quote terms and draft PDF
+
+**Persona:** Sales engineer preparing customer-facing commercial terms.
+
+**Entry point:** ProjectNew quote summary bar and generate PDF action.
+
+**Business value:** Ensures customer quote documents reflect the selected commercial terms before the formal quote is issued.
+
+**Prerequisites:**
+- ProjectNew draft has customer, priced parts, and DFM-ready state.
+- PdfService and UploadService are healthy.
+- Currency/lead-time data is available.
+
+**User path:**
+1. Select customer.
+2. Configure lead time, shipping cost, manual discount, currency, and quotation terms.
+3. Verify quote total updates.
+4. Generate draft quotation PDF.
+5. Open/download PDF and compare against visible ProjectNew summary.
+6. Change commercial term and regenerate/verify updated draft where supported.
+
+**Features covered:**
+- Customer quote summary.
+- Lead time.
+- Shipping cost.
+- Manual discount.
+- Currency conversion.
+- Quotation terms.
+- Draft PDF generation.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `CustomerService`
+- `PricingService`
+- `CurrencyService`
+- `QuotationService`
+- `PdfService`
+- `UploadService`
+
+**Data created or mutated:**
+- Quote commercial fields.
+- Draft PDF request/artifact.
+- Optional draft quotation metadata.
+
+**Verification checklist:**
+- Quote total equals line subtotal minus discounts plus shipping/tax rules where applicable.
+- Manual discount meaning is preserved exactly and not converted into vague percentages.
+- Draft PDF includes customer, address, part details, thumbnails, quoted-by identity, terms, and totals.
+- Draft PDF uses quotation document type, not receipt.
+- Regenerated draft reflects current ProjectNew state.
+
+**Observability checks:**
+- PdfService logs quotation/draft document generation.
+- UploadService stores generated PDF artifact.
+- ReceiptService does not consume quotation PDF completion.
+
+**Current implementation status:** Ready to automate for current ProjectNew draft PDF path.
+
+**Product direction implied by story:** Commercial quote terms are part of the employee quote contract and must match the generated document.
+
+**Known product gaps:** Define draft PDF watermark/status and whether draft PDFs are stored, regenerated, or temporary.
+
+## INT-023: Employee creates formal project quotation from ProjectNew
+
+**Persona:** Sales engineer issuing the official quotation.
+
+**Entry point:** ProjectNew Quote button.
+
+**Business value:** Confirms the employee can turn the current ProjectNew draft into a persisted project and official quotation.
+
+**Prerequisites:**
+- ProjectNew draft is complete: customer selected, parts uploaded/analyzed, pricing ready, DFM policy satisfied.
+- ProjectService, QuotationService, PdfService, UploadService, CustomerService, and PricingService are healthy.
+
+**User path:**
+1. Open a complete ProjectNew draft.
+2. Click Quote.
+3. Wait for project creation/synchronization.
+4. Verify parts, file references, configurations, prices, customer details, and commercial terms are persisted.
+5. Verify formal quotation is created.
+6. Verify automatic quotation PDF generation succeeds and employee lands on expected project/quotation detail state.
+
+**Features covered:**
+- Project creation.
+- Part synchronization.
+- Price confirmation.
+- Formal quotation creation.
+- Automatic quotation PDF generation.
+- Navigation to persisted record.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `ProjectService`
+- `QuotationService`
+- `PdfService`
+- `UploadService`
+- `CustomerService`
+- `PricingService`
+- `EmployeeService`
+
+**Data created or mutated:**
+- Project record.
+- Project part records.
+- Quotation record.
+- Formal quotation PDF artifact.
+- Employee quoted-by metadata.
+
+**Verification checklist:**
+- Quote action is idempotent or guards against duplicate clicks.
+- Persisted project has distinct id and all expected parts.
+- File/artifact references are valid after temp-to-project migration.
+- Quotation totals match ProjectNew visible totals.
+- Automatic PDF includes customer detail, thumbnails, item details, totals, and employee quoted-by identity.
+- Existing ProjectNew behavior is preserved; this story does not require QuoteEngine lifecycle unification.
+
+**Observability checks:**
+- BFF logs project create/sync, quote generation, and PDF request with shared correlation id.
+- ProjectService and QuotationService traces show successful persistence.
+- PdfService logs quotation document type.
+- UploadService authorizes artifact reads/writes.
+
+**Current implementation status:** Ready to automate for current ProjectNew quote flow.
+
+**Product direction implied by story:** ProjectNew's current employee quote creation investment remains protected while future QuoteEngine planning happens separately.
+
+**Known product gaps:** Define duplicate-click/idempotency behavior and failure recovery if PDF generation fails after quotation creation.
+
+## INT-024: Employee verifies ProjectNew temp file migration and persisted artifact ownership
+
+**Persona:** Sales engineer moving from draft upload state into persisted project state.
+
+**Entry point:** ProjectNew after customer selection or quote creation.
+
+**Business value:** Ensures uploaded manufacturing files do not stay stranded in temporary storage after the quote becomes a real project.
+
+**Prerequisites:**
+- ProjectNew draft has uploaded files under temporary project/session storage.
+- Customer can be selected and project can be created.
+- UploadService and ProjectService are healthy.
+
+**User path:**
+1. Upload CAD files before final persisted project exists.
+2. Select customer and complete required configuration.
+3. Trigger save/quote so a persisted project is created.
+4. Verify storage paths/artifact references migrate or are copied according to policy.
+5. Reopen persisted project/detail and verify viewer, thumbnails, DFM, drawings, and pricing context remain valid.
+
+**Features covered:**
+- Temporary upload scope.
+- File migration/copy.
+- Persisted artifact ownership.
+- Reopen project detail.
+- Artifact hydration.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `UploadService`
+- `ProjectService`
+- `GeometryService`
+- `PdfService` where artifacts feed PDF.
+
+**Data created or mutated:**
+- Uploaded CAD artifacts.
+- Migrated/copied artifact references.
+- Project/part artifact metadata.
+
+**Verification checklist:**
+- Temp storage references do not remain as the only source after persisted project creation unless policy allows it.
+- Reopened project can resolve viewer and thumbnail URLs.
+- DFM/report data remains attached to correct file/part.
+- PDF generation can hydrate thumbnails from persisted artifact state.
+- Cleanup or rollback preserves consistency if migration fails.
+
+**Observability checks:**
+- UploadService logs copy/migration/authorization calls.
+- ProjectService records final artifact references.
+- BFF logs migration failure with actionable detail if it happens.
+
+**Current implementation status:** Ready to automate where migration is visible through ProjectNew/project detail.
+
+**Product direction implied by story:** ProjectNew must preserve technical evidence across draft-to-project persistence.
+
+**Known product gaps:** Define retention and cleanup rules for temporary project upload buckets.
+
+## INT-025: Employee manages ProjectNew part drawings and supporting attachments
+
+**Persona:** Sales engineer adding manufacturing drawings or requirement documents per part.
+
+**Entry point:** ProjectNew Drawing tab/attachment controls.
+
+**Business value:** Ensures quote-critical drawings stay linked to the correct part and do not mix with CAD analysis files.
+
+**Prerequisites:**
+- ProjectNew draft has at least two parts.
+- UploadService supports attachment kind metadata.
+- Employee has document upload permission.
+
+**User path:**
+1. Select Part A.
+2. Upload drawing attachment.
+3. Select Part B while Part A upload is active or complete.
+4. Upload a separate drawing/supporting file for Part B.
+5. Refresh and verify each part shows only its own attachments.
+6. Generate draft/formal PDF and verify drawing references appear where expected.
+
+**Features covered:**
+- Part-scoped drawing upload.
+- Supporting attachment separation.
+- Attachment persistence.
+- PDF item detail enrichment.
+- Upload state isolation.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `UploadService`
+- `ProjectService`
+- `PdfService`
+
+**Data created or mutated:**
+- Drawing attachment artifact.
+- Supporting attachment artifact.
+- Part attachment metadata.
+- PDF item detail references.
+
+**Verification checklist:**
+- Uploading drawing for one part does not disable or confuse another part's upload control.
+- Attachment kind is Drawing or SupportingDocument, not CAD manufacturing model.
+- Attachments are visible after refresh under the correct part.
+- Generated PDF references drawing names where business rules require it.
+- Unauthorized employees cannot download restricted attachments.
+
+**Observability checks:**
+- UploadService logs attachment upload with project id, part id, and kind.
+- ProjectService persists part attachment metadata.
+- PdfService item-detail payload includes drawing names when generating quotation.
+
+**Current implementation status:** Ready to automate for current drawing attachment behavior.
+
+**Product direction implied by story:** Part attachments are manufacturing evidence and must stay separate from model-analysis artifacts.
+
+**Known product gaps:** Define attachment categories, retention, and customer-visible versus employee-only attachment policy.
+
+## INT-026: Employee duplicates one part inside ProjectNew draft
+
+**Persona:** Sales engineer quoting variants or repeated quantities from one uploaded part.
+
+**Entry point:** ProjectNew part row/card duplicate action.
+
+**Business value:** Speeds quoting variants without forcing redundant upload and analysis.
+
+**Prerequisites:**
+- ProjectNew draft contains one analyzed/configured part with artifacts and pricing.
+- Employee has project edit permission.
+
+**User path:**
+1. Open ProjectNew draft.
+2. Select or locate a fully configured part.
+3. Duplicate the part.
+4. Verify duplicated part appears as a distinct part.
+5. Change material/quantity on duplicate.
+6. Verify source part remains unchanged and duplicate pricing recalculates.
+
+**Features covered:**
+- Single-part duplication.
+- Artifact reuse.
+- Configuration carryover.
+- Independent pricing changes.
+- Source isolation.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `ProjectService`
+- `UploadService`
+- `GeometryService`
+- `PricingService`
+
+**Data created or mutated:**
+- New draft part.
+- Reused artifact references.
+- Copied configuration.
+- New pricing result for changed duplicate.
+
+**Verification checklist:**
+- Duplicate receives distinct part id.
+- Source part file/artifacts/configuration remain unchanged.
+- DFM reports and thumbnail/viewer artifacts are available on duplicate.
+- Changing duplicate input recalculates duplicate price only.
+- Autosave captures both source and duplicate state.
+
+**Observability checks:**
+- No unnecessary reupload or geometry analysis occurs for unchanged duplicated file unless policy requires it.
+- PricingService receives recalculation for duplicate after input change.
+- ProjectService persists distinct part identities.
+
+**Current implementation status:** Ready to automate for current ProjectNew duplicate-part behavior.
+
+**Product direction implied by story:** Employees should be able to create quote variants quickly while preserving technical traceability.
+
+**Known product gaps:** Define how duplicate names/line numbers should appear on PDFs and project detail.
+
+## INT-027: Employee recovers from ProjectNew pricing, geometry, and SignalR failures
+
+**Persona:** Sales engineer working through transient service issues.
+
+**Entry point:** ProjectNew upload, DFM, pricing, and quote actions.
+
+**Business value:** Ensures the employee quote flow fails visibly and recoverably instead of silently producing bad quotes.
+
+**Prerequisites:**
+- Test environment can simulate or fixture pricing failure, geometry timeout, upload failure, and SignalR reconnect/failure.
+- Employee has normal project/quote permissions.
+
+**User path:**
+1. Start ProjectNew draft with at least one part.
+2. Trigger or simulate upload failure and verify part-specific recovery.
+3. Trigger or simulate geometry timeout and verify terminal DFM state plus retry.
+4. Trigger or simulate pricing failure and verify quote action is disabled until resolved.
+5. Interrupt SignalR and verify reconnect or polling/catch-up updates the part state.
+6. Resolve conditions and complete quote generation.
+
+**Features covered:**
+- Upload failure recovery.
+- Geometry timeout terminal state.
+- DFM retry.
+- Pricing failure recovery.
+- SignalR reconnect/catch-up.
+- Quote action gating.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `UploadService`
+- `GeometryService`
+- `PricingService`
+- `ProjectService`
+- RabbitMQ
+- SignalR notification hub.
+
+**Data created or mutated:**
+- Failed/retried upload state.
+- DFM timeout/error state.
+- Pricing failure/retry state.
+- Final quote-ready draft.
+
+**Verification checklist:**
+- Each failure is visible on the affected part and does not corrupt unrelated parts.
+- No part stays indefinitely in queued/uploading/analyzing/pricing state after a terminal failure.
+- Quote action is blocked while required pricing/DFM state is unresolved.
+- Retried operation replaces stale error state with current result.
+- Final generated quote uses only current successful part/pricing data.
+
+**Observability checks:**
+- Backend logs show terminal failure events with correlation id.
+- SignalR reconnect or status catch-up retrieves the latest terminal state.
+- PricingService/GeometryService retry traces match visible UI updates.
+
+**Current implementation status:** Partial. Core handling exists in current ProjectNew areas, but E2E fault injection/test hooks must be added.
+
+**Product direction implied by story:** ProjectNew should be trusted under real service failures, not only in the happy path.
+
+**Known product gaps:** Build deterministic E2E test hooks or fixtures for failure modes without destabilizing normal Aspire runs.
 
 # Commerce, Catalog, And Storefront Stories
 
@@ -4074,6 +5262,7 @@ Before production deployment, the E2E suite derived from these stories should pr
 - At least one passing customer path through `Maliev.Web`.
 - At least one passing dedicated quote path through `Maliev.QuoteEngine` once it is service-backed.
 - At least one passing employee sales/ProjectNew path through `Maliev.Intranet`.
+- Separate status reporting for QuoteEngine customer stories and ProjectNew employee stories so prototype-backed customer gaps do not mask regressions in the current employee workflow.
 - At least one passing quote-to-order/payment/delivery path.
 - At least one passing commerce publish-to-storefront path.
 - Passing or intentionally skipped Web trust/conversion, customer portal, admin/master-data, finance, procurement, manufacturing execution, HR, and security negative-path stories according to their current status.
