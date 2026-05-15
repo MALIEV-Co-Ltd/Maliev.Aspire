@@ -131,7 +131,8 @@ public sealed class AspireTestAdminSeedOptions
     public IReadOnlyList<string> LimitedRolePermissions { get; init; } =
     [
         "auth.sessions.read",
-        "employee.profiles.read"
+        "employee.profiles.read",
+        "employee.profiles.update"
     ];
 
     /// <summary>

@@ -683,7 +683,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             permissionState =>
                 !permissionState.HasWildcard &&
                 permissionState.HasPermission("auth.sessions.read") &&
-                permissionState.HasPermission("employee.profiles.read"),
+                permissionState.HasPermission("employee.profiles.read") &&
+                permissionState.HasPermission("employee.profiles.update"),
             "limited employee profile permissions");
 
         var permissionState = await GetIntranetPermissionStateAsync(page);
@@ -721,6 +722,61 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             }");
 
         Assert.All(restrictedResponses, response => Assert.StartsWith("403", response, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Verifies a limited employee can update their own profile without receiving broad employee-management access.
+    /// Covers the self-service employee profile portion of HR-001 and the permission-shaped behavior of INT-001.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "HR-001,INT-001,SEC-002")]
+    public async Task Intranet_LimitedEmployee_CanUpdateOwnProfileOnly()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(
+            page,
+            intranetBase,
+            "/hr/profile",
+            _fixture.AspireTestLimitedEmployeeEmail,
+            _fixture.AspireTestLimitedEmployeePassword,
+            permissionState =>
+                !permissionState.HasWildcard &&
+                permissionState.HasPermission("employee.profiles.read") &&
+                permissionState.HasPermission("employee.profiles.update"),
+            "limited employee profile read/update permissions");
+
+        await Expect(page.Locator("body")).ToContainTextAsync("My Profile", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(_fixture.AspireTestLimitedEmployeeEmail, new() { Timeout = 30_000 });
+
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var preferredName = $"Limited {unique}";
+        var personalEmail = $"limited.{unique}@example.com";
+        var mobilePhone = $"+6681{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() % 10000000:0000000}";
+
+        await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Edit profile", RegexOptions.IgnoreCase) }).ClickAsync();
+        await page.Locator(".profile-field").Filter(new() { HasText = "Preferred name" }).Locator("input").FillAsync(preferredName);
+        await page.Locator(".profile-field").Filter(new() { HasText = "Personal email" }).Locator("input").FillAsync(personalEmail);
+        await page.Locator(".profile-field").Filter(new() { HasText = "Mobile phone" }).Locator("input").FillAsync(mobilePhone);
+        await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Save changes", RegexOptions.IgnoreCase) }).ClickAsync();
+
+        await Expect(page.Locator("body")).ToContainTextAsync(preferredName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(personalEmail, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(mobilePhone, new() { Timeout = 30_000 });
+
+        await page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(preferredName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(personalEmail, new() { Timeout = 30_000 });
+
+        var employeeListResponse = await page.EvaluateAsync<string>(
+            @"async () => {
+                const r = await fetch('/api/v1/employees', { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }");
+        Assert.StartsWith("403", employeeListResponse, StringComparison.Ordinal);
     }
 
     /// <summary>

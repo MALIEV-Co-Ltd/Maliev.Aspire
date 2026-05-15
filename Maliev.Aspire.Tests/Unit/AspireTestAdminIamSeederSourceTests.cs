@@ -37,6 +37,7 @@ public class AspireTestAdminIamSeederSourceTests
         Assert.Contains("LimitedRoleId = \"roles.aspire.limited\"", optionsSource, StringComparison.Ordinal);
         Assert.Contains("\"auth.sessions.read\"", optionsSource, StringComparison.Ordinal);
         Assert.Contains("\"employee.profiles.read\"", optionsSource, StringComparison.Ordinal);
+        Assert.Contains("\"employee.profiles.update\"", optionsSource, StringComparison.Ordinal);
         Assert.Contains("await EnsureLimitedRoleAsync(options, cancellationToken);", source, StringComparison.Ordinal);
         Assert.Contains("await RemoveUnexpectedLimitedBindingsAsync(options, cancellationToken);", source, StringComparison.Ordinal);
         Assert.Contains("await EnsureLimitedRoleBindingAsync(options, cancellationToken);", source, StringComparison.Ordinal);
