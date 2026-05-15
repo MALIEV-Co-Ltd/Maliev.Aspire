@@ -323,6 +323,99 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee can publish a Commerce product and the Web storefront exposes only the published listing.
+    /// Covers executable portions of WEB-008, COM-001, COM-002, COM-003, and COM-004.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "WEB-008,COM-001,COM-002,COM-003,COM-004")]
+    public async Task Commerce_EmployeePublishesProduct_WebCustomerCanBrowseCartAndArchivedProductIsHidden()
+    {
+        await using var intranetContext = await NewContextAsync();
+        var intranetPage = await intranetContext.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(intranetPage, intranetBase, "/commerce/catalog");
+        var product = await CreateCommerceProductAsync(intranetPage);
+
+        await intranetPage.GotoAsync(new Uri(intranetBase, "/commerce/catalog").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(intranetPage.Locator("body")).ToContainTextAsync(product.Title, new() { Timeout = 30_000 });
+        await Expect(intranetPage.Locator("body")).ToContainTextAsync("Draft", new() { Timeout = 15_000 });
+
+        await using var webContext = await NewContextAsync();
+        var webPage = await webContext.NewPageAsync();
+        var webDiagnostics = new List<string>();
+        webPage.Console += (_, message) =>
+        {
+            if (message.Type is "error" or "warning")
+            {
+                webDiagnostics.Add($"{message.Type}: {message.Text}");
+            }
+        };
+        webPage.PageError += (_, exception) => webDiagnostics.Add($"pageerror: {exception}");
+        webPage.Response += (_, response) =>
+        {
+            if (response.Status >= 400)
+            {
+                webDiagnostics.Add($"response: {response.Status} {response.Url}");
+            }
+        };
+        var webBase = GetEndpoint("WebBff");
+
+        await webPage.GotoAsync(new Uri(webBase, "/shop").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await webPage.Locator(".shop-toolbar input[type='search']").FillAsync(product.Title);
+        await Expect(webPage.Locator("body")).Not.ToContainTextAsync(product.Title, new() { Timeout = 5_000 });
+
+        product = await UpdateCommerceProductStatusAsync(intranetPage, product, "Published");
+        await webPage.GotoAsync(new Uri(webBase, "/shop").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(webPage.Locator("body")).ToContainTextAsync(product.Title, new() { Timeout = 30_000 });
+        await webPage.GetByRole(AriaRole.Link, new() { NameString = product.Title }).First.ClickAsync();
+        await webPage.WaitForURLAsync(url => url.Contains($"/shop/{product.Handle}", StringComparison.OrdinalIgnoreCase), new() { Timeout = 30_000 });
+        await Expect(webPage.GetByRole(AriaRole.Heading, new() { NameString = product.Title })).ToBeVisibleAsync();
+        await webPage.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Add to cart|เพิ่มลงตะกร้า", RegexOptions.IgnoreCase) }).ClickAsync();
+        try
+        {
+            await webPage.WaitForFunctionAsync(
+                "handle => window.localStorage.getItem('maliev.cart.v1')?.includes(handle)",
+                product.Handle,
+                new() { Timeout = 15_000 });
+        }
+        catch (Exception ex)
+        {
+            var cartJson = await webPage.EvaluateAsync<string?>("() => window.localStorage.getItem('maliev.cart.v1')");
+            var body = await webPage.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+            throw new InvalidOperationException(
+                $"Add-to-cart did not persist the product before navigation. Cart JSON: {cartJson ?? "<null>"}. Url: {webPage.Url}. Body: {body[..Math.Min(body.Length, 1_000)]}. Browser diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, webDiagnostics)}",
+                ex);
+        }
+
+        await webPage.GotoAsync(new Uri(webBase, "/cart").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        try
+        {
+            await Expect(webPage.Locator("body")).ToContainTextAsync(product.Title, new() { Timeout = 15_000 });
+        }
+        catch (Exception ex)
+        {
+            var cartJson = await webPage.EvaluateAsync<string?>("() => window.localStorage.getItem('maliev.cart.v1')");
+            var body = await webPage.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+            throw new InvalidOperationException(
+                $"Cart page did not show the persisted product. Cart JSON: {cartJson ?? "<null>"}. Url: {webPage.Url}. Body: {body[..Math.Min(body.Length, 1_000)]}. Browser diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, webDiagnostics)}",
+                ex);
+        }
+        var quantityInput = webPage.GetByLabel(new Regex("Quantity|จำนวน", RegexOptions.IgnoreCase)).First;
+        await quantityInput.FillAsync("2");
+        await quantityInput.PressAsync("Tab");
+        await Expect(webPage.Locator("body")).ToContainTextAsync("2,980.00", new() { Timeout = 15_000 });
+        await webPage.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Continue to checkout|ดำเนินการชำระเงิน", RegexOptions.IgnoreCase) }).ClickAsync();
+        await webPage.WaitForURLAsync(url => url.Contains("/auth/sign-in", StringComparison.OrdinalIgnoreCase), new() { Timeout = 30_000 });
+        Assert.Contains("returnUrl", webPage.Url, StringComparison.OrdinalIgnoreCase);
+
+        await ArchiveCommerceProductAsync(intranetPage, product);
+        await webPage.GotoAsync(new Uri(webBase, $"/shop/{product.Handle}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(webPage.Locator("body")).ToContainTextAsync("Product not found", new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies the QuoteEngine anonymous demo remains non-mutating and usable.
     /// Covers the demo-backed executable portions of QUOTE-002, QUOTE-003, QUOTE-004, QUOTE-018, QUOTE-019, QUOTE-020, and QUOTE-024.
     /// </summary>
@@ -687,6 +780,93 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     private sealed record CreatedIntranetCustomer(string Email, string FullName, string RawCreateResponse);
+
+    private static async Task<CommerceE2EProduct> CreateCommerceProductAsync(IPage page)
+    {
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var handle = $"e2e-storefront-product-{unique}";
+        var title = $"E2E Storefront Product {unique}";
+        var payload = new
+        {
+            handle,
+            title,
+            brand = "MALIEV",
+            summary = "Browser E2E published catalog product.",
+            description = "Created by the Aspire browser E2E gate to verify employee catalog management and Web storefront exposure.",
+            productType = "Printed Product",
+            status = "Draft",
+            variants = new[]
+            {
+                new
+                {
+                    sku = $"E2E-{unique}",
+                    title = "Default",
+                    priceAmount = 1490.00m,
+                    currency = "THB",
+                    inventoryQuantity = 7,
+                    optionValuesJson = "{\"Lead time\":\"3 business days\"}"
+                }
+            },
+            media = Array.Empty<object>(),
+            collectionHandles = Array.Empty<string>()
+        };
+
+        var createResult = await page.EvaluateAsync<string>(
+            @"async payload => {
+                const r = await fetch('/api/v1/commerce/products', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            payload);
+
+        Assert.StartsWith("201", createResult, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(createResult[4..]);
+        return new CommerceE2EProduct(
+            document.RootElement.GetProperty("id").GetGuid(),
+            document.RootElement.GetProperty("handle").GetString() ?? handle,
+            document.RootElement.GetProperty("title").GetString() ?? title,
+            document.RootElement.GetProperty("status").GetString() ?? "Draft");
+    }
+
+    private static async Task<CommerceE2EProduct> UpdateCommerceProductStatusAsync(IPage page, CommerceE2EProduct product, string status)
+    {
+        var updateResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch(`/api/v1/commerce/products/${args.id}/status`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: args.status })
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new { id = product.Id, status });
+
+        Assert.StartsWith("200", updateResult, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(updateResult[4..]);
+        return product with { Status = document.RootElement.GetProperty("status").GetString() ?? status };
+    }
+
+    private static async Task ArchiveCommerceProductAsync(IPage page, CommerceE2EProduct product)
+    {
+        var archiveResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/commerce/products/${id}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            product.Id);
+
+        Assert.StartsWith("204", archiveResult, StringComparison.Ordinal);
+    }
+
+    private sealed record CommerceE2EProduct(Guid Id, string Handle, string Title, string Status);
 
     private static async Task AssertIntranetRouteAsync(IPage page, Uri intranetBase, string path, Regex expectedText)
     {
