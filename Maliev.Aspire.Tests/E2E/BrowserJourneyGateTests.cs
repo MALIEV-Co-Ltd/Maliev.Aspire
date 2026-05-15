@@ -1204,6 +1204,209 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee can create a supplier-backed purchase order, attach evidence, cancel with a reason, and see persisted state.
+    /// Covers the executable supplier profile, purchase order, attachment, and cancellation portions of PROC-002 and PROC-003.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "PROC-002,PROC-003")]
+    public async Task Intranet_ProcurementPurchaseOrder_CreatesAttachesAndCancelsSupplierPo()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var procurementDiagnostics = new List<string>();
+        page.Console += (_, message) =>
+        {
+            var text = message.Text;
+            if (text.Contains("procurement", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("purchase order", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("HTTP", StringComparison.OrdinalIgnoreCase))
+            {
+                procurementDiagnostics.Add($"console:{message.Type}:{text}");
+            }
+        };
+        page.RequestFailed += (_, request) =>
+        {
+            if (request.Url.Contains("/api/v1/procurement", StringComparison.OrdinalIgnoreCase))
+            {
+                procurementDiagnostics.Add($"request-failed:{request.Method} {request.Url} {request.Failure}");
+            }
+        };
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var customerPo = $"CPO-E2E-{unique}".ToUpperInvariant();
+        var attachmentPath = Path.Combine(Path.GetTempPath(), $"maliev-e2e-purchase-order-{unique}.txt");
+        var attachmentName = Path.GetFileName(attachmentPath);
+        var attachmentDescription = $"Supplier PO evidence {unique}";
+        var cancelReason = $"E2E duplicate supplier PO {unique}";
+
+        await File.WriteAllTextAsync(attachmentPath, $"Supplier purchase order evidence for {customerPo}");
+
+        try
+        {
+            using var purchaseOrderClient = _fixture.CreateAuthenticatedClient("PurchaseOrderService");
+
+            await SignInToIntranetAsync(page, intranetBase, "/purchasing/new");
+            var customer = await CreateIntranetCorporateCustomerAsync(page);
+            var order = await AspireTestData.CreateOrderAsync(
+                _fixture,
+                customer.CustomerId,
+                $"Procurement source order {unique}");
+            var sourceOrderId = GetJsonString(order, "orderId", "OrderId");
+            Assert.False(string.IsNullOrWhiteSpace(sourceOrderId), $"OrderService did not return an order id: {order}");
+
+            var supplier = await CreateIntranetSupplierAsync(page);
+            await WaitForIntranetApiTextContainsAsync(page, "/api/v1/suppliers?page=1&pageSize=100", supplier.Name);
+            await WaitForIntranetApiTextContainsAsync(page, "/api/v1/orders?page=1&pageSize=100", sourceOrderId);
+
+            await page.GotoAsync(new Uri(intranetBase, "/purchasing/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await Expect(page.Locator("body")).ToContainTextAsync("New Purchase Order", new() { Timeout = 30_000 });
+            await Expect(page.GetByLabel("Supplier")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync(supplier.Name, new() { Timeout = 30_000 });
+
+            await page.GetByLabel("Order type").SelectOptionAsync("1");
+            await page.GetByLabel("Supplier").SelectOptionAsync([new SelectOptionValue { Label = supplier.Name }]);
+            await page.GetByLabel("Source order").SelectOptionAsync(sourceOrderId);
+            await Expect(page.GetByLabel("Order item")).ToBeEnabledAsync(new() { Timeout = 30_000 });
+            await page.GetByLabel("Order item").SelectOptionAsync("primary");
+            await page.GetByLabel("Currency").SelectOptionAsync("THB");
+            await page.GetByLabel("Customer PO").FillAsync(customerPo);
+            await page.GetByLabel("Quantity").FillAsync("1");
+            await page.GetByLabel("Notes").FillAsync($"Created by Aspire browser E2E procurement gate {unique}");
+
+            var createResponseTask = page.WaitForResponseAsync(response =>
+                response.Url.Contains("/api/v1/procurement", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+                new PageWaitForResponseOptions { Timeout = 90_000 });
+
+            await page.GetByRole(AriaRole.Button, new() { NameString = "Create PO" }).ClickAsync();
+            IResponse createResponse;
+            try
+            {
+                createResponse = await createResponseTask;
+            }
+            catch (TimeoutException ex)
+            {
+                var pageError = await page.Locator(".mlv-error").First.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 }).ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+                var body = await ReadBodyPreviewAsync(page, 2_000);
+                throw new TimeoutException(
+                    $"Purchase order form did not receive a create response. Url: {page.Url}. Error: {pageError}. Diagnostics: {string.Join(" || ", procurementDiagnostics)}. Body: {body}",
+                    ex);
+            }
+
+            var createResponseBody = await ReadResponseTextOrEmptyAsync(createResponse);
+            var createPageError = createResponse.Ok
+                ? string.Empty
+                : await page.Locator(".mlv-error").First.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 }).ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+            var createBody = createResponse.Ok
+                ? string.Empty
+                : await ReadBodyPreviewAsync(page, 2_000);
+            Assert.True(
+                createResponse.Ok,
+                $"Purchase order create POST failed with HTTP {createResponse.Status}: {createResponseBody}. Error: {createPageError}. Body: {createBody}. Diagnostics: {string.Join(" || ", procurementDiagnostics)}");
+
+            try
+            {
+                await page.WaitForURLAsync(
+                    url => Regex.IsMatch(new Uri(url).AbsolutePath, "^/purchasing/[0-9]+$"),
+                    new PageWaitForURLOptions
+                    {
+                        Timeout = 60_000,
+                        WaitUntil = WaitUntilState.NetworkIdle
+                    });
+            }
+            catch (TimeoutException ex)
+            {
+                var pageError = await page.Locator(".mlv-error").First.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 }).ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+                var body = await ReadBodyPreviewAsync(page, 2_000);
+                throw new TimeoutException(
+                    $"Purchase order creation did not navigate after submit. Url: {page.Url}. Create response: HTTP {createResponse.Status} {createResponseBody}. Error: {pageError}. Diagnostics: {string.Join(" || ", procurementDiagnostics)}. Body: {body}",
+                    ex);
+            }
+
+            var poIdText = Regex.Match(new Uri(page.Url).AbsolutePath, @"/purchasing/(?<id>[0-9]+)").Groups["id"].Value;
+            Assert.True(int.TryParse(poIdText, out var purchaseOrderId), $"Purchase order detail route did not contain an integer id: {page.Url}");
+
+            await Expect(page.Locator("body")).ToContainTextAsync(supplier.Name, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync(sourceOrderId, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync(customerPo, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync("THB", new() { Timeout = 15_000 });
+
+            var createdResult = await page.EvaluateAsync<string>(
+                @"async id => {
+                    const r = await fetch(`/api/v1/procurement/${id}`, { credentials: 'include' });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                purchaseOrderId);
+            Assert.StartsWith("200 ", createdResult, StringComparison.Ordinal);
+            using (var createdDocument = JsonDocument.Parse(createdResult[4..]))
+            {
+                var purchaseOrder = createdDocument.RootElement;
+                Assert.Equal(sourceOrderId, GetJsonString(purchaseOrder, "sourceOrderId", "SourceOrderId"));
+                Assert.Equal(customerPo, GetJsonString(purchaseOrder, "customerPo", "CustomerPo"));
+                Assert.Equal("THB", GetJsonString(purchaseOrder, "currencyCode", "CurrencyCode"));
+                Assert.False(string.IsNullOrWhiteSpace(GetJsonString(purchaseOrder, "poNumber", "PoNumber")));
+                var status = GetJsonString(purchaseOrder, "status", "Status");
+                Assert.True(
+                    new[] { "Pending", "Approved", "Draft" }.Contains(status, StringComparer.Ordinal),
+                    $"Unexpected purchase order status after creation: {status}");
+            }
+
+            await page.Locator("input[type=file]").SetInputFilesAsync(attachmentPath);
+            await Expect(page.Locator("body")).ToContainTextAsync(attachmentName, new() { Timeout = 15_000 });
+            await page.Locator("select.mlv-form-input").Last.SelectOptionAsync("CustomerPO");
+            await page.Locator("input[placeholder='Description']").FillAsync(attachmentDescription);
+            await page.GetByRole(AriaRole.Button, new() { NameString = "Attach document" }).ClickAsync();
+            await Expect(page.Locator("body")).ToContainTextAsync(attachmentName, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync("CustomerPO", new() { Timeout = 30_000 });
+
+            var fileResult = await page.EvaluateAsync<string>(
+                @"async id => {
+                    const r = await fetch(`/api/v1/procurement/${id}`, { credentials: 'include' });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                purchaseOrderId);
+            Assert.StartsWith("200 ", fileResult, StringComparison.Ordinal);
+            using (var fileDocument = JsonDocument.Parse(fileResult[4..]))
+            {
+                var purchaseOrder = fileDocument.RootElement;
+                Assert.True(TryGetJsonProperty(purchaseOrder, out var files, "files", "Files"));
+                Assert.Contains(files.EnumerateArray(), file =>
+                    string.Equals(attachmentName, GetJsonString(file, "fileName", "FileName"), StringComparison.Ordinal) &&
+                    string.Equals("CustomerPO", GetJsonString(file, "documentType", "DocumentType"), StringComparison.Ordinal));
+            }
+
+            await page.GetByRole(AriaRole.Button, new() { NameString = "Cancel PO" }).ClickAsync();
+            await page.Locator("textarea[placeholder='Cancellation reason']").FillAsync(cancelReason);
+            await page.GetByRole(AriaRole.Button, new() { NameString = "Confirm cancel" }).ClickAsync();
+            await Expect(page.Locator("body")).ToContainTextAsync("Cancelled", new() { Timeout = 30_000 });
+
+            var cancelledResult = await page.EvaluateAsync<string>(
+                @"async id => {
+                    const r = await fetch(`/api/v1/procurement/${id}`, { credentials: 'include' });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                purchaseOrderId);
+            Assert.StartsWith("200 ", cancelledResult, StringComparison.Ordinal);
+            using (var cancelledDocument = JsonDocument.Parse(cancelledResult[4..]))
+            {
+                var purchaseOrder = cancelledDocument.RootElement;
+                Assert.Equal("Cancelled", GetJsonString(purchaseOrder, "status", "Status"));
+                Assert.True(TryGetJsonProperty(purchaseOrder, out var files, "files", "Files"));
+                Assert.Contains(files.EnumerateArray(), file =>
+                    string.Equals(attachmentName, GetJsonString(file, "fileName", "FileName"), StringComparison.Ordinal));
+            }
+        }
+        finally
+        {
+            if (File.Exists(attachmentPath))
+            {
+                File.Delete(attachmentPath);
+            }
+        }
+    }
+
+    /// <summary>
     /// Verifies employee-created customer records are searchable, detail pages render, and the employee project quote workspace can select a customer.
     /// Covers executable customer/project-workspace portions of INT-003 and INT-004.
     /// </summary>
@@ -1573,6 +1776,18 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         }
     }
 
+    private static async Task<string> ReadResponseTextOrEmptyAsync(IResponse response)
+    {
+        try
+        {
+            return await response.TextAsync();
+        }
+        catch (PlaywrightException)
+        {
+            return string.Empty;
+        }
+    }
+
     private static async Task<string> ReadHtmlPreviewAsync(IPage page, int maxLength)
     {
         try
@@ -1690,6 +1905,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 attempt < 5 &&
                 ex.Message.Contains("Execution context was destroyed", StringComparison.OrdinalIgnoreCase))
             {
+                await page.WaitForTimeoutAsync(500);
+            }
+            catch (PlaywrightException ex) when (attempt < 5)
+            {
+                authUser = $"fetch failed: {ex.Message}";
                 await page.WaitForTimeoutAsync(500);
             }
         }
@@ -1969,6 +2189,78 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         string TaxId,
         string BillingAddressLine1,
         string RawCreateResponse);
+
+    private static async Task<CreatedIntranetSupplier> CreateIntranetSupplierAsync(IPage page)
+    {
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var name = $"E2E Supplier Metals {unique}";
+        var taxId = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+        var email = $"supplier.{unique}@maliev.local";
+
+        var createResult = await page.EvaluateAsync<string>(
+            @"async payload => {
+                const r = await fetch('/api/v1/suppliers', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new
+            {
+                name,
+                taxId,
+                email,
+                phone = "+6625550123",
+                country = "Thailand",
+                address = "18 Procurement Verification Road",
+                city = "Bangkok",
+                postalCode = "10310",
+                contactPerson = "E2E Supplier Contact",
+                website = "https://supplier.e2e.maliev.local",
+                capabilities = new[] { "CNC", "Aluminium" }
+            });
+
+        Assert.True(
+            createResult.StartsWith("201", StringComparison.Ordinal),
+            $"Supplier create failed. Result: {createResult}");
+        using var document = JsonDocument.Parse(createResult[4..]);
+        var root = document.RootElement;
+        var supplierId = root.GetProperty("id").GetGuid();
+        Assert.Equal(name, GetJsonString(root, "companyName", "CompanyName"));
+        Assert.Equal(taxId, GetJsonString(root, "taxId", "TaxId"));
+
+        return new CreatedIntranetSupplier(supplierId, name, taxId, email);
+    }
+
+    private sealed record CreatedIntranetSupplier(Guid Id, string Name, string TaxId, string Email);
+
+    private static async Task WaitForIntranetApiTextContainsAsync(IPage page, string path, string expectedText)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(45);
+        var lastResult = string.Empty;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            lastResult = await page.EvaluateAsync<string>(
+                @"async path => {
+                    const r = await fetch(path, { credentials: 'include' });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                path);
+
+            if (lastResult.StartsWith("200 ", StringComparison.Ordinal) &&
+                lastResult.Contains(expectedText, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            await page.WaitForTimeoutAsync(1_000);
+        }
+
+        Assert.Fail($"Expected {path} to contain {expectedText} before timeout. Last result: {lastResult[..Math.Min(lastResult.Length, 2_000)]}");
+    }
 
     private static async Task SelectCustomerInPickerAsync(IPage page, string query, string expectedName)
     {
