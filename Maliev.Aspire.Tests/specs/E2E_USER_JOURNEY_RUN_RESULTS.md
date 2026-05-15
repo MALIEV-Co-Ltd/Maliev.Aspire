@@ -21,8 +21,9 @@
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests"` | Passed: 2 tests |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~Intranet_LimitedEmployee_CannotAccessRestrictedModuleApis"` | Passed: 1 test |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~Intranet_GlobalSearch_ReturnsEmployeeCreatedCustomerAndNavigatesToRecord"` | Passed: 1 test |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 16 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 18 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~Intranet_LimitedEmployee_CanUpdateOwnProfileOnly"` | Passed: 1 test |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 17 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 19 tests |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~AspireTestAdminSeedOptionsTests\|FullyQualifiedName~AspireTestAdminIamSeederSourceTests"` | Passed: 7 tests |
 | `dotnet test B:\maliev\Maliev.CommerceService\Maliev.CommerceService.Tests\Maliev.CommerceService.Tests.csproj -p:UseSharedCompilation=false -m:1` | Passed: 9 tests |
 | `dotnet test B:\maliev\Maliev.Web\Maliev.Web.Tests\Maliev.Web.Tests.csproj -p:UseSharedCompilation=false -m:1` | Passed: 69 tests |
@@ -45,6 +46,7 @@
 | `INT-002`, `INT-003`, `INT-010`, `INT-011`, `INT-012`, `INT-013`, `INT-014`, `COM-001`, `FIN-001`, `FIN-002`, `PROC-002`, `PROC-003`, `MFG-001`, `MFG-003`, `MFG-004`, `HR-001`, `HR-002`, `OPS-001`, `SEC-002` | Authenticated Intranet automation employee signs in through the real BFF/AuthService/IAM path and reaches dashboard, search, admin, IAM user, customer, project, commerce catalog, accounting, purchasing, manufacturing material/equipment/schedule, and HR profile module routes without login loops, startup failures, or route-level permission denial. |
 | `INT-003`, `INT-004` | Authenticated Intranet automation employee creates a new customer through `/api/v1/customers/create-basic`, finds the customer in `/customers`, opens the customer detail page, opens `/sales/projects/new`, searches the project customer picker, selects that customer, and verifies the quote workspace bill-to, upload dropzone, and quote total surfaces. |
 | `OPS-001`, `INT-003` | Authenticated Intranet employee creates a customer, waits for CustomerService's search upsert event to reach SearchService, verifies `/api/v1/search` returns a customer result with `/customers` navigation, uses the top-bar global search UI, verifies click-away closes the result panel, clicks the result, and lands on the customer list with the created customer visible. |
+| `HR-001`, `INT-001`, `SEC-002` | Limited employee signs in with only session/profile permissions, opens `/hr/profile`, updates preferred name, personal email, and mobile phone through the browser UI, reloads to verify persistence, and remains denied from broad `/api/v1/employees` access. |
 
 ### Fixes Made During E2E Execution
 
@@ -67,6 +69,8 @@
 | `Maliev.Intranet` | `e2c9df9` | Resolved current employee profile lookups from the cookie `ClaimTypes.NameIdentifier` claim as well as raw `sub` and `user_id`, fixing `/api/v1/employees/me/profile` for browser-authenticated Intranet sessions. | `EmployeesControllerProfileTests` passed 3 tests; `dotnet build B:\maliev\Maliev.Intranet\Maliev.Intranet.slnx --configuration Release -p:UseSharedCompilation=false -m:1 --no-restore` passed. |
 | `Maliev.Aspire` | `75b56f9` | Added the limited employee seed fixture and browser journey for Intranet permission-boundary validation, plus seed source guards to prevent accidental wildcard assignment. | `Intranet_LimitedEmployee_CannotAccessRestrictedModuleApis` passed; full `BrowserJourneyGateTests` passed 15 tests; `Tier=E2E` passed 17 tests; seed option/source tests passed 7 tests. |
 | `Maliev.Aspire` | `dd1dc4d` | Added the Intranet global-search browser journey for CustomerService -> RabbitMQ -> SearchService -> Intranet BFF -> top-bar UI navigation, and ignored generated `.lscache` tooling artifacts. | `Intranet_GlobalSearch_ReturnsEmployeeCreatedCustomerAndNavigatesToRecord` passed; limited employee search denial passed; full `BrowserJourneyGateTests` passed 16 tests; `Tier=E2E` passed 18 tests. |
+| `Maliev.Intranet` | `e0c7806` | Made `/hr/profile` render from the self-service profile endpoint when the full employee-detail or preference endpoints are not permitted, so a limited employee can still use their own profile page. | `HrProfilePageTests` and `EmployeesControllerProfileTests` passed 6 tests; `dotnet build B:\maliev\Maliev.Intranet\Maliev.Intranet.slnx --configuration Release -p:UseSharedCompilation=false -m:1 --no-restore /nr:false` passed. |
+| `Maliev.Aspire` | `bb5704e` | Added `employee.profiles.update` to the limited employee fixture and browser coverage for self-service profile editing under limited permissions. | `Intranet_LimitedEmployee_CanUpdateOwnProfileOnly` passed; limited permission-boundary test passed; full `BrowserJourneyGateTests` passed 17 tests; `Tier=E2E` passed 19 tests. |
 
 ### Remaining Full-Catalog Blockers
 
@@ -173,7 +177,7 @@
 | `PROC-002` | Blocked | Requires supplier profile UI. | Need Aspire test admin. |
 | `PROC-003` | Blocked | Requires PO detail/cancel/attachment UI. | Need created PO and authenticated session. |
 | `PROC-004` | Blocked | Requires receiving and inventory/accounting impact. | Need PO, inventory, and accounting seed path. |
-| `HR-001` | Blocked | Requires employee lifecycle module. | Need Aspire test admin with HR/admin permissions. |
+| `HR-001` | Partial after automated run | Later automated browser E2E verifies a limited employee can open `/hr/profile`, update their own preferred name, personal email, and mobile phone, reload, and see the persisted self-profile data. | Need full employee lifecycle creation, IAM role assignment, manager/department setup, and offboarding behavior. |
 | `HR-002` | Blocked | Requires leave request and manager approval. | Need two employee identities and role-scoped sessions. |
 | `HR-003` | Blocked | Requires career candidate module. | Need authenticated HR user and candidate seed. |
 | `HR-004` | Blocked | Requires compliance/training module. | Need authenticated HR/compliance user and records. |
