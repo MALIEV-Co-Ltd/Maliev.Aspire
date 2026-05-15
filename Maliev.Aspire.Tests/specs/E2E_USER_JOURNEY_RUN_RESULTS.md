@@ -19,8 +19,8 @@
 |---------|--------|
 | `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 --no-restore` | Passed |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests"` | Passed: 2 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 11 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 13 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 12 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 14 tests |
 
 ### Automated Story Coverage Added
 
@@ -36,6 +36,7 @@
 | `QUOTE-008`, `QUOTE-009`, `QUOTE-010`, `QUOTE-011`, `QUOTE-012`, `QUOTE-013`, `QUOTE-014` | QuoteEngine prototype-backed profile, order tracking, NDA, and supporting document portal routes render. Real persistence, upload, ownership, and employee visibility checks remain blocked until service-backed customer projects replace prototype storage. |
 | `INT-001`, `SEC-002`, `SEC-003` | Anonymous Intranet direct access to `/projects/new` redirects to login and preserves return URL. |
 | `INT-002`, `INT-003`, `INT-010`, `INT-011`, `INT-012`, `INT-013`, `INT-014`, `COM-001`, `FIN-001`, `FIN-002`, `PROC-002`, `PROC-003`, `MFG-001`, `MFG-003`, `MFG-004`, `HR-001`, `HR-002`, `OPS-001`, `SEC-002` | Authenticated Intranet automation employee signs in through the real BFF/AuthService/IAM path and reaches dashboard, search, admin, IAM user, customer, project, commerce catalog, accounting, purchasing, manufacturing material/equipment/schedule, and HR profile module routes without login loops, startup failures, or route-level permission denial. |
+| `INT-003`, `INT-004` | Authenticated Intranet automation employee creates a new customer through `/api/v1/customers/create-basic`, finds the customer in `/customers`, opens the customer detail page, opens `/sales/projects/new`, searches the project customer picker, selects that customer, and verifies the quote workspace bill-to, upload dropzone, and quote total surfaces. |
 
 ### Fixes Made During E2E Execution
 
@@ -48,6 +49,7 @@
 | `Maliev.Web` | `5810d48` | Forwarded browser auth cookies into internal same-origin Web BFF calls during server-side rendering, fixing the account page `Unauthorized` state after successful registration. | `dotnet test B:\maliev\Maliev.Web\Maliev.Web.Tests\Maliev.Web.Tests.csproj --no-build` passed 69 tests; `Web_CustomerEmailRegistration_CreatesAccountSessionAndSignsOut` reached the signed-in account page. |
 | `Maliev.Web` | `ea8c3a4` | Added stable names and accessible labels to account address fields so address entry is testable and accessible. | `dotnet build B:\maliev\Maliev.Web\Maliev.Web.slnx -p:UseSharedCompilation=false -m:1 --no-restore` passed; full Web tests passed 69 tests. |
 | `Maliev.Aspire` | `c8f4b97` | Added executable Web contact and customer registration/account browser stories, preferred secure endpoints in browser tests, and wired Web quote CTAs to the secure local QuoteEngine endpoint. | `BrowserJourneyGateTests` passed 11 tests; `Tier=E2E` passed 13 tests; `AppHostReferenceTests` passed 10 tests. |
+| `Maliev.Aspire` | `97793a1` | Added the first deeper authenticated Intranet browser story for employee customer creation, customer detail verification, and Project quote workspace customer selection. The test intentionally avoids `/api/v1/seed/customers` because that seed endpoint uses service-account clients and currently returns downstream CustomerService 403 in the Aspire browser context. | `Intranet_EmployeeCreatedCustomer_CanBeOpenedAndSelectedInProjectWorkspace` passed; `BrowserJourneyGateTests` passed 12 tests; `Tier=E2E` passed 14 tests. |
 
 ### Remaining Full-Catalog Blockers
 
