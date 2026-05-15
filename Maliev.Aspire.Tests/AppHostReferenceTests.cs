@@ -58,9 +58,49 @@ public sealed class AppHostReferenceTests
     public void AppHost_LocalTestAdmin_RegistersEmployeeAndIamSeeders()
     {
         var appHostSource = File.ReadAllText(FindAppHostSource());
+        var appHostDirectory = Path.GetDirectoryName(FindAppHostSource())!;
+        var resourceExtensionSource = File.ReadAllText(Path.Combine(
+            appHostDirectory,
+            "Extensions",
+            "MalievResourceExtensions.cs"));
 
+        Assert.Contains(".SeedDatabase<CountryDatabaseSeeder>(databases.Country", appHostSource, StringComparison.Ordinal);
         Assert.Contains(".SeedDatabase<EmployeeDatabaseSeeder>(databases.Employee", appHostSource, StringComparison.Ordinal);
         Assert.Contains(".SeedDatabase<IAMDatabaseSeeder>(databases.IAM", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("targetService.WaitFor(seeder);", resourceExtensionSource, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Customer creation paths require CountryService data before address forms are usable.
+    /// </summary>
+    [Fact]
+    public void AppHost_CustomerAndIntranet_WaitForCountryReferenceData()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var customerBlockStart = appHostSource.IndexOf(
+            "var customerService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+        var employeeBlockStart = appHostSource.IndexOf(
+            "var employeeService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+        var intranetBlockStart = appHostSource.IndexOf(
+            "builder.AddProject<Projects.Maliev_Intranet_Bff>(\"IntranetBff\")",
+            StringComparison.Ordinal);
+        var webBlockStart = appHostSource.IndexOf(
+            "builder.AddProject<Projects.Maliev_Web_Bff>(\"WebBff\")",
+            StringComparison.Ordinal);
+
+        Assert.True(customerBlockStart >= 0, "CustomerService resource declaration was not found.");
+        Assert.True(employeeBlockStart > customerBlockStart, "EmployeeService resource declaration was not found after CustomerService.");
+        Assert.True(intranetBlockStart >= 0, "IntranetBff resource declaration was not found.");
+        Assert.True(webBlockStart > intranetBlockStart, "WebBff resource declaration was not found after IntranetBff.");
+
+        var customerBlock = appHostSource[customerBlockStart..employeeBlockStart];
+        var intranetBlock = appHostSource[intranetBlockStart..webBlockStart];
+        Assert.Contains(".WithReference(countryService)", customerBlock, StringComparison.Ordinal);
+        Assert.Contains(".WaitFor(countryService)", customerBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithReference(countryService)", intranetBlock, StringComparison.Ordinal);
+        Assert.Contains(".WaitFor(countryService)", intranetBlock, StringComparison.Ordinal);
     }
 
     /// <summary>

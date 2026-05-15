@@ -1,3 +1,4 @@
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.CountryService;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.EmployeeService;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.IAMService;
 using Maliev.Aspire.AppHost.Extensions;
@@ -298,7 +299,8 @@ static partial class Program
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .SeedDatabase<CountryDatabaseSeeder>(databases.Country);
 
         var registryService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_RegistryService_Api>("RegistryService")
@@ -355,6 +357,7 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(countryService)
+                .WaitFor(countryService)
                 .WithReference(uploadService)
                 .WaitFor(uploadService)
                 .WithReference(iamService)
@@ -798,6 +801,7 @@ static partial class Program
                 .WithReference(iamService)
                 .WaitFor(iamService)
                 .WithReference(countryService)
+                .WaitFor(countryService)
                 .WithReference(registryService)
                 .WithReference(uploadService)
                 .WithReference(customerService)
@@ -881,6 +885,7 @@ static partial class Program
                 .WithReference(iamService)
                 .WaitFor(iamService)
                 .WithReference(countryService)
+                .WaitFor(countryService)
                 .WithReference(registryService)
                 .WithReference(uploadService)
                 .WithReference(quotationService)

@@ -79,7 +79,11 @@ public static class MalievResourceExtensions
             .WaitFor(database)
             .WithParentRelationship(targetService);
 
-        if (!targetService.ApplicationBuilder.Environment.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+        if (targetService.ApplicationBuilder.Environment.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+        {
+            targetService.WaitFor(seeder);
+        }
+        else
         {
             seeder.WithExplicitStart();
         }
