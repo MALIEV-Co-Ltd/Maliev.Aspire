@@ -19,8 +19,8 @@
 |---------|--------|
 | `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 --no-restore` | Passed |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests"` | Passed: 2 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 13 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 15 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~BrowserJourneyGateTests" -p:UseSharedCompilation=false -m:1` | Passed: 14 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1` | Passed: 16 tests |
 | `dotnet test B:\maliev\Maliev.CommerceService\Maliev.CommerceService.Tests\Maliev.CommerceService.Tests.csproj -p:UseSharedCompilation=false -m:1` | Passed: 9 tests |
 | `dotnet test B:\maliev\Maliev.Web\Maliev.Web.Tests\Maliev.Web.Tests.csproj -p:UseSharedCompilation=false -m:1` | Passed: 69 tests |
 
@@ -31,6 +31,7 @@
 | `WEB-001`, `WEB-010`, `WEB-011`, `WEB-012`, `WEB-013` | Web home, services, shop, cookie consent, `/quote`, local QuoteEngine demo handoff, and all public trust/policy/support routes: `/about`, `/materials`, `/industries`, `/case-studies`, `/blog`, `/faq`, `/contact`, `/shipping-returns`, `/privacy`, `/terms`, `/cookie-policy`, `/refund-policy`, and `/warranty-policy`. |
 | `WEB-002`, `WEB-012` | Web contact/support route renders the contact form, submits a real inquiry through the Web BFF to ContactService, and shows the customer success state. Employee-side inquiry processing still requires authenticated Intranet coverage. |
 | `WEB-003`, `WEB-005`, `WEB-009` | Email/password registration creates a customer session through AuthService/CustomerService, lands on the protected account page, opens profile, creates an address, signs out, and confirms protected account access redirects back to sign-in. Email verification remains a required product gap. |
+| `SEC-001`, `SEC-003`, `WEB-009` | Two independently registered Web customers create isolated sessions. Customer A creates an account address; Customer B attempts to mutate that address through the Web BFF and receives the not-found ownership boundary. Clearing Customer B's session and opening `/account/addresses` redirects to sign-in with the original return URL preserved. |
 | `WEB-006`, `WEB-007` | Google sign-in and password reset entry points render through browser routes. Completion remains blocked by local OAuth/test-token and local mail/reset-token fixtures. |
 | `WEB-008`, `COM-001`, `COM-002`, `COM-003`, `COM-004` | Authenticated Intranet employee creates a draft Commerce product through `/api/v1/commerce/products`, verifies the draft is visible to employees but hidden from Web, publishes it, verifies Web shop/product detail/cart add/quantity edit/checkout sign-in redirect, registers a customer, verifies the signed customer session, creates a CommerceService-backed checkout draft, archives the product, and verifies the public product URL returns the customer-facing not-found state. Payment completion remains a separate Omise/product gap. |
 | `QUOTE-002`, `QUOTE-003`, `QUOTE-004`, `QUOTE-018`, `QUOTE-019`, `QUOTE-020`, `QUOTE-024` | QuoteEngine anonymous demo loads the MALIEV sample file, shows the prototype viewer and DFM checks, switches to FDM, recalculates standard price, recalculates express lead-time price, recalculates after quantity edit, keeps formal PDF disabled, and states that no customer data is created. |
@@ -57,10 +58,11 @@
 | `Maliev.CommerceService` | `6c62bf5` | Fixed storefront cart-line persistence by explicitly adding new application-assigned `CartLine` entities through the repository instead of relying on EF relationship tracking from an existing cart collection. | New service-flow test verifies product publish, cart creation, cart-line insert, and checkout-session creation; full CommerceService tests passed 9 tests; the Web browser checkout journey passed. |
 | `Maliev.Web` | `9b39065` | Replaced direct Order/Payment/Delivery checkout draft calls with CommerceService cart and checkout-session boundaries, added progressive-enhancement cart form submit, synchronized cart `localStorage` before submit, and exposed backend diagnostics only in Development/Testing. | Full Web tests passed 69 tests; signed customer browser checkout creates a draft and shows the ready state. |
 | `Maliev.Aspire` | `7e901d2` | Expanded the Commerce browser gate to cover customer registration after checkout sign-in redirect, account-session verification, signed checkout draft creation, IAM readiness retries for the automation employee, and checkout diagnostics. | `Commerce_EmployeePublishesProduct_WebCustomerCanBrowseCartAndArchivedProductIsHidden` passed; full `BrowserJourneyGateTests` passed 13 tests. |
+| `Maliev.Aspire` | `20b40c8` | Added the Web customer account security browser story for two-customer address ownership isolation and protected account return-url preservation. | `Web_CustomerAccountSecurity_BlocksCrossCustomerAddressMutationAndPreservesReturnUrl` passed; `BrowserJourneyGateTests` passed 14 tests; `Tier=E2E` passed 16 tests. |
 
 ### Remaining Full-Catalog Blockers
 
-- Full 95-story browser verification still requires multi-customer session fixtures for ownership/security checks, local mail capture for verification/reset links, OAuth test mode, payment completion, service-backed QuoteEngine project/quotation/order/payment workflows, and deeper browser actions inside each Intranet module beyond route-level authorization/rendering.
+- Full 95-story browser verification still requires local mail capture for verification/reset links, OAuth test mode, payment completion, service-backed QuoteEngine project/quotation/order/payment workflows, cross-customer ownership checks beyond Web account addresses, low-permission employee sessions, and deeper browser actions inside each Intranet module beyond route-level authorization/rendering.
 - Stories not listed above remain partial or blocked as recorded in the manual story matrix below. They must not be counted as fully verified until they have automated browser coverage or an explicitly accepted product-gap failure.
 
 ## 2026-05-15 Manual Browser E2E Correction Run
@@ -169,9 +171,9 @@
 | `HR-004` | Blocked | Requires compliance/training module. | Need authenticated HR/compliance user and records. |
 | `HR-005` | Blocked | Requires compensation module. | Need authenticated HR/finance user and permission boundary checks. |
 | `HR-006` | Blocked | Requires performance module. | Need manager/employee identities and review records. |
-| `SEC-001` | Blocked | Cross-customer denial requires two authenticated customers. | Need two seeded customer accounts and QuoteEngine/Web sessions. |
+| `SEC-001` | Partial after automated run | Later automated Web E2E created two authenticated customers and verified Customer B cannot mutate Customer A's address. | Need extend the same ownership denial to QuoteEngine projects, quote versions, orders, NDAs, supporting documents, and PDFs. |
 | `SEC-002` | Partial | Anonymous direct URLs to restricted Intranet pages redirected to login. | Need low-permission employee session to verify 403/hidden modules. |
-| `SEC-003` | Partial | Direct protected URLs preserved return URL on login redirect. | Need expired authenticated session check. |
+| `SEC-003` | Partial after automated run | Direct protected URLs preserved return URL on login redirect; later automated Web E2E also cleared a customer session and verified `/account/addresses` redirects with return URL preserved. | Need true expired-token/refresh-session behavior, not only anonymous or missing-cookie redirects. |
 | `SEC-004` | Partial | QuoteEngine demo hides formal/internal artifacts and disables PDF. | Need authenticated customer surfaces plus employee quote with internal pricing. |
 
 ### Fixed During Manual Browser Run
