@@ -86,6 +86,48 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies the public Web content routes used for trust, policy, support, and conversion research render without broken navigation.
+    /// Covers the route-level executable portions of WEB-001, WEB-010, WEB-011, WEB-012, and WEB-013.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "WEB-001,WEB-010,WEB-011,WEB-012,WEB-013")]
+    public async Task Web_PublicContentRoutes_RenderTrustPolicyAndSupportSurfaces()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var webBase = GetEndpoint("WebBff");
+
+        var routes = new[]
+        {
+            "/",
+            "/about",
+            "/services",
+            "/materials",
+            "/industries",
+            "/case-studies",
+            "/blog",
+            "/faq",
+            "/contact",
+            "/shipping-returns",
+            "/privacy",
+            "/terms",
+            "/cookie-policy",
+            "/refund-policy",
+            "/warranty-policy",
+            "/quote"
+        };
+
+        foreach (var route in routes)
+        {
+            var response = await page.GotoAsync(new Uri(webBase, route).ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            Assert.True(response?.Ok, $"Web route {route} did not return success. Status: {response?.Status}");
+            await Expect(page.Locator("body")).Not.ToBeEmptyAsync(new() { Timeout = 15_000 });
+            await Expect(page.Locator("body")).Not.ToContainTextAsync("Sorry, there is nothing at this address", new() { Timeout = 5_000 });
+        }
+    }
+
+    /// <summary>
     /// Verifies public Web contact, policy, support, auth, account, shop, and cart entry points render.
     /// Covers the currently executable portions of WEB-002, WEB-003, WEB-005, WEB-006, WEB-007, WEB-008, WEB-009, WEB-012, and COM-003.
     /// </summary>
@@ -131,11 +173,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies the QuoteEngine anonymous demo remains non-mutating and usable.
-    /// Covers QUOTE-003 and QUOTE-024.
+    /// Covers the demo-backed executable portions of QUOTE-002, QUOTE-003, QUOTE-004, QUOTE-018, QUOTE-019, QUOTE-020, and QUOTE-024.
     /// </summary>
     [Fact]
     [Trait("Tier", "E2E")]
-    [Trait("Stories", "QUOTE-003,QUOTE-024")]
+    [Trait("Stories", "QUOTE-002,QUOTE-003,QUOTE-004,QUOTE-018,QUOTE-019,QUOTE-020,QUOTE-024")]
     public async Task QuoteEngine_AnonymousDemo_EstimatesWithoutFormalArtifacts()
     {
         await using var context = await NewContextAsync();
@@ -145,6 +187,9 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await page.GotoAsync(new Uri(quoteBase, "/demo").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
         await Expect(page.GetByText("Demo only", new() { Exact = false })).ToBeVisibleAsync();
         await Expect(page.GetByText("maliev-sample-bracket.step", new() { Exact = false }).First).ToBeVisibleAsync();
+        await Expect(page.GetByText("Prototype viewer", new() { Exact = false })).ToBeVisibleAsync();
+        await Expect(page.GetByText("DFM checks", new() { Exact = false })).ToBeVisibleAsync();
+        await Expect(page.GetByText("No customer data is created", new() { Exact = false })).ToBeVisibleAsync();
 
         await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "CNC Machining", Exact = true })).ToBeVisibleAsync();
         await page.GetByRole(AriaRole.Button, new() { NameString = "FDM 3D Printing", Exact = true }).ClickAsync();
@@ -152,17 +197,25 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await page.GetByRole(AriaRole.Button, new() { NameString = "Estimate" }).ClickAsync();
         await Expect(page.GetByText(new Regex("2,596\\.00\\s+THB")).First).ToBeVisibleAsync();
 
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Express" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Estimate" }).ClickAsync();
+        await Expect(page.GetByText(new Regex("3,504\\.60\\s+THB")).First).ToBeVisibleAsync();
+
+        await page.GetByLabel("Quantity").FillAsync("3");
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Estimate" }).ClickAsync();
+        await Expect(page.GetByText(new Regex("5,256\\.90\\s+THB")).First).ToBeVisibleAsync();
+
         var pdfButton = page.GetByRole(AriaRole.Button, new() { NameString = "PDF" }).First;
         await Expect(pdfButton).ToBeDisabledAsync();
     }
 
     /// <summary>
     /// Verifies signed customer project mode is gated before customer-owned uploads.
-    /// Covers QUOTE-005.
+    /// Covers the authentication-gated entry portions of QUOTE-001, QUOTE-005, and QUOTE-017.
     /// </summary>
     [Fact]
     [Trait("Tier", "E2E")]
-    [Trait("Stories", "QUOTE-005")]
+    [Trait("Stories", "QUOTE-001,QUOTE-005,QUOTE-017")]
     public async Task QuoteEngine_RealProjectMode_BlocksCustomerUploadUntilSignIn()
     {
         await using var context = await NewContextAsync();

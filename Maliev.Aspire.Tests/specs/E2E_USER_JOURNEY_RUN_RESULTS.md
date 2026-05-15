@@ -18,24 +18,34 @@
 |---------|--------|
 | `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 --no-restore` | Passed |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests"` | Passed: 2 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 8 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 9 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 11 tests |
 
 ### Automated Story Coverage Added
 
 | Story ids | Automated browser coverage |
 |-----------|----------------------------|
-| `WEB-001`, `WEB-010`, `WEB-011`, `WEB-013` | Web home, services, shop, cookie consent, `/quote`, and local QuoteEngine demo handoff. |
+| `WEB-001`, `WEB-010`, `WEB-011`, `WEB-012`, `WEB-013` | Web home, services, shop, cookie consent, `/quote`, local QuoteEngine demo handoff, and all public trust/policy/support routes: `/about`, `/materials`, `/industries`, `/case-studies`, `/blog`, `/faq`, `/contact`, `/shipping-returns`, `/privacy`, `/terms`, `/cookie-policy`, `/refund-policy`, and `/warranty-policy`. |
 | `WEB-002`, `WEB-012` | Web contact/support route renders the contact form and submit control surface. Submission and employee processing still require a deterministic test mailbox/form-submit path. |
 | `WEB-003`, `WEB-005`, `WEB-006`, `WEB-007`, `WEB-009` | Web sign-up, sign-in, Google entry, password reset, and account-protection entry points render through browser routes. Full account creation, verification, session refresh, and sign-out still require local mail/OAuth/test-customer credentials. |
 | `WEB-008`, `COM-003` | Web shop and cart routes render storefront search/category and cart surfaces. Product detail, add-to-cart, quantity editing, and checkout draft still require published commerce seed products. |
-| `QUOTE-003`, `QUOTE-024` | QuoteEngine anonymous demo loads the MALIEV sample file, switches to FDM, recalculates price, and keeps formal PDF disabled. |
-| `QUOTE-005` | QuoteEngine real project route shows the sign-in/upload gate before customer-owned upload. |
+| `QUOTE-002`, `QUOTE-003`, `QUOTE-004`, `QUOTE-018`, `QUOTE-019`, `QUOTE-020`, `QUOTE-024` | QuoteEngine anonymous demo loads the MALIEV sample file, shows the prototype viewer and DFM checks, switches to FDM, recalculates standard price, recalculates express lead-time price, recalculates after quantity edit, keeps formal PDF disabled, and states that no customer data is created. |
+| `QUOTE-001`, `QUOTE-005`, `QUOTE-017` | QuoteEngine real project route shows the sign-in/upload gate before customer-owned upload. Real upload retry remains blocked until authenticated project mode is service-backed. |
 | `QUOTE-008`, `QUOTE-009`, `QUOTE-010`, `QUOTE-011`, `QUOTE-012`, `QUOTE-013`, `QUOTE-014` | QuoteEngine prototype-backed profile, order tracking, NDA, and supporting document portal routes render. Real persistence, upload, ownership, and employee visibility checks remain blocked until service-backed customer projects replace prototype storage. |
 | `INT-001`, `SEC-002`, `SEC-003` | Anonymous Intranet direct access to `/projects/new` redirects to login and preserves return URL. |
+| `INT-002`, `INT-003`, `INT-010`, `INT-011`, `INT-012`, `INT-013`, `INT-014`, `COM-001`, `FIN-001`, `FIN-002`, `PROC-002`, `PROC-003`, `MFG-001`, `MFG-003`, `MFG-004`, `HR-001`, `HR-002`, `OPS-001`, `SEC-002` | Authenticated Intranet automation employee signs in through the real BFF/AuthService/IAM path and reaches dashboard, search, admin, IAM user, customer, project, commerce catalog, accounting, purchasing, manufacturing material/equipment/schedule, and HR profile module routes without login loops, startup failures, or route-level permission denial. |
+
+### Fixes Made During E2E Execution
+
+| Repo | Commit | Fix | Evidence |
+|------|--------|-----|----------|
+| `Maliev.AuthService` | `d4d6d26` | Preserved Authorization headers for employee/customer validation clients by using HTTPS-first Aspire service discovery. | `dotnet test B:\maliev\Maliev.AuthService\Maliev.AuthService.slnx --filter "FullyQualifiedName~AuthenticationServiceTests" --no-restore` passed 25 tests. |
+| `Maliev.Intranet` | `143057c` | Enabled hosted Blazor static web assets in the Intranet BFF so Aspire browser runs can load CSS/images/Blazor framework assets. | `dotnet build B:\maliev\Maliev.Intranet\Maliev.Intranet.Bff\Maliev.Intranet.Bff.csproj -p:UseSharedCompilation=false -m:1 --no-restore` passed; `LoginPageControllerTests` passed 2 tests. |
+| `Maliev.AuthService` | `34559d6` | Preserved Authorization headers for AuthService -> IAM permission resolution by using `https+http://IAMService`; this restored wildcard IAM claims in the Intranet browser session. | `dotnet test B:\maliev\Maliev.AuthService\Maliev.AuthService.slnx --filter "FullyQualifiedName~IAMServiceClient" --no-restore` passed 5 tests; authenticated Intranet browser route sweep passed. |
 
 ### Remaining Full-Catalog Blockers
 
-- Full 95-story browser verification still requires deterministic customer and employee browser sessions, local mail capture for verification/reset links, OAuth test mode, published commerce seed products, and service-backed QuoteEngine project/quotation/order/payment workflows.
+- Full 95-story browser verification still requires deterministic customer browser sessions, local mail capture for verification/reset links, OAuth test mode, published commerce seed products, service-backed QuoteEngine project/quotation/order/payment workflows, and deeper browser actions inside each Intranet module beyond route-level authorization/rendering.
 - Stories not listed above remain partial or blocked as recorded in the manual story matrix below. They must not be counted as fully verified until they have automated browser coverage or an explicitly accepted product-gap failure.
 
 ## 2026-05-15 Manual Browser E2E Correction Run
