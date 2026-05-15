@@ -1,0 +1,33 @@
+name: CI - Main
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  SERVICE_DEFAULTS_PATH: "Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj"
+  VERSION_FORMAT: "1.0.*"
+  NUGET_USERNAME: ${{ github.actor }}
+  NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
+
+jobs:
+  build:
+    name: Build ServiceDefaults
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.SERVICE_DEFAULTS_PATH }} -p:SharedLibraryVersion=${{ env.VERSION_FORMAT }}
+
+      - name: Build
+        run: dotnet build ${{ env.SERVICE_DEFAULTS_PATH }} --configuration Release --no-restore /p:TreatWarningsAsErrors=true /p:SharedLibraryVersion=${{ env.VERSION_FORMAT }}
