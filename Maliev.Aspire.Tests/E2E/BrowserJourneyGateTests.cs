@@ -900,6 +900,143 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee can create a customer from the Intranet onboarding UI with company, address, and note data.
+    /// Covers the manual employee onboarding portions of INT-002 and the customer-detail propagation portions of INT-003.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-002,INT-003")]
+    public async Task Intranet_CustomerOnboardingUi_CreatesCompanyAddressesAndInternalNote()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var firstName = "E2E";
+        var lastName = $"Onboard {unique}";
+        var fullName = $"{firstName} {lastName}";
+        var email = $"e2e.ui.onboard.{unique}@maliev.local";
+        var phone = "+66810000000";
+        var companyName = $"E2E UI Components {unique}";
+        var taxId = $"01055{DateTimeOffset.UtcNow:HHmmssff}";
+        var internalNote = $"Created through the Intranet onboarding UI E2E gate {unique}.";
+
+        await SignInToIntranetAsync(page, intranetBase, "/sales/customers/new");
+
+        var countriesResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/ReferenceData/countries', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        if (!countriesResult.StartsWith("200 ", StringComparison.Ordinal) ||
+            !countriesResult.Contains("Thailand", StringComparison.OrdinalIgnoreCase) ||
+            !countriesResult.Contains("\"iso2\":\"TH\"", StringComparison.OrdinalIgnoreCase))
+        {
+            using var countryClient = _fixture.CreateAuthenticatedClient("CountryService");
+            using var directCountryResponse = await countryClient.GetAsync("/country/v1/countries?pageSize=1000");
+            var directCountryBody = await directCountryResponse.Content.ReadAsStringAsync();
+            Assert.Fail(
+                $"Intranet BFF did not return Thailand country reference data. " +
+                $"BFF result: {countriesResult}. " +
+                $"Direct CountryService result: {(int)directCountryResponse.StatusCode} {directCountryResponse.StatusCode} " +
+                $"{directCountryBody[..Math.Min(directCountryBody.Length, 2_000)]}");
+        }
+
+        await Expect(page.Locator(".customer-profile-form")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await page.GetByLabel("First name").FillAsync(firstName);
+        await page.GetByLabel("Last name").FillAsync(lastName);
+        await page.GetByLabel("Email").FillAsync(email);
+        await page.GetByLabel("Phone number").FillAsync(phone);
+        await Expect(page.Locator(".customer-create-side")).ToContainTextAsync(fullName);
+
+        await OpenCustomerCreateTabAsync(page, "Company");
+        await page.Locator(".company-name-field input").FillAsync(companyName);
+        await page.Locator(".company-tax-field input").FillAsync(taxId);
+        await Expect(page.Locator(".customer-create-side")).ToContainTextAsync(companyName);
+        await Expect(page.Locator(".customer-create-side")).ToContainTextAsync("Head office", new() { IgnoreCase = true });
+
+        var companyBilling = page.Locator(".company-address-block");
+        await FillAddressFieldsAsync(companyBilling, "99 Demo Industrial Road", "Si Lom", "Bang Rak", "Bangkok", "10500");
+
+        await OpenCustomerCreateTabAsync(page, "Addresses");
+        var customerBilling = page.Locator(".address-panel").Filter(new() { HasText = "Customer billing address" });
+        await FillAddressFieldsAsync(customerBilling, "88 Customer Billing Road", "Khlong Toei Nuea", "Watthana", "Bangkok", "10110");
+
+        var customerShipping = page.Locator(".address-panel").Filter(new() { HasText = "Customer shipping address" });
+        await FillAddressFieldsAsync(customerShipping, "77 Shipping Warehouse Lane", "Bang Kapi", "Huai Khwang", "Bangkok", "10310");
+
+        await OpenCustomerCreateTabAsync(page, "Notes");
+        await page.Locator(".notes-input").FillAsync(internalNote);
+        await page.WaitForTimeoutAsync(750);
+        await Expect(page.Locator(".customer-create-side")).ToContainTextAsync("10500");
+        await Expect(page.Locator(".customer-create-side")).ToContainTextAsync("10110");
+        await Expect(page.Locator(".customer-create-side")).ToContainTextAsync("10310");
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Create Customer" }).ClickAsync();
+        try
+        {
+            await page.WaitForURLAsync(
+                url => Regex.IsMatch(new Uri(url).AbsolutePath, "^/customers/[0-9a-fA-F-]{36}$"),
+                new PageWaitForURLOptions
+                {
+                    Timeout = 60_000,
+                    WaitUntil = WaitUntilState.NetworkIdle
+                });
+        }
+        catch (TimeoutException ex)
+        {
+            var pageError = await page.Locator(".mlv-error").First.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 }).ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+            var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+            throw new TimeoutException(
+                $"Customer onboarding did not navigate after submit. Url: {page.Url}. Error: {pageError}. Body: {body[..Math.Min(body.Length, 1_500)]}",
+                ex);
+        }
+
+        var customerId = new Uri(page.Url).Segments.Last().TrimEnd('/');
+        await Expect(page.Locator("body")).ToContainTextAsync(fullName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(companyName, new() { Timeout = 30_000 });
+        await Expect(page.Locator(".customer-field").Filter(new() { HasText = "Email" }).Locator("input").First).ToHaveValueAsync(email, new() { Timeout = 15_000 });
+
+        var detailResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/customers/${id}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            customerId);
+
+        Assert.StartsWith("200", detailResult, StringComparison.Ordinal);
+        using var detail = JsonDocument.Parse(detailResult[4..]);
+        var root = detail.RootElement;
+        Assert.Equal(fullName, GetJsonString(root, "name", "Name"));
+        Assert.Equal(email, GetJsonString(root, "email", "Email"));
+        Assert.Equal(companyName, GetJsonString(root, "companyName", "CompanyName"));
+        Assert.Equal(taxId, GetJsonString(root, "companyVatNumber", "CompanyVatNumber"));
+
+        Assert.True(TryGetJsonProperty(root, out var addresses, "addresses", "Addresses"));
+        Assert.Contains(addresses.EnumerateArray(), address =>
+            string.Equals("Billing", GetJsonString(address, "type", "Type"), StringComparison.OrdinalIgnoreCase)
+            && string.Equals("88 Customer Billing Road", GetJsonString(address, "addressLine1", "AddressLine1"), StringComparison.Ordinal)
+            && string.Equals("10110", GetJsonString(address, "postalCode", "PostalCode"), StringComparison.Ordinal));
+        Assert.Contains(addresses.EnumerateArray(), address =>
+            string.Equals("Shipping", GetJsonString(address, "type", "Type"), StringComparison.OrdinalIgnoreCase)
+            && string.Equals("77 Shipping Warehouse Lane", GetJsonString(address, "addressLine1", "AddressLine1"), StringComparison.Ordinal)
+            && string.Equals("10310", GetJsonString(address, "postalCode", "PostalCode"), StringComparison.Ordinal));
+
+        Assert.True(TryGetJsonProperty(root, out var companyBillingAddress, "companyBillingAddress", "CompanyBillingAddress"));
+        Assert.Equal("99 Demo Industrial Road", GetJsonString(companyBillingAddress, "addressLine1", "AddressLine1"));
+        Assert.Equal("10500", GetJsonString(companyBillingAddress, "postalCode", "PostalCode"));
+
+        Assert.True(TryGetJsonProperty(root, out var notes, "notes", "Notes"));
+        Assert.Contains(notes.EnumerateArray(), note =>
+            GetJsonString(note, "noteText", "NoteText").Contains(internalNote, StringComparison.Ordinal)
+            && GetJsonString(note, "noteText", "NoteText").Contains("Head office", StringComparison.OrdinalIgnoreCase));
+
+        await page.Locator(".customer-record-tabs button[data-tab='addresses']").ClickAsync();
+        await Expect(page.Locator(".customer-tab-panel[data-section='addresses']")).ToContainTextAsync("88 Customer Billing Road");
+        await Expect(page.Locator(".customer-tab-panel[data-section='addresses']")).ToContainTextAsync("77 Shipping Warehouse Lane");
+
+        await page.Locator(".customer-record-tabs button[data-tab='notes']").ClickAsync();
+        await Expect(page.Locator(".customer-notes-layout[data-section='notes']")).ToContainTextAsync(internalNote);
+    }
+
+    /// <summary>
     /// Verifies global search returns newly created customer records and navigates to the customer workflow.
     /// Covers the indexed, permission-scoped search portion of OPS-001.
     /// </summary>
@@ -993,9 +1130,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         while (DateTimeOffset.UtcNow < deadline)
         {
-            await page.GotoAsync(loginUrl, new PageGotoOptions { WaitUntil = WaitUntilState.Commit });
             try
             {
+                await page.GotoAsync(loginUrl, new PageGotoOptions
+                {
+                    Timeout = 15_000,
+                    WaitUntil = WaitUntilState.Commit
+                });
+
                 await page.Locator("#login-email, #Username").First.WaitForAsync(new LocatorWaitForOptions
                 {
                     State = WaitForSelectorState.Attached,
@@ -1004,13 +1146,29 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             }
             catch (TimeoutException ex)
             {
-                var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
-                var content = await page.ContentAsync();
-                var inputs = await page.Locator("input").EvaluateAllAsync<string[]>(
-                    "els => els.map(e => e.outerHTML)");
-                throw new TimeoutException(
-                    $"Intranet login form did not render. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_000)]}. Inputs: {string.Join(" | ", inputs)}. Html: {content[..Math.Min(content.Length, 2_000)]}",
-                    ex);
+                if (!page.Url.Contains("/login", StringComparison.OrdinalIgnoreCase))
+                {
+                    var permissionState = await GetIntranetPermissionStateAsync(page);
+                    if (isReady(permissionState))
+                    {
+                        return;
+                    }
+
+                    if (permissionState.IsAuthenticated)
+                    {
+                        lastError = $"Intranet redirected away from login for {email}, but {readinessDescription} are not ready. Auth user: {permissionState.Diagnostic}";
+                        await page.GotoAsync(new Uri(intranetBase, "/api/v1/auth/logout").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.Commit });
+                        await page.WaitForTimeoutAsync(2_000);
+                        continue;
+                    }
+                }
+
+                var body = await ReadBodyPreviewAsync(page);
+                var content = await ReadHtmlPreviewAsync(page, 2_000);
+                var inputs = await ReadInputPreviewAsync(page);
+                lastError = $"Intranet login form did not render. {ex.Message}. Url: {page.Url}. Body: {body}. Inputs: {string.Join(" | ", inputs)}. Html: {content[..Math.Min(content.Length, 2_000)]}";
+                await page.WaitForTimeoutAsync(2_000);
+                continue;
             }
 
             var emailInput = page.Locator("#login-email, #Username").First;
@@ -1049,13 +1207,56 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             }
             catch (TimeoutException ex)
             {
-                var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
-                lastError = $"{ex.Message}. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_000)]}";
+                var body = await ReadBodyPreviewAsync(page);
+                lastError = $"{ex.Message}. Url: {page.Url}. Body: {body}";
                 await page.WaitForTimeoutAsync(2_000);
             }
         }
 
         throw new TimeoutException($"Intranet employee {email} could not sign in before timeout. Last error: {lastError}");
+    }
+
+    private static async Task<string> ReadBodyPreviewAsync(IPage page, int maxLength = 1_000)
+    {
+        try
+        {
+            var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+            return body[..Math.Min(body.Length, maxLength)];
+        }
+        catch (PlaywrightException)
+        {
+            return string.Empty;
+        }
+        catch (TimeoutException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static async Task<string> ReadHtmlPreviewAsync(IPage page, int maxLength)
+    {
+        try
+        {
+            var content = await page.ContentAsync();
+            return content[..Math.Min(content.Length, maxLength)];
+        }
+        catch (PlaywrightException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static async Task<string[]> ReadInputPreviewAsync(IPage page)
+    {
+        try
+        {
+            return await page.Locator("input").EvaluateAllAsync<string[]>(
+                "els => els.map(e => e.outerHTML)");
+        }
+        catch (PlaywrightException)
+        {
+            return [];
+        }
     }
 
     private static async Task<IntranetPermissionState> GetIntranetPermissionStateAsync(IPage page)
@@ -1186,6 +1387,46 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
     private sealed record CreatedIntranetCustomer(string Email, string FullName, string RawCreateResponse);
 
+    private static async Task OpenCustomerCreateTabAsync(IPage page, string tabName)
+    {
+        await page.Locator(".customer-create-tabs button").Filter(new() { HasText = tabName }).ClickAsync();
+        await Expect(page.Locator(".customer-create-tab-panel")).ToBeVisibleAsync(new() { Timeout = 15_000 });
+    }
+
+    private static async Task FillAddressFieldsAsync(
+        ILocator scope,
+        string line1,
+        string subdistrict,
+        string district,
+        string province,
+        string postalCode)
+    {
+        await FillScopedTextboxAsync(scope, "Address line 1", line1);
+        await FillScopedTextboxAsync(scope, "Subdistrict", subdistrict);
+        await FillScopedTextboxAsync(scope, "District", district);
+        await FillScopedTextboxAsync(scope, "State / Province", province);
+        await FillScopedTextboxAsync(scope, "Postal code", postalCode);
+    }
+
+    private static async Task FillScopedTextboxAsync(ILocator scope, string label, string value)
+    {
+        var labelLiteral = ToXPathLiteral(label);
+        await scope
+            .Locator($"xpath=.//label[contains(concat(' ', normalize-space(@class), ' '), ' mlv-form-field ')][span[normalize-space(.) = {labelLiteral}]]//input")
+            .FillAsync(value);
+    }
+
+    private static string ToXPathLiteral(string value)
+    {
+        if (!value.Contains('\'', StringComparison.Ordinal))
+        {
+            return $"'{value}'";
+        }
+
+        var parts = value.Split('\'').Select(part => $"'{part}'");
+        return $"concat({string.Join(", \"'\", ", parts)})";
+    }
+
     private static async Task<GlobalSearchE2EResult> WaitForGlobalSearchResultAsync(IPage page, string query, string expectedTitle)
     {
         var searchResult = await page.EvaluateAsync<string>(
@@ -1236,6 +1477,20 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         }
 
         return string.Empty;
+    }
+
+    private static bool TryGetJsonProperty(JsonElement element, out JsonElement property, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (element.TryGetProperty(name, out property))
+            {
+                return true;
+            }
+        }
+
+        property = default;
+        return false;
     }
 
     private sealed record GlobalSearchE2EResult(string Title, string ResourceType, string Href);
