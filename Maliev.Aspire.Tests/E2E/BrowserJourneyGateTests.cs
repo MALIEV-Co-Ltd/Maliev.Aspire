@@ -780,6 +780,112 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies a limited employee can submit a leave request and the seeded manager can approve it.
+    /// Covers the currently executable employee/manager leave journey in HR-002.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "HR-002")]
+    public async Task Intranet_LeaveRequest_LimitedEmployeeSubmitsAndManagerApproves()
+    {
+        await AspireTestData.EnsureAnnualLeavePolicyAsync(_fixture);
+
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var reason = $"E2E planned leave {unique}";
+        var startDate = DateTime.UtcNow.Date.AddDays(14 + Random.Shared.Next(1, 30));
+        var endDate = startDate.AddDays(1);
+
+        await SignInToIntranetAsync(
+            page,
+            intranetBase,
+            "/hr/leave",
+            _fixture.AspireTestLimitedEmployeeEmail,
+            _fixture.AspireTestLimitedEmployeePassword,
+            permissionState =>
+                permissionState.HasPermission("leave.balances.read") &&
+                permissionState.HasPermission("leave.requests.read") &&
+                permissionState.HasPermission("leave.requests.create"),
+            "limited employee leave read/create permissions");
+
+        await Expect(page.Locator("body")).ToContainTextAsync("Leave Management", new() { Timeout = 30_000 });
+        await page.GetByLabel("Leave type").SelectOptionAsync("Annual");
+        await page.GetByLabel("Start date").FillAsync(startDate.ToString("yyyy-MM-dd"));
+        await page.GetByLabel("End date").FillAsync(endDate.ToString("yyyy-MM-dd"));
+        await page.GetByLabel("Reason").FillAsync(reason);
+
+        var submitResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/timeoff/requests", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Submit leave request" }).ClickAsync();
+        var submitResponse = await submitResponseTask;
+        var submitBody = await ReadResponseTextOrEmptyAsync(submitResponse);
+        Assert.True(submitResponse.Ok, $"Leave request submission failed with HTTP {submitResponse.Status}: {submitBody}");
+        using var submitDocument = JsonDocument.Parse(submitBody);
+        var leaveRequestId = submitDocument.RootElement.GetProperty("id").GetGuid();
+        Assert.NotEqual(Guid.Empty, leaveRequestId);
+        await Expect(page.Locator("body")).ToContainTextAsync("Pending", new() { Timeout = 30_000 });
+
+        await page.GotoAsync(new Uri(intranetBase, "/api/v1/auth/logout").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.Commit });
+
+        await SignInToIntranetAsync(page, intranetBase, "/hr/leave");
+        await Expect(page.Locator("body")).ToContainTextAsync("Leave Management", new() { Timeout = 30_000 });
+        await Expect(page.Locator(".mlv-list-row").Filter(new() { HasText = reason })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var decisionResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/timeoff/requests/{leaveRequestId}/decision", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await page.Locator(".mlv-list-row")
+            .Filter(new() { HasText = reason })
+            .GetByRole(AriaRole.Button, new() { NameString = "Approve request" })
+            .ClickAsync();
+        var decisionResponse = await decisionResponseTask;
+        var decisionBody = await ReadResponseTextOrEmptyAsync(decisionResponse);
+        Assert.True(decisionResponse.Ok, $"Leave approval failed with HTTP {decisionResponse.Status}: {decisionBody}");
+        await Expect(page.Locator(".mlv-list-row").Filter(new() { HasText = reason })).ToBeHiddenAsync(new() { Timeout = 30_000 });
+
+        var managerApprovalsResult = await page.EvaluateAsync<string>(
+            @"async () => {
+                const r = await fetch('/api/v1/timeoff/approvals', { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }");
+        Assert.StartsWith("200 ", managerApprovalsResult, StringComparison.Ordinal);
+        Assert.DoesNotContain(leaveRequestId.ToString(), managerApprovalsResult, StringComparison.OrdinalIgnoreCase);
+
+        await page.GotoAsync(new Uri(intranetBase, "/api/v1/auth/logout").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.Commit });
+        await SignInToIntranetAsync(
+            page,
+            intranetBase,
+            "/hr/leave",
+            _fixture.AspireTestLimitedEmployeeEmail,
+            _fixture.AspireTestLimitedEmployeePassword,
+            permissionState =>
+                permissionState.HasPermission("leave.balances.read") &&
+                permissionState.HasPermission("leave.requests.read") &&
+                permissionState.HasPermission("leave.requests.create"),
+            "limited employee leave read/create permissions");
+
+        var employeeRequestsResult = await page.EvaluateAsync<string>(
+            @"async () => {
+                const r = await fetch('/api/v1/timeoff/requests', { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }");
+        Assert.StartsWith("200 ", employeeRequestsResult, StringComparison.Ordinal);
+        using var employeeRequestsDocument = JsonDocument.Parse(employeeRequestsResult[4..]);
+        Assert.Contains(employeeRequestsDocument.RootElement.EnumerateArray(), request =>
+            string.Equals(leaveRequestId.ToString(), GetJsonString(request, "id", "Id"), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals("Approved", GetJsonString(request, "status", "Status"), StringComparison.Ordinal));
+
+        await Expect(page.Locator("body")).ToContainTextAsync("Approved", new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies the Aspire-local automation employee can sign into Intranet and reach protected ERP surfaces.
     /// Covers the authenticated entry portions of INT-001, INT-014, OPS-001, OPS-002, and SEC-003.
     /// </summary>
@@ -1018,6 +1124,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await AssertIntranetRouteAsync(page, intranetBase, "/mfg/equipment", new Regex("equipment|facility|machine", RegexOptions.IgnoreCase));
         await AssertIntranetRouteAsync(page, intranetBase, "/mfg/production-schedule", new Regex("production|schedule|job", RegexOptions.IgnoreCase));
         await AssertIntranetRouteAsync(page, intranetBase, "/hr/profile", new Regex("profile|employee|leave|HR", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/hr/leave", new Regex("leave|request|approval", RegexOptions.IgnoreCase));
     }
 
     /// <summary>

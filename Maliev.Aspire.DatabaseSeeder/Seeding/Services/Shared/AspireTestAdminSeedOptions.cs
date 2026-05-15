@@ -132,7 +132,10 @@ public sealed class AspireTestAdminSeedOptions
     [
         "auth.sessions.read",
         "employee.profiles.read",
-        "employee.profiles.update"
+        "employee.profiles.update",
+        "leave.balances.read",
+        "leave.requests.read",
+        "leave.requests.create"
     ];
 
     /// <summary>

@@ -65,6 +65,9 @@ public class AspireTestAdminSeedOptionsTests
         Assert.Contains("auth.sessions.read", options.LimitedRolePermissions);
         Assert.Contains("employee.profiles.read", options.LimitedRolePermissions);
         Assert.Contains("employee.profiles.update", options.LimitedRolePermissions);
+        Assert.Contains("leave.balances.read", options.LimitedRolePermissions);
+        Assert.Contains("leave.requests.read", options.LimitedRolePermissions);
+        Assert.Contains("leave.requests.create", options.LimitedRolePermissions);
         Assert.NotEqual(Guid.Empty, options.PrincipalId);
         Assert.NotEqual(Guid.Empty, options.EmployeeId);
         Assert.NotEqual(Guid.Empty, options.LimitedPrincipalId);

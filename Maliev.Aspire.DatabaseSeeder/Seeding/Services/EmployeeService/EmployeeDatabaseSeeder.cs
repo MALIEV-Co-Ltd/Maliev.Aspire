@@ -117,6 +117,7 @@ public class EmployeeDatabaseSeeder : DatabaseSeeder<EmployeeDbContext>
         employee.PasswordHash = _passwordService.HashPassword(options.Password!);
         employee.EmploymentStatus = EmploymentStatus.Active;
         employee.EmploymentType = EmploymentType.FullTime;
+        employee.ManagerId = options.EmployeeId;
         employee.StartDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         employee.ModifiedDate = DateTime.UtcNow;
 
@@ -164,6 +165,7 @@ public class EmployeeDatabaseSeeder : DatabaseSeeder<EmployeeDbContext>
         employee.PasswordHash = _passwordService.HashPassword(options.Password!);
         employee.EmploymentStatus = EmploymentStatus.Active;
         employee.EmploymentType = EmploymentType.FullTime;
+        employee.ManagerId = options.EmployeeId;
         employee.StartDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         employee.ModifiedDate = DateTime.UtcNow;
 
