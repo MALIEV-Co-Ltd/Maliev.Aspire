@@ -1407,6 +1407,112 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee can receive a supplier purchase order through the Intranet lifecycle UI.
+    /// Covers the currently executable receiving/status/event portion of PROC-004.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "PROC-004")]
+    public async Task Intranet_ProcurementReceiving_ApprovesSendsAndReceivesSupplierPo()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var customerPo = $"CPO-RECV-{unique}".ToUpperInvariant();
+
+        await SignInToIntranetAsync(page, intranetBase, "/purchasing");
+        var customer = await CreateIntranetCorporateCustomerAsync(page);
+        var order = await AspireTestData.CreateOrderAsync(
+            _fixture,
+            customer.CustomerId,
+            $"Procurement receiving source order {unique}");
+        var sourceOrderId = GetJsonString(order, "orderId", "OrderId");
+        Assert.False(string.IsNullOrWhiteSpace(sourceOrderId), $"OrderService did not return an order id: {order}");
+
+        var supplier = await CreateIntranetSupplierAsync(page);
+        await WaitForIntranetApiTextContainsAsync(page, "/api/v1/suppliers?page=1&pageSize=100", supplier.Name);
+        await WaitForIntranetApiTextContainsAsync(page, "/api/v1/orders?page=1&pageSize=100", sourceOrderId);
+
+        var createResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch('/api/v1/procurement', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        orderType: 1,
+                        supplierServiceId: args.supplierId,
+                        sourceOrderId: args.sourceOrderId,
+                        customerPo: args.customerPo,
+                        currencyCode: 'THB',
+                        expectedDeliveryDate: args.expectedDeliveryDate,
+                        notes: args.notes,
+                        items: [{ externalOrderItemId: 0, sourceOrderItemId: 'primary', quantity: 1 }]
+                    })
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new
+            {
+                supplierId = supplier.Id,
+                sourceOrderId,
+                customerPo,
+                expectedDeliveryDate = DateTime.UtcNow.Date.AddDays(14).ToString("O"),
+                notes = $"Created by Aspire browser E2E receiving gate {unique}"
+            });
+
+        Assert.StartsWith("201 ", createResult, StringComparison.Ordinal);
+        using var createdDocument = JsonDocument.Parse(createResult[4..]);
+        var created = createdDocument.RootElement;
+        var purchaseOrderId = created.GetProperty("id").GetInt32();
+        var poNumber = GetJsonString(created, "poNumber", "PoNumber");
+        Assert.Equal("Pending", GetJsonString(created, "status", "Status"));
+        Assert.False(string.IsNullOrWhiteSpace(poNumber));
+
+        await page.GotoAsync(new Uri(intranetBase, $"/purchasing/{purchaseOrderId}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(poNumber, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(supplier.Name, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(customerPo, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Pending", new() { Timeout = 30_000 });
+
+        var approved = await RunPurchaseOrderLifecycleActionAsync(page, purchaseOrderId, "Approve", "approve", "Approved");
+        Assert.Equal(poNumber, GetJsonString(approved, "poNumber", "PoNumber"));
+        Assert.False(string.IsNullOrWhiteSpace(GetJsonString(approved, "approvedBy", "ApprovedBy")));
+        Assert.False(string.IsNullOrWhiteSpace(GetJsonString(approved, "approvedAt", "ApprovedAt")));
+
+        var ordered = await RunPurchaseOrderLifecycleActionAsync(page, purchaseOrderId, "Send", "send-to-supplier", "Ordered");
+        Assert.Equal(poNumber, GetJsonString(ordered, "poNumber", "PoNumber"));
+
+        var delivered = await RunPurchaseOrderLifecycleActionAsync(page, purchaseOrderId, "Receive", "receive", "Delivered");
+        Assert.Equal(poNumber, GetJsonString(delivered, "poNumber", "PoNumber"));
+        Assert.Equal(sourceOrderId, GetJsonString(delivered, "sourceOrderId", "SourceOrderId"));
+        Assert.Equal(customerPo, GetJsonString(delivered, "customerPo", "CustomerPo"));
+        Assert.False(string.IsNullOrWhiteSpace(GetJsonString(delivered, "lastModifiedBy", "LastModifiedBy")));
+
+        var persistedResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/procurement/${id}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            purchaseOrderId);
+        Assert.StartsWith("200 ", persistedResult, StringComparison.Ordinal);
+        using (var persistedDocument = JsonDocument.Parse(persistedResult[4..]))
+        {
+            var purchaseOrder = persistedDocument.RootElement;
+            Assert.Equal("Delivered", GetJsonString(purchaseOrder, "status", "Status"));
+            Assert.Equal(poNumber, GetJsonString(purchaseOrder, "poNumber", "PoNumber"));
+            Assert.Equal("THB", GetJsonString(purchaseOrder, "currencyCode", "CurrencyCode"));
+            Assert.True(TryGetJsonProperty(purchaseOrder, out var items, "items", "Items"));
+            Assert.Contains(items.EnumerateArray(), item =>
+                string.Equals("primary", GetJsonString(item, "sourceOrderItemId", "SourceOrderItemId"), StringComparison.Ordinal));
+        }
+
+        await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "Receive" })).ToBeDisabledAsync(new() { Timeout = 15_000 });
+        await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "Cancel PO" })).ToBeDisabledAsync(new() { Timeout = 15_000 });
+    }
+
+    /// <summary>
     /// Verifies employee-created customer records are searchable, detail pages render, and the employee project quote workspace can select a customer.
     /// Covers executable customer/project-workspace portions of INT-003 and INT-004.
     /// </summary>
@@ -1786,6 +1892,32 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         {
             return string.Empty;
         }
+    }
+
+    private static async Task<JsonElement> RunPurchaseOrderLifecycleActionAsync(
+        IPage page,
+        int purchaseOrderId,
+        string buttonName,
+        string pathSuffix,
+        string expectedStatus)
+    {
+        var responseTask = page.WaitForResponseAsync(
+            response =>
+                response.Url.Contains($"/api/v1/procurement/{purchaseOrderId}/{pathSuffix}", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = buttonName }).ClickAsync();
+        var response = await responseTask;
+        var body = await ReadResponseTextOrEmptyAsync(response);
+        Assert.True(
+            response.Ok,
+            $"Purchase order lifecycle action {buttonName} failed with HTTP {response.Status}: {body}");
+        using var document = JsonDocument.Parse(body);
+        var root = document.RootElement.Clone();
+        Assert.Equal(expectedStatus, GetJsonString(root, "status", "Status"));
+        await Expect(page.Locator("body")).ToContainTextAsync(expectedStatus, new() { Timeout = 30_000 });
+        return root;
     }
 
     private static async Task<string> ReadHtmlPreviewAsync(IPage page, int maxLength)
