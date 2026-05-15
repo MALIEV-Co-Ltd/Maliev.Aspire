@@ -1128,6 +1128,108 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee can create material master data, inspect the material detail, edit quote-critical fields,
+    /// and read the persisted state back through the BFF boundary.
+    /// Covers the executable material master-data portion of INT-012.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-012")]
+    public async Task Intranet_MaterialMasterData_CreatesAndEditsMaterial()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var materialName = $"E2E PEEK {unique}";
+        var materialCode = $"E2E-MAT-{unique % 1_000_000:D6}";
+        var description = $"Production-gate material created by E2E {unique}.";
+
+        await SignInToIntranetAsync(page, intranetBase, "/mfg/materials");
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "Materials" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Add Material" }).ClickAsync();
+        var createPanel = page.Locator(".mlv-panel-card").Filter(new() { HasText = "Create material" }).First;
+        await Expect(createPanel).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await createPanel.GetByLabel("Name").FillAsync(materialName);
+        await createPanel.GetByLabel("Code").FillAsync(materialCode);
+        await createPanel.GetByLabel("Unit price").FillAsync("125.75");
+        await createPanel.GetByLabel("Stock").FillAsync("42");
+        await createPanel.GetByLabel("Unit", new() { Exact = true }).FillAsync("pcs");
+        await createPanel.GetByLabel("Description").FillAsync(description);
+
+        var createResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/materials", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await createPanel.GetByRole(AriaRole.Button, new() { NameString = "Create Material" }).ClickAsync();
+        var createResponse = await createResponseTask;
+        var createBody = await ReadResponseTextOrEmptyAsync(createResponse);
+        Assert.True(createResponse.Ok, $"Material create failed with HTTP {createResponse.Status}: {createBody}");
+
+        using var createDocument = JsonDocument.Parse(createBody);
+        var created = createDocument.RootElement;
+        var materialId = created.GetProperty("id").GetGuid();
+        Assert.Equal(materialName, GetJsonString(created, "name", "Name"));
+        Assert.Equal(materialCode, GetJsonString(created, "sku", "SKU", "code", "Code"));
+        Assert.Equal(42, (int)GetJsonDouble(created, "quantityOnHand", "QuantityOnHand", "stockLevel", "StockLevel"));
+
+        await page.WaitForURLAsync(
+            url => url.Contains($"/mfg/materials/{materialId}", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForURLOptions { Timeout = 30_000, WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(materialName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(materialCode, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(description, new() { Timeout = 30_000 });
+
+        var updatedName = $"{materialName} Updated";
+        var updatedCode = $"{materialCode}-U";
+        var updatedDescription = $"Updated quote-critical material data {unique}.";
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Edit" }).ClickAsync();
+        await page.GetByLabel("Name").FillAsync(updatedName);
+        await page.GetByLabel("Code").FillAsync(updatedCode);
+        await page.GetByLabel("Unit price").FillAsync("139.25");
+        await page.GetByLabel("Stock").FillAsync("84");
+        await page.GetByLabel("Description").FillAsync(updatedDescription);
+
+        var updateResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/materials/{materialId}", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "PUT", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Save" }).ClickAsync();
+        var updateResponse = await updateResponseTask;
+        var updateBody = await ReadResponseTextOrEmptyAsync(updateResponse);
+        Assert.True(updateResponse.Ok, $"Material update failed with HTTP {updateResponse.Status}: {updateBody}");
+
+        using var updateDocument = JsonDocument.Parse(updateBody);
+        var updated = updateDocument.RootElement;
+        Assert.Equal(updatedName, GetJsonString(updated, "name", "Name"));
+        Assert.Equal(updatedCode, GetJsonString(updated, "sku", "SKU", "code", "Code"));
+        Assert.Equal(139.25, GetJsonDouble(updated, "unitPrice", "UnitPrice", "pricePerUnit", "PricePerUnit"), precision: 2);
+        Assert.Equal(84, (int)GetJsonDouble(updated, "quantityOnHand", "QuantityOnHand", "stockLevel", "StockLevel"));
+
+        await Expect(page.Locator("body")).ToContainTextAsync(updatedName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(updatedCode, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(updatedDescription, new() { Timeout = 30_000 });
+
+        var persistedResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/materials/${id}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            materialId);
+
+        Assert.StartsWith("200 ", persistedResult, StringComparison.Ordinal);
+        using var persistedDocument = JsonDocument.Parse(persistedResult[4..]);
+        var persisted = persistedDocument.RootElement;
+        Assert.Equal(updatedName, GetJsonString(persisted, "name", "Name"));
+        Assert.Equal(updatedCode, GetJsonString(persisted, "sku", "SKU", "code", "Code"));
+        Assert.Equal(updatedDescription, GetJsonString(persisted, "description", "Description"));
+        Assert.Equal(84, (int)GetJsonDouble(persisted, "quantityOnHand", "QuantityOnHand", "stockLevel", "StockLevel"));
+    }
+
+    /// <summary>
     /// Verifies an employee can create a customer-backed invoice, attach PO evidence, finalize it, and see the resulting invoice state.
     /// Covers the executable invoice creation, attachment, credit-term, and status portions of FIN-001 and FIN-002.
     /// </summary>
