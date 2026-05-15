@@ -214,10 +214,59 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var page = await context.NewPageAsync();
         var intranetBase = GetEndpoint("IntranetBff");
 
-        await page.GotoAsync(new Uri(intranetBase, "/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.GotoAsync(new Uri(intranetBase, "/sales/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
         await page.WaitForURLAsync(url => url.Contains("/login", StringComparison.OrdinalIgnoreCase));
         await Expect(page.GetByText("Sign in with Google", new() { Exact = false })).ToBeVisibleAsync();
         Assert.Contains("returnUrl", page.Url, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Verifies the Aspire-local automation employee can sign into Intranet and reach protected ERP surfaces.
+    /// Covers the authenticated entry portions of INT-001, INT-014, OPS-001, OPS-002, and SEC-003.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-001,INT-014,OPS-001,OPS-002,SEC-003")]
+    public async Task Intranet_AutomationEmployee_SignsInAndReachesProtectedSurfaces()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var browserDiagnostics = new List<string>();
+        page.Console += (_, message) =>
+        {
+            if (message.Type is "error" or "warning")
+            {
+                browserDiagnostics.Add($"{message.Type}: {message.Text}");
+            }
+        };
+        page.PageError += (_, exception) => browserDiagnostics.Add($"pageerror: {exception}");
+        page.Response += (_, response) =>
+        {
+            if (response.Status >= 400)
+            {
+                browserDiagnostics.Add($"response: {response.Status} {response.Url}");
+            }
+        };
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(page, intranetBase, "/");
+        try
+        {
+            await Expect(page.Locator("body")).ToContainTextAsync("Dashboard", new() { Timeout = 15_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync("Codex Admin", new() { Timeout = 15_000 });
+        }
+        catch (Exception ex)
+        {
+            var diagnostics = string.Join(Environment.NewLine, browserDiagnostics);
+            throw new InvalidOperationException($"Intranet did not start after sign-in. Browser diagnostics:{Environment.NewLine}{diagnostics}", ex);
+        }
+
+        await page.GotoAsync(new Uri(intranetBase, "/admin/system-health").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("health|service|system", RegexOptions.IgnoreCase), new() { Timeout = 15_000 });
+
+        await page.GotoAsync(new Uri(intranetBase, "/sales/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        Assert.DoesNotContain("/login", page.Url, StringComparison.OrdinalIgnoreCase);
+        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("project|quote|customer", RegexOptions.IgnoreCase), new() { Timeout = 15_000 });
     }
 
     private async Task<IBrowserContext> NewContextAsync()
@@ -243,6 +292,70 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         {
             return _fixture.AppFactory!.GetEndpoint(resourceName, "https");
         }
+    }
+
+    private async Task SignInToIntranetAsync(IPage page, Uri intranetBase, string returnUrl)
+    {
+        var loginUrl = new Uri(intranetBase, $"/login?returnUrl={Uri.EscapeDataString(returnUrl)}").ToString();
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+        string? lastError = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            await page.GotoAsync(loginUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            try
+            {
+                await page.Locator("#login-email, #Username").First.WaitForAsync(new LocatorWaitForOptions
+                {
+                    State = WaitForSelectorState.Attached,
+                    Timeout = 15_000
+                });
+            }
+            catch (TimeoutException ex)
+            {
+                var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+                var content = await page.ContentAsync();
+                var inputs = await page.Locator("input").EvaluateAllAsync<string[]>(
+                    "els => els.map(e => e.outerHTML)");
+                throw new TimeoutException(
+                    $"Intranet login form did not render. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_000)]}. Inputs: {string.Join(" | ", inputs)}. Html: {content[..Math.Min(content.Length, 2_000)]}",
+                    ex);
+            }
+
+            var emailInput = page.Locator("#login-email, #Username").First;
+            var passwordInput = page.Locator("#login-password, #Password").First;
+            await emailInput.FillAsync(_fixture.AspireTestAdminEmail, new LocatorFillOptions { Force = true });
+            await passwordInput.FillAsync(_fixture.AspireTestAdminPassword, new LocatorFillOptions { Force = true });
+            var serverLoginForm = page.Locator("form[action='/api/v1/auth/login-form']").First;
+            if (await serverLoginForm.CountAsync() > 0)
+            {
+                await serverLoginForm.EvaluateAsync("form => form.requestSubmit()");
+            }
+            else
+            {
+                await page.Locator("button[type='submit']").First.ClickAsync();
+            }
+
+            try
+            {
+                await page.WaitForURLAsync(
+                    url => !url.Contains("/login", StringComparison.OrdinalIgnoreCase),
+                    new PageWaitForURLOptions
+                    {
+                        Timeout = 10_000,
+                        WaitUntil = WaitUntilState.Commit
+                    });
+                return;
+            }
+            catch (TimeoutException ex)
+            {
+                var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+                lastError = $"{ex.Message}. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_000)]}";
+                await page.WaitForTimeoutAsync(2_000);
+            }
+        }
+
+        throw new TimeoutException($"Intranet automation employee could not sign in before timeout. Last error: {lastError}");
     }
 
     private static ILocatorAssertions Expect(ILocator locator)
