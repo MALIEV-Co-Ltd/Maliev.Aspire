@@ -76,8 +76,13 @@ public static class MalievResourceExtensions
                 "../Maliev.Aspire.DatabaseSeeder/Maliev.Aspire.DatabaseSeeder.csproj")
             .WithEnvironment("SEED_TARGET", seederClassName)
             .WithReference(database)
-            .WithExplicitStart()
+            .WaitFor(database)
             .WithParentRelationship(targetService);
+
+        if (!targetService.ApplicationBuilder.Environment.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+        {
+            seeder.WithExplicitStart();
+        }
 
         CopyParentEnvironment(seeder, targetService);
         configureSeeder?.Invoke(seeder);

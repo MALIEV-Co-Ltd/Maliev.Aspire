@@ -14,6 +14,8 @@ namespace Maliev.Aspire.Tests.Infrastructure;
 /// </summary>
 public class AspireTestFixture : IAsyncLifetime
 {
+    private static readonly string AspireTestAdminPasswordValue = $"CodexE2E-{Guid.NewGuid():N}!aA1";
+
     private static readonly IReadOnlyDictionary<string, string> ServiceLivenessPaths =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -74,6 +76,16 @@ public class AspireTestFixture : IAsyncLifetime
     public string? AdminToken { get; private set; }
 
     /// <summary>
+    /// Gets the Aspire-local automation employee email used by browser E2E tests.
+    /// </summary>
+    public string AspireTestAdminEmail { get; } = "aspire-automation@debug.com";
+
+    /// <summary>
+    /// Gets the generated Aspire-local automation employee password for this test process.
+    /// </summary>
+    public string AspireTestAdminPassword => AspireTestAdminPasswordValue;
+
+    /// <summary>
     /// How long the AppHost took to start, for diagnostics.
     /// </summary>
     public TimeSpan StartupDuration { get; private set; }
@@ -89,6 +101,8 @@ public class AspireTestFixture : IAsyncLifetime
 
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Testing");
         Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Testing");
+        Environment.SetEnvironmentVariable("AspireTestAdmin__Enabled", "true");
+        Environment.SetEnvironmentVariable("AspireTestAdmin__Password", AspireTestAdminPasswordValue);
 
         var appHostAssembly = typeof(Projects.Maliev_Aspire_AppHost).Assembly;
 
