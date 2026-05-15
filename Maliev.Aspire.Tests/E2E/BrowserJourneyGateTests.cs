@@ -172,6 +172,156 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies a visitor can submit a public website contact inquiry through the Web BFF to ContactService.
+    /// Covers the executable submission portion of WEB-002 and WEB-012.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "WEB-002,WEB-012")]
+    public async Task Web_ContactInquiry_SubmitsThroughContactBoundary()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var webBase = GetEndpoint("WebBff");
+
+        await page.GotoAsync(new Uri(webBase, "/contact").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+
+        var form = page.Locator("form.contact-form");
+        await Expect(form).ToBeVisibleAsync();
+
+        await form.GetByLabel(new Regex("Full name|ชื่อ", RegexOptions.IgnoreCase)).FillAsync("E2E Website Customer");
+        await form.GetByLabel(new Regex("Email|อีเมล", RegexOptions.IgnoreCase)).FillAsync($"e2e-contact-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}@example.com");
+        await form.GetByLabel(new Regex("Phone|โทรศัพท์", RegexOptions.IgnoreCase)).FillAsync("+66 2 000 0000");
+        await form.GetByLabel(new Regex("Company|บริษัท", RegexOptions.IgnoreCase)).FillAsync("E2E Manufacturing Co.");
+        await form.GetByLabel(new Regex("Subject|หัวข้อ", RegexOptions.IgnoreCase)).FillAsync("Manufacturing quote support");
+        await form.GetByLabel(new Regex("Message|ข้อความ", RegexOptions.IgnoreCase)).FillAsync("Please confirm MALIEV received this E2E support inquiry.");
+
+        await form.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Send message|ส่งข้อความ", RegexOptions.IgnoreCase) }).ClickAsync();
+        await Expect(form.Locator(".form-status")).ToContainTextAsync(new Regex("Message received|ได้รับข้อความแล้ว", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
+    /// Verifies a customer can self-register with email/password, land in the protected account area, browse account pages, and sign out.
+    /// Covers the executable portions of WEB-003, WEB-005, and WEB-009.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "WEB-003,WEB-005,WEB-009")]
+    public async Task Web_CustomerEmailRegistration_CreatesAccountSessionAndSignsOut()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var browserDiagnostics = new List<string>();
+        page.Request += (_, request) =>
+        {
+            if (request.Url.Contains("/auth/", StringComparison.OrdinalIgnoreCase) ||
+                request.Url.Contains("/web/", StringComparison.OrdinalIgnoreCase) ||
+                request.Url.Contains("/customer/", StringComparison.OrdinalIgnoreCase))
+            {
+                browserDiagnostics.Add($"request: {request.Method} {request.Url}");
+            }
+        };
+        page.RequestFailed += (_, request) =>
+        {
+            browserDiagnostics.Add($"request-failed: {request.Method} {request.Url} {request.Failure}");
+        };
+        page.Response += (_, response) =>
+        {
+            if (response.Url.Contains("/auth/", StringComparison.OrdinalIgnoreCase) ||
+                response.Url.Contains("/web/", StringComparison.OrdinalIgnoreCase) ||
+                response.Url.Contains("/customer/", StringComparison.OrdinalIgnoreCase) ||
+                response.Status >= 400)
+            {
+                browserDiagnostics.Add($"response: {response.Status} {response.Url}");
+            }
+        };
+        var webBase = GetEndpoint("WebBff");
+        var unique = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var email = $"e2e-customer-{unique}@example.com";
+        const string password = "E2e-Customer-12345!";
+
+        await page.GotoAsync(new Uri(webBase, "/auth/sign-up?returnUrl=%2Faccount").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.Locator("details.auth-email-panel summary").ClickAsync();
+        var signUpForm = page.Locator("form.auth-form[action='/auth/sign-up/email']");
+        await Expect(signUpForm).ToBeVisibleAsync();
+        await signUpForm.Locator("input[name='FirstName']").FillAsync("E2E");
+        await signUpForm.Locator("input[name='LastName']").FillAsync("Customer");
+        await signUpForm.Locator("input[name='Email']").FillAsync(email);
+        await signUpForm.Locator("input[name='Password']").FillAsync(password);
+        await signUpForm.EvaluateAsync("form => form.requestSubmit()");
+
+        try
+        {
+            await page.WaitForURLAsync(
+                url => url.Contains("/account", StringComparison.OrdinalIgnoreCase),
+                new()
+                {
+                    Timeout = 45_000,
+                    WaitUntil = WaitUntilState.Commit
+                });
+        }
+        catch (TimeoutException ex)
+        {
+            var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+            throw new TimeoutException(
+                $"Customer registration did not reach /account. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_500)]}. Browser diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, browserDiagnostics)}",
+                ex);
+        }
+        try
+        {
+            await Expect(page.GetByText(new Regex("Signed in|เข้าสู่ระบบแล้ว", RegexOptions.IgnoreCase))).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        }
+        catch (Exception ex)
+        {
+            var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+            var session = await page.EvaluateAsync<string>(
+                "async () => { const r = await fetch('/web/v1/account/session', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+            throw new InvalidOperationException(
+                $"Customer account page did not show signed-in summary. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_500)]}. Session: {session}. Browser diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, browserDiagnostics)}",
+                ex);
+        }
+        await Expect(page.GetByText(email, new() { Exact = false })).ToBeVisibleAsync();
+        await Expect(page.Locator(".account-status-row").Filter(new() { HasTextRegex = new Regex("Customer ID|รหัสลูกค้า", RegexOptions.IgnoreCase) })).ToBeVisibleAsync();
+
+        await page.GotoAsync(new Uri(webBase, "/account/profile").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("Customer details|ข้อมูลลูกค้า", RegexOptions.IgnoreCase) })).ToBeVisibleAsync();
+        await Expect(page.Locator("input[type='email']").First).ToHaveValueAsync(email);
+
+        await page.GotoAsync(new Uri(webBase, "/account/addresses").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("Billing and shipping addresses|ที่อยู่ออกบิลและจัดส่ง", RegexOptions.IgnoreCase) })).ToBeVisibleAsync();
+        var addressForm = page.Locator("form.account-form").Last;
+        await addressForm.GetByLabel(new Regex("^(Recipient|ผู้รับ)$", RegexOptions.IgnoreCase)).FillAsync("E2E Receiver");
+        await addressForm.GetByLabel(new Regex("Recipient phone|เบอร์ผู้รับ", RegexOptions.IgnoreCase)).FillAsync("+66 81 000 0000");
+        await addressForm.GetByLabel(new Regex("Address line 1|ที่อยู่บรรทัดที่ 1", RegexOptions.IgnoreCase)).FillAsync("99 E2E Road");
+        await addressForm.GetByLabel(new Regex("Address line 2|ที่อยู่บรรทัดที่ 2", RegexOptions.IgnoreCase)).FillAsync("Unit 1");
+        await addressForm.GetByLabel(new Regex("District|เขต", RegexOptions.IgnoreCase)).FillAsync("Bang Rak");
+        await addressForm.GetByLabel(new Regex("City|เมือง", RegexOptions.IgnoreCase)).FillAsync("Bangkok");
+        await addressForm.GetByLabel(new Regex("Province|จังหวัด", RegexOptions.IgnoreCase)).FillAsync("Bangkok");
+        await addressForm.GetByLabel(new Regex("Postal code|รหัสไปรษณีย์", RegexOptions.IgnoreCase)).FillAsync("10500");
+        await addressForm.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Add address|เพิ่มที่อยู่", RegexOptions.IgnoreCase) }).ClickAsync();
+        await Expect(page.GetByText(new Regex("Address added|เพิ่มที่อยู่แล้ว", RegexOptions.IgnoreCase))).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        await page.GotoAsync(new Uri(webBase, "/account").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Sign out|ออกจากระบบ", RegexOptions.IgnoreCase) }).ClickAsync();
+        await page.WaitForURLAsync(
+            url => new Uri(url).AbsolutePath == "/",
+            new()
+            {
+                Timeout = 30_000,
+                WaitUntil = WaitUntilState.Commit
+            });
+
+        await page.GotoAsync(new Uri(webBase, "/account").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.WaitForURLAsync(
+            url => url.Contains("/auth/sign-in", StringComparison.OrdinalIgnoreCase),
+            new()
+            {
+                Timeout = 30_000,
+                WaitUntil = WaitUntilState.Commit
+            });
+    }
+
+    /// <summary>
     /// Verifies the QuoteEngine anonymous demo remains non-mutating and usable.
     /// Covers the demo-backed executable portions of QUOTE-002, QUOTE-003, QUOTE-004, QUOTE-018, QUOTE-019, QUOTE-020, and QUOTE-024.
     /// </summary>
@@ -374,11 +524,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     {
         try
         {
-            return _fixture.AppFactory!.GetEndpoint(resourceName, "http");
+            return _fixture.AppFactory!.GetEndpoint(resourceName, "https");
         }
         catch
         {
-            return _fixture.AppFactory!.GetEndpoint(resourceName, "https");
+            return _fixture.AppFactory!.GetEndpoint(resourceName, "http");
         }
     }
 

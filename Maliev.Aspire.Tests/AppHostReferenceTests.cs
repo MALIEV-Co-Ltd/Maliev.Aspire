@@ -167,7 +167,7 @@ public sealed class AppHostReferenceTests
             Assert.Contains($".WithReference({dependency})", webBlock, StringComparison.Ordinal);
         }
 
-        Assert.Contains(".WithEnvironment(\"QuoteEngine__BaseUrl\", quoteEngineBff.GetEndpoint(\"http\"))", webBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"QuoteEngine__BaseUrl\", quoteEngineBff.GetEndpoint(\"https\"))", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/web/aspire-liveness\")", webBlock, StringComparison.Ordinal);
     }
 
