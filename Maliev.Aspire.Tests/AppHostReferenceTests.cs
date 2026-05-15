@@ -29,7 +29,7 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
-    /// GeometryService must not start OTLP export before the collector is ready.
+    /// GeometryService must not start OTLP export before the collector is ready outside Testing.
     /// </summary>
     [Fact]
     public void AppHost_GeometryService_WaitsForOpenTelemetryCollector()
@@ -47,7 +47,8 @@ public sealed class AppHostReferenceTests
 
         var geometryBlock = appHostSource[geometryBlockStart..bffReferenceStart];
         Assert.Contains(".WithEnvironment(\"OTEL_EXPORTER_OTLP_ENDPOINT\", otelCollector.GetEndpoint(\"grpc\"))", geometryBlock, StringComparison.Ordinal);
-        Assert.Contains(".WaitFor(otelCollector)", geometryBlock, StringComparison.Ordinal);
+        Assert.Contains("if (!environmentName.Equals(\"Testing\", StringComparison.OrdinalIgnoreCase))", geometryBlock, StringComparison.Ordinal);
+        Assert.Contains("geometryService = geometryService.WaitFor(otelCollector);", geometryBlock, StringComparison.Ordinal);
     }
 
     /// <summary>

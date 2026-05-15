@@ -2,7 +2,7 @@
 
 > Living document defining the test strategy, coverage matrix, and governance for the Maliev microservices ecosystem.
 >
-> **Last updated**: 2026-05-14
+> **Last updated**: 2026-05-15
 
 ---
 
@@ -71,6 +71,7 @@
 - Project-based quote revision, quote-to-order, quote-to-payment, commerce publish-to-storefront, and operations workflows
 - One quotation per project with immutable quotation versions, exact version PDF artifacts, source project linkage, and version-aware acceptance/order creation
 - Source of truth: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_STORIES.md`
+- Execution evidence: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_RUN_RESULTS.md`
 
 ### 1.4 Infrastructure Patterns
 
@@ -205,7 +206,8 @@ Maliev.Aspire.Tests/
 │   ├── SUPPLY_CHAIN_TESTS.md
 │   ├── MESSAGING_TESTS.md   # Event chain specs (NEW)
 │   ├── WORKFLOW_TESTS.md    # Cross-service workflow specs (NEW)
-│   └── E2E_USER_JOURNEY_STORIES.md # Production-gate browser journey catalog
+│   ├── E2E_USER_JOURNEY_STORIES.md # Production-gate browser journey catalog
+│   └── E2E_USER_JOURNEY_RUN_RESULTS.md # Dated production-gate run evidence
 └── TEST_PLAN.md             # This document
 ```
 
@@ -296,6 +298,9 @@ dotnet test --filter "Tier=SystemIntegration"
 # Run specific domain
 dotnet test --filter "FullyQualifiedName~Domain.Commercial"
 
+# Discover browser E2E tests
+dotnet test --filter "Tier=E2E" --list-tests
+
 # Run with coverage
 dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults
 
@@ -346,6 +351,7 @@ dotnet test Maliev.OrderService.Tests/ -v n
 - **New Blazor page/component**: Should have a bUnit component test (Intranet.Tests)
 - **New customer/employee journey**: Must update `specs/E2E_USER_JOURNEY_STORIES.md` with persona, entry point, services, verification checklist, current status, and known gaps
 - **New E2E automation**: Must reference one or more story ids from `specs/E2E_USER_JOURNEY_STORIES.md` and must not duplicate endpoint CRUD tests already covered by lower tiers
+- **New E2E/system gate run**: Must append dated evidence to `specs/E2E_USER_JOURNEY_RUN_RESULTS.md`, including commands, pass/fail status, blockers, fixes, and whether browser automation actually exists
 - **New quote/project journey**: Must preserve the project-based contract: Project is mutable workspace; Quotation is the project quote family; QuotationVersion is immutable snapshot/PDF/change-summary evidence; accepted orders reference a specific quotation version
 
 ### 6.2 Review Checklist for PRs

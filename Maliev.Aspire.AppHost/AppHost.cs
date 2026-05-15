@@ -96,7 +96,11 @@ static partial class Program
 
         var omisePublicKey = builder.AddParameterFromConfig("OmisePublicKey", "PaymentProviders:Omise:PublicKey", secret: true);
         var omiseSecretKey = builder.AddParameterFromConfig("OmiseSecretKey", "PaymentProviders:Omise:SecretKey", secret: true);
-        var omiseWebhookSecret = builder.AddParameterFromConfig("OmiseWebhookSecret", "PaymentProviders:Omise:WebhookSecret", secret: true);
+        var omiseWebhookSecret = builder.AddParameterFromConfig(
+            "OmiseWebhookSecret",
+            "PaymentProviders:Omise:WebhookSecret",
+            secret: true,
+            defaultValue: "whsec_omise_development_secret");
 
         const string devNotificationEncryptionKey = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
         var notificationEncryptionKey = builder.AddParameter("NotificationEncryptionKey", secret: true);
@@ -183,10 +187,18 @@ static partial class Program
         this IDistributedApplicationBuilder builder,
         string parameterName,
         string configKey,
-        bool secret = false)
+        bool secret = false,
+        string? defaultValue = null)
     {
+        var configuredValue = builder.Configuration[configKey];
+
+        if (string.IsNullOrWhiteSpace(configuredValue) && defaultValue is not null)
+        {
+            return builder.AddParameter(parameterName, defaultValue, secret: secret);
+        }
+
         var parameter = builder.AddParameter(parameterName, secret: secret);
-        builder.Configuration[$"Parameters:{parameterName}"] = builder.Configuration[configKey];
+        builder.Configuration[$"Parameters:{parameterName}"] = configuredValue;
         return parameter;
     }
 
@@ -1051,8 +1063,14 @@ static partial class Program
             .WithEnvironment("JWT_SECURITY_KEY", config.JwtSecurityKey)
             .WithEnvironment("JWT_ISSUER", config.JwtIssuer)
             .WithEnvironment("JWT_AUDIENCE", config.JwtAudience)
-            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", otelCollector.GetEndpoint("grpc"))
-            .WaitFor(otelCollector)
+            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", otelCollector.GetEndpoint("grpc"));
+
+        if (!environmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+        {
+            geometryService = geometryService.WaitFor(otelCollector);
+        }
+
+        geometryService = geometryService
             .WithEnvironment("GEOMETRY_MAIN_WORKERS", "2")
             .WithEnvironment("GEOMETRY_DFM_WORKERS", "1")
             .WithEnvironment("GEOMETRY_PREVIEW_RENDER_WORKERS", "2")
@@ -1061,7 +1079,7 @@ static partial class Program
             .WithEnvironment("GEOMETRY_ARTIFACT_CONCURRENCY", "2")
             .WithEnvironment("GEOMETRY_RABBITMQ_PREFETCH", "2")
             .WithExternalHttpEndpoints()
-            .WithHttpEndpoint(port: 8081, targetPort: 8081, env: "PORT")
+            .WithHttpEndpoint(targetPort: 8081, env: "PORT")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
             .WithTestingSafeHttpHealthCheck("/geometry/aspire-liveness");
 

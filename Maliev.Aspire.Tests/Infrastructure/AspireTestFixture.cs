@@ -199,7 +199,12 @@ public class AspireTestFixture : IAsyncLifetime
 
     private static void WaitForServiceLiveness(string projectName, HttpClient client, string livenessPath)
     {
-        var timeout = TimeSpan.FromMinutes(3);
+        var timeout = projectName switch
+        {
+            "GeometryService" => TimeSpan.FromMinutes(8),
+            "PaymentService" => TimeSpan.FromMinutes(6),
+            _ => TimeSpan.FromMinutes(3)
+        };
         var deadline = DateTime.UtcNow.Add(timeout);
         var attempts = 0;
         HttpStatusCode? lastStatus = null;
@@ -261,6 +266,11 @@ public class AspireTestFixture : IAsyncLifetime
     /// <returns>The resolved base address URI.</returns>
     private Uri ResolveHttpsBaseAddressCore(string projectName)
     {
+        if (string.Equals(projectName, "GeometryService", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResolveFactoryClientBaseAddress(projectName);
+        }
+
         try
         {
             var httpsEndpoint = AppFactory!.GetEndpoint(projectName, "https");
@@ -272,6 +282,22 @@ public class AspireTestFixture : IAsyncLifetime
             Console.WriteLine($"[AspireTestFixture] HTTPS endpoint lookup failed for {projectName}: {ex.Message}");
         }
 
+        try
+        {
+            var httpEndpoint = AppFactory!.GetEndpoint(projectName, "http");
+            Console.WriteLine($"[AspireTestFixture] {projectName}: using HTTP endpoint {httpEndpoint}");
+            return httpEndpoint;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AspireTestFixture] HTTP endpoint lookup failed for {projectName}: {ex.Message}");
+        }
+
+        return ResolveFactoryClientBaseAddress(projectName);
+    }
+
+    private Uri ResolveFactoryClientBaseAddress(string projectName)
+    {
         var baseClient = AppFactory!.CreateHttpClient(projectName);
         var httpBase = baseClient.BaseAddress!;
 

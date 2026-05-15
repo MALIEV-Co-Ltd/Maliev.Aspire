@@ -181,6 +181,8 @@ Maliev.Aspire.Tests/
 
 `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_STORIES.md` is the source of truth for browser-level production gate coverage. Future agents must update it when user-facing customer or employee journeys change.
 
+`Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_RUN_RESULTS.md` records dated execution evidence. Use it to record commands run, pass/fail counts, blocked tests, fixes applied, and whether browser E2E automation exists yet.
+
 Use these rules for the E2E story catalog:
 - Cover complete journeys through `Maliev.Web`, `Maliev.QuoteEngine`, `Maliev.Intranet`, their BFFs, and downstream services.
 - Document persona, entry point, business value, prerequisites, user path, services involved, data created or mutated, verification checklist, observability checks, current implementation status, and known product gaps.
@@ -192,6 +194,8 @@ Use these rules for the E2E story catalog:
 - QuoteEngine has two E2E modes: anonymous demo mode is non-mutating and uses MALIEV-owned sample files; signed customer project mode must use server-resolved customer identity and real service-backed Project/Upload/Geometry/Pricing/Quotation/PDF/Order/Payment/Delivery workflows.
 - Reorder or major customer changes after acceptance must start from Duplicate Project linked to the source project. Accepted projects, quotation versions, PDFs, orders, and payments must remain immutable evidence.
 - Version-aware E2E assertions must prove one quotation per project, multiple immutable quotation versions, exact version PDF links, current-version marker, source-project linkage, and acceptance/order creation against the selected quotation version.
+- When asked to run the E2E gate, first discover `[Trait("Tier", "E2E")]` browser tests. If no tests exist, state that explicitly, run the available service-level E2E and Aspire system checks, and record the result in `E2E_USER_JOURNEY_RUN_RESULTS.md`.
+- Keep run results out of `E2E_USER_JOURNEY_STORIES.md`; that file defines the journeys, while `E2E_USER_JOURNEY_RUN_RESULTS.md` records evidence.
 
 #### Assertions & Logging
 - **Assertions**: Use strict xUnit `Assert` (e.g., `Assert.NotNull`, `Assert.Equal`). FluentAssertions is banned.
