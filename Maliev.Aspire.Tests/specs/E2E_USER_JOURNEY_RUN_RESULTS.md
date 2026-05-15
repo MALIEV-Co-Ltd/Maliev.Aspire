@@ -2,6 +2,7 @@
 
 > Dated execution evidence for the production-gate E2E journey catalog and Aspire integrated environment checks.
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
+> Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
 ## 2026-05-15 Automated Playwright E2E Bootstrap Run
 
@@ -18,16 +19,17 @@
 |---------|--------|
 | `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 --no-restore` | Passed |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests"` | Passed: 2 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 9 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 11 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 11 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 13 tests |
 
 ### Automated Story Coverage Added
 
 | Story ids | Automated browser coverage |
 |-----------|----------------------------|
 | `WEB-001`, `WEB-010`, `WEB-011`, `WEB-012`, `WEB-013` | Web home, services, shop, cookie consent, `/quote`, local QuoteEngine demo handoff, and all public trust/policy/support routes: `/about`, `/materials`, `/industries`, `/case-studies`, `/blog`, `/faq`, `/contact`, `/shipping-returns`, `/privacy`, `/terms`, `/cookie-policy`, `/refund-policy`, and `/warranty-policy`. |
-| `WEB-002`, `WEB-012` | Web contact/support route renders the contact form and submit control surface. Submission and employee processing still require a deterministic test mailbox/form-submit path. |
-| `WEB-003`, `WEB-005`, `WEB-006`, `WEB-007`, `WEB-009` | Web sign-up, sign-in, Google entry, password reset, and account-protection entry points render through browser routes. Full account creation, verification, session refresh, and sign-out still require local mail/OAuth/test-customer credentials. |
+| `WEB-002`, `WEB-012` | Web contact/support route renders the contact form, submits a real inquiry through the Web BFF to ContactService, and shows the customer success state. Employee-side inquiry processing still requires authenticated Intranet coverage. |
+| `WEB-003`, `WEB-005`, `WEB-009` | Email/password registration creates a customer session through AuthService/CustomerService, lands on the protected account page, opens profile, creates an address, signs out, and confirms protected account access redirects back to sign-in. Email verification remains a required product gap. |
+| `WEB-006`, `WEB-007` | Google sign-in and password reset entry points render through browser routes. Completion remains blocked by local OAuth/test-token and local mail/reset-token fixtures. |
 | `WEB-008`, `COM-003` | Web shop and cart routes render storefront search/category and cart surfaces. Product detail, add-to-cart, quantity editing, and checkout draft still require published commerce seed products. |
 | `QUOTE-002`, `QUOTE-003`, `QUOTE-004`, `QUOTE-018`, `QUOTE-019`, `QUOTE-020`, `QUOTE-024` | QuoteEngine anonymous demo loads the MALIEV sample file, shows the prototype viewer and DFM checks, switches to FDM, recalculates standard price, recalculates express lead-time price, recalculates after quantity edit, keeps formal PDF disabled, and states that no customer data is created. |
 | `QUOTE-001`, `QUOTE-005`, `QUOTE-017` | QuoteEngine real project route shows the sign-in/upload gate before customer-owned upload. Real upload retry remains blocked until authenticated project mode is service-backed. |
@@ -42,10 +44,14 @@
 | `Maliev.AuthService` | `d4d6d26` | Preserved Authorization headers for employee/customer validation clients by using HTTPS-first Aspire service discovery. | `dotnet test B:\maliev\Maliev.AuthService\Maliev.AuthService.slnx --filter "FullyQualifiedName~AuthenticationServiceTests" --no-restore` passed 25 tests. |
 | `Maliev.Intranet` | `143057c` | Enabled hosted Blazor static web assets in the Intranet BFF so Aspire browser runs can load CSS/images/Blazor framework assets. | `dotnet build B:\maliev\Maliev.Intranet\Maliev.Intranet.Bff\Maliev.Intranet.Bff.csproj -p:UseSharedCompilation=false -m:1 --no-restore` passed; `LoginPageControllerTests` passed 2 tests. |
 | `Maliev.AuthService` | `34559d6` | Preserved Authorization headers for AuthService -> IAM permission resolution by using `https+http://IAMService`; this restored wildcard IAM claims in the Intranet browser session. | `dotnet test B:\maliev\Maliev.AuthService\Maliev.AuthService.slnx --filter "FullyQualifiedName~IAMServiceClient" --no-restore` passed 5 tests; authenticated Intranet browser route sweep passed. |
+| `Maliev.Web` | `14cdd41` | Aligned Web contact submissions with ContactService by resolving Thailand through CountryService, sending numeric contact type/priority values, mapping attachments, and accepting ContactService's integer id response. | `dotnet test B:\maliev\Maliev.Web\Maliev.Web.Tests\Maliev.Web.Tests.csproj --no-build` passed 68 tests; `Web_ContactInquiry_SubmitsThroughContactBoundary` passed in Aspire. |
+| `Maliev.Web` | `5810d48` | Forwarded browser auth cookies into internal same-origin Web BFF calls during server-side rendering, fixing the account page `Unauthorized` state after successful registration. | `dotnet test B:\maliev\Maliev.Web\Maliev.Web.Tests\Maliev.Web.Tests.csproj --no-build` passed 69 tests; `Web_CustomerEmailRegistration_CreatesAccountSessionAndSignsOut` reached the signed-in account page. |
+| `Maliev.Web` | `ea8c3a4` | Added stable names and accessible labels to account address fields so address entry is testable and accessible. | `dotnet build B:\maliev\Maliev.Web\Maliev.Web.slnx -p:UseSharedCompilation=false -m:1 --no-restore` passed; full Web tests passed 69 tests. |
+| `Maliev.Aspire` | `c8f4b97` | Added executable Web contact and customer registration/account browser stories, preferred secure endpoints in browser tests, and wired Web quote CTAs to the secure local QuoteEngine endpoint. | `BrowserJourneyGateTests` passed 11 tests; `Tier=E2E` passed 13 tests; `AppHostReferenceTests` passed 10 tests. |
 
 ### Remaining Full-Catalog Blockers
 
-- Full 95-story browser verification still requires deterministic customer browser sessions, local mail capture for verification/reset links, OAuth test mode, published commerce seed products, service-backed QuoteEngine project/quotation/order/payment workflows, and deeper browser actions inside each Intranet module beyond route-level authorization/rendering.
+- Full 95-story browser verification still requires multi-customer session fixtures for ownership/security checks, local mail capture for verification/reset links, OAuth test mode, published commerce seed products, service-backed QuoteEngine project/quotation/order/payment workflows, and deeper browser actions inside each Intranet module beyond route-level authorization/rendering.
 - Stories not listed above remain partial or blocked as recorded in the manual story matrix below. They must not be counted as fully verified until they have automated browser coverage or an explicitly accepted product-gap failure.
 
 ## 2026-05-15 Manual Browser E2E Correction Run
@@ -164,16 +170,15 @@
 | Issue | Fix | Verification |
 |-------|-----|--------------|
 | QuoteEngine BFF served `index.html`, but the Blazor app stayed stuck on `Loading quote engine` during browser verification. | Added `builder.WebHost.UseStaticWebAssets()` to `Maliev.QuoteEngine.Bff` so hosted WASM static assets are available under Aspire. | Browser reload of `http://localhost:5012/demo` rendered QuoteEngine shell, demo sample file, DFM panel, configuration controls, and pricing. `dotnet build Maliev.QuoteEngine.Bff.csproj -p:UseSharedCompilation=false` passed. |
-| Web quote CTAs left Aspire and pointed at production `https://quote.maliev.com/...`. | Added a runtime `QuoteEngine__BaseUrl` override in `Maliev.Web` and wired AppHost `WebBff` to `quoteEngineBff.GetEndpoint("http")`. Production default remains `https://quote.maliev.com`. | After restarting AppHost, Web `/quote` rendered `Try demo` as `http://localhost:5012/demo` and `Start project` as `http://localhost:5012/projects/new`; clicking `Try demo` loaded QuoteEngine demo inside Aspire. |
+| Web quote CTAs left Aspire and pointed at production `https://quote.maliev.com/...`. | Added a runtime `QuoteEngine__BaseUrl` override in `Maliev.Web`; the current AppHost wiring uses `quoteEngineBff.GetEndpoint("https")` so Web and QuoteEngine handoff stay on secure local endpoints. Production default remains `https://quote.maliev.com`. | Latest automated run verified Web `/quote` `Try demo` routes to the Aspire-hosted QuoteEngine demo and `BrowserJourneyGateTests` passed. |
 
 ### Manual Browser Blockers
 
 | Blocker | Evidence | Impact | Recommended next action |
 |---------|----------|--------|-------------------------|
 | No deterministic employee test login is enabled. | Aspire parameter `AspireTestAdminEnabled` is `false`; login-only browser checks could not enter Intranet. | Employee, manufacturing, procurement, finance, HR, admin, and ProjectNew stories cannot be manually completed. | Enable a non-production Aspire test admin seed path with a secret-sourced password, then run authenticated Intranet browser stories. |
-| Browser control failed on HTML `email` inputs during form submission. | QuoteEngine and Web sign-up attempts failed when filling `<input type="email">`. | Customer sign-up, reset, and contact submission were verified only to form-render state. | Add real Playwright E2E automation or fix the browser-control input path, then complete customer form submissions. |
+| Local email/OAuth providers are not represented in Aspire. | Automated Web email/password registration now works, but verification email, password reset email, and Google OAuth cannot complete without local provider fixtures. | Email verification, reset-token, and Google sign-in remain partial/blocked even though customer registration/session/account/address/sign-out now passes. | Add a local mail sink and OAuth/test-token strategy for Aspire E2E. |
 | Storefront has no published seeded products. | `/shop` rendered `No products listed yet`. | Cart and checkout draft stories cannot be completed end to end. | Add an Aspire seed command/data set for published CommerceService products. |
-| Email/OAuth providers are not represented in the local browser gate. | Sign-up, verification, reset, and Google buttons render, but no local mailbox/OAuth test harness exists. | Email verification and Google sign-in remain production-gate gaps. | Add a local mail sink and OAuth/test-token strategy for Aspire E2E. |
 
 ## 2026-05-15 Run
 
