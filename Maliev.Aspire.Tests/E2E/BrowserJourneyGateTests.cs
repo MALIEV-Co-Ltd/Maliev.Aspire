@@ -708,7 +708,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 const endpoints = [
                     '/api/v1/iam/users',
                     '/api/v1/iam/roles',
-                    '/api/v1/employees'
+                    '/api/v1/employees',
+                    '/api/v1/search?query=customer&limit=5'
                 ];
                 const results = [];
                 for (const endpoint of endpoints) {
@@ -840,6 +841,48 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await Expect(page.Locator(".ccc-root")).ToContainTextAsync(customer.FullName, new() { Timeout = 15_000 });
         await Expect(page.Locator("body")).ToContainTextAsync("Drop files here or click to upload", new() { Timeout = 15_000 });
         await Expect(page.Locator("body")).ToContainTextAsync("Quote Total", new() { Timeout = 15_000 });
+    }
+
+    /// <summary>
+    /// Verifies global search returns newly created customer records and navigates to the customer workflow.
+    /// Covers the indexed, permission-scoped search portion of OPS-001.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "OPS-001,INT-003")]
+    public async Task Intranet_GlobalSearch_ReturnsEmployeeCreatedCustomerAndNavigatesToRecord()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(page, intranetBase, "/");
+        var customer = await CreateIntranetCustomerAsync(page);
+
+        var indexedResult = await WaitForGlobalSearchResultAsync(page, customer.Email, customer.FullName);
+        Assert.True(
+            string.Equals("customer", indexedResult.ResourceType, StringComparison.OrdinalIgnoreCase),
+            $"Expected a customer search result but got resource type '{indexedResult.ResourceType}'.");
+        Assert.Contains("/customers", indexedResult.Href, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(customer.FullName, indexedResult.Title, StringComparison.OrdinalIgnoreCase);
+
+        await page.GotoAsync(new Uri(intranetBase, "/").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        var globalSearch = page.Locator(".topbar-global-search .global-search-input").First;
+        await globalSearch.FillAsync(customer.Email);
+        var searchResult = page.Locator(".topbar-global-search .global-search-result").Filter(new() { HasText = customer.FullName }).First;
+        await Expect(searchResult).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        await page.Locator(".global-search-backdrop").First.ClickAsync();
+        await Expect(page.Locator(".topbar-global-search .global-search-panel")).ToBeHiddenAsync(new() { Timeout = 10_000 });
+
+        await globalSearch.FillAsync(string.Empty);
+        await globalSearch.FillAsync(customer.Email);
+        searchResult = page.Locator(".topbar-global-search .global-search-result").Filter(new() { HasText = customer.FullName }).First;
+        await Expect(searchResult).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await searchResult.ClickAsync();
+
+        await page.WaitForURLAsync(url => url.Contains("/customers", StringComparison.OrdinalIgnoreCase), new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(customer.Email, new() { Timeout = 30_000 });
     }
 
     private async Task<IBrowserContext> NewContextAsync()
@@ -1086,6 +1129,60 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     private sealed record CreatedIntranetCustomer(string Email, string FullName, string RawCreateResponse);
+
+    private static async Task<GlobalSearchE2EResult> WaitForGlobalSearchResultAsync(IPage page, string query, string expectedTitle)
+    {
+        var searchResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const deadline = Date.now() + 60000;
+                let last = '';
+                while (Date.now() < deadline) {
+                    const r = await fetch(`/api/v1/search?query=${encodeURIComponent(args.query)}&limit=10`, { credentials: 'include' });
+                    const text = await r.text();
+                    last = `${r.status} ${text}`;
+                    if (r.status === 200) {
+                        const body = JSON.parse(text);
+                        const results = body.results ?? body.Results ?? [];
+                        const match = results.find(result => {
+                            const title = result.title ?? result.Title ?? '';
+                            const subtitle = result.subtitle ?? result.Subtitle ?? '';
+                            return title.toLowerCase().includes(args.expectedTitle.toLowerCase()) ||
+                                subtitle.toLowerCase().includes(args.query.toLowerCase());
+                        });
+                        if (match) {
+                            return `200 ${JSON.stringify(match)}`;
+                        }
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                return last;
+            }",
+            new { query, expectedTitle });
+
+        Assert.StartsWith("200", searchResult, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(searchResult[4..]);
+        var root = document.RootElement;
+        return new GlobalSearchE2EResult(
+            GetJsonString(root, "title", "Title"),
+            GetJsonString(root, "resourceType", "ResourceType"),
+            GetJsonString(root, "href", "Href"));
+    }
+
+    private static string GetJsonString(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String)
+            {
+                return value.GetString() ?? string.Empty;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private sealed record GlobalSearchE2EResult(string Title, string ResourceType, string Href);
 
     private static async Task<CommerceE2EProduct> CreateCommerceProductAsync(IPage page)
     {
