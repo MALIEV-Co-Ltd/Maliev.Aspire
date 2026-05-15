@@ -881,6 +881,111 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an Intranet admin can create an IAM user, assign an initial role, and inspect role permissions.
+    /// Covers the executable IAM administration portions of INT-010 and INT-011.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-010,INT-011,SEC-002")]
+    public async Task Intranet_IamAdmin_CreatesUserAssignsRoleAndViewsPermissionMatrix()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var displayName = $"E2E IAM User {unique}";
+        var email = $"e2e.iam.{unique}@maliev.local";
+        const string roleId = "roles.aspire.limited";
+
+        await SignInToIntranetAsync(page, intranetBase, "/iam");
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "IAM" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var rolesResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/iam/roles', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", rolesResult, StringComparison.Ordinal);
+
+        using var rolesDocument = JsonDocument.Parse(rolesResult[4..]);
+        var limitedRole = rolesDocument.RootElement.EnumerateArray().SingleOrDefault(role =>
+            string.Equals(roleId, GetJsonString(role, "roleId", "RoleId"), StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotEqual(JsonValueKind.Undefined, limitedRole.ValueKind);
+        var roleName = GetJsonString(limitedRole, "name", "Name");
+        var rolePermissions = GetJsonStringArray(limitedRole, "permissionIds", "PermissionIds", "permissions", "Permissions");
+        Assert.Contains("employee.profiles.read", rolePermissions, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("employee.profiles.update", rolePermissions, StringComparer.OrdinalIgnoreCase);
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Roles" }).ClickAsync();
+        await Expect(page.Locator("body")).ToContainTextAsync(string.IsNullOrWhiteSpace(roleName) ? roleId : roleName, new() { Timeout = 30_000 });
+
+        await page.GotoAsync(new Uri(intranetBase, $"/iam/roles/{Uri.EscapeDataString(roleId)}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(roleId, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("employee.profiles.read", new() { Timeout = 30_000 });
+
+        var matrixResult = await page.EvaluateAsync<string>(
+            "async roleId => { const r = await fetch(`/api/v1/iam/roles/${encodeURIComponent(roleId)}/permissions-matrix`, { credentials: 'include' }); return `${r.status} ${await r.text()}`; }",
+            roleId);
+        Assert.StartsWith("200 ", matrixResult, StringComparison.Ordinal);
+
+        using var matrixDocument = JsonDocument.Parse(matrixResult[4..]);
+        var matrixRoot = matrixDocument.RootElement;
+        Assert.Equal(roleId, GetJsonString(matrixRoot, "roleId", "RoleId"));
+        Assert.True(TryGetJsonProperty(matrixRoot, out var matrixPermissions, "permissions", "Permissions"));
+        Assert.Contains(matrixPermissions.EnumerateArray(), permission =>
+            string.Equals("employee.profiles.read", GetJsonString(permission, "permissionId", "PermissionId"), StringComparison.OrdinalIgnoreCase) &&
+            GetJsonBool(permission, "granted", "Granted"));
+
+        await page.GotoAsync(new Uri(intranetBase, "/iam/users/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "Create IAM User" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await page.GetByLabel("Name").FillAsync(displayName);
+        await page.GetByLabel("Email").FillAsync(email);
+        await page.GetByLabel("Role").SelectOptionAsync(roleId);
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Create User" }).ClickAsync();
+
+        await page.WaitForURLAsync(
+            url => new Uri(url).AbsolutePath.Equals("/iam", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForURLOptions
+            {
+                Timeout = 60_000,
+                WaitUntil = WaitUntilState.NetworkIdle
+            });
+
+        var usersResult = await page.EvaluateAsync<string>(
+            @"async email => {
+                const r = await fetch(`/api/v1/iam/users?search=${encodeURIComponent(email)}&pageSize=10`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            email);
+        Assert.StartsWith("200 ", usersResult, StringComparison.Ordinal);
+
+        using var usersDocument = JsonDocument.Parse(usersResult[4..]);
+        Assert.True(TryGetJsonProperty(usersDocument.RootElement, out var userData, "data", "Data"));
+        var createdUser = userData.EnumerateArray().SingleOrDefault(user =>
+            string.Equals(email, GetJsonString(user, "email", "Email"), StringComparison.OrdinalIgnoreCase));
+
+        Assert.NotEqual(JsonValueKind.Undefined, createdUser.ValueKind);
+        Assert.Equal(displayName, GetJsonString(createdUser, "displayName", "DisplayName"));
+        var principalId = createdUser.GetProperty("principalId").GetGuid();
+
+        await page.GotoAsync(new Uri(intranetBase, $"/iam/users/{principalId}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(displayName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(email, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(roleName, new() { Timeout = 30_000 });
+
+        var userRolesResult = await page.EvaluateAsync<string>(
+            @"async principalId => {
+                const r = await fetch(`/api/v1/iam/users/${principalId}/roles`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            principalId);
+        Assert.StartsWith("200 ", userRolesResult, StringComparison.Ordinal);
+
+        using var userRolesDocument = JsonDocument.Parse(userRolesResult[4..]);
+        Assert.Contains(userRolesDocument.RootElement.EnumerateArray(), binding =>
+            string.Equals(roleId, GetJsonString(binding, "roleId", "RoleId"), StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(GetJsonString(binding, "bindingId", "BindingId")));
+    }
+
+    /// <summary>
     /// Verifies authenticated Intranet module routes render for the production-gate employee story groups.
     /// Covers route-level executable portions of INT-002, INT-003, INT-010, INT-011, INT-012, INT-013, INT-014,
     /// COM-001, FIN-001, FIN-002, PROC-002, PROC-003, MFG-001, MFG-003, MFG-004, HR-001, HR-002, OPS-001, and SEC-002.
@@ -1389,8 +1494,22 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
     private static async Task<IntranetPermissionState> GetIntranetPermissionStateAsync(IPage page)
     {
-        var authUser = await page.EvaluateAsync<string>(
-            "async () => { const r = await fetch('/api/v1/auth/user', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        string authUser = string.Empty;
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            try
+            {
+                authUser = await page.EvaluateAsync<string>(
+                    "async () => { const r = await fetch('/api/v1/auth/user', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+                break;
+            }
+            catch (PlaywrightException ex) when (
+                attempt < 5 &&
+                ex.Message.Contains("Execution context was destroyed", StringComparison.OrdinalIgnoreCase))
+            {
+                await page.WaitForTimeoutAsync(500);
+            }
+        }
 
         if (!authUser.StartsWith("200 ", StringComparison.Ordinal))
         {
@@ -1631,6 +1750,25 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         }
 
         return 0;
+    }
+
+    private static List<string> GetJsonStringArray(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            return value
+                .EnumerateArray()
+                .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() ?? string.Empty : string.Empty)
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .ToList();
+        }
+
+        return [];
     }
 
     private static bool TryGetJsonProperty(JsonElement element, out JsonElement property, params string[] names)
