@@ -967,6 +967,7 @@ static partial class Program
                 .WithReference(pricingService)
                 .WithReference(uploadService)
                 .WithReference(commerceService)
+                .WithEnvironment("QuoteEngine__BaseUrl", quoteEngineBff.GetEndpoint("http"))
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Customer Web (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Customer Web (HTTPS)")
                 .WithTestingSafeHttpHealthCheck("/web/aspire-liveness"),

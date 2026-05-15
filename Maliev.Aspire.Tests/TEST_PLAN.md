@@ -72,6 +72,8 @@
 - One quotation per project with immutable quotation versions, exact version PDF artifacts, source project linkage, and version-aware acceptance/order creation
 - Source of truth: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_STORIES.md`
 - Execution evidence: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_RUN_RESULTS.md`
+- If no `[Trait("Tier", "E2E")]` browser tests exist, the gate is not complete: run manual browser/Playwright checks against the Aspire-hosted frontend URLs, record story-level pass/partial/blocked/fail evidence, then run available service-level E2E and system integration checks separately.
+- Service/system integration checks may support the E2E gate, but they must not be documented as browser E2E results unless a browser actually opened the relevant user journey.
 
 ### 1.4 Infrastructure Patterns
 

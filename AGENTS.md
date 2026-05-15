@@ -194,7 +194,8 @@ Use these rules for the E2E story catalog:
 - QuoteEngine has two E2E modes: anonymous demo mode is non-mutating and uses MALIEV-owned sample files; signed customer project mode must use server-resolved customer identity and real service-backed Project/Upload/Geometry/Pricing/Quotation/PDF/Order/Payment/Delivery workflows.
 - Reorder or major customer changes after acceptance must start from Duplicate Project linked to the source project. Accepted projects, quotation versions, PDFs, orders, and payments must remain immutable evidence.
 - Version-aware E2E assertions must prove one quotation per project, multiple immutable quotation versions, exact version PDF links, current-version marker, source-project linkage, and acceptance/order creation against the selected quotation version.
-- When asked to run the E2E gate, first discover `[Trait("Tier", "E2E")]` browser tests. If no tests exist, state that explicitly, run the available service-level E2E and Aspire system checks, and record the result in `E2E_USER_JOURNEY_RUN_RESULTS.md`.
+- When asked to run the E2E gate, first discover `[Trait("Tier", "E2E")]` browser tests. If no browser tests exist, state that explicitly, manually exercise the highest-priority journeys in a browser/Playwright against the Aspire-hosted Web, QuoteEngine, and Intranet entry points, run the available service-level E2E and Aspire system checks, and record story-level results in `E2E_USER_JOURNEY_RUN_RESULTS.md`.
+- Do not represent service/system integration tests as browser E2E results. Browser E2E evidence must include the URL opened, visible UI assertions, pass/partial/blocked/fail status, and any fixes or blockers discovered during manual browser execution.
 - Keep run results out of `E2E_USER_JOURNEY_STORIES.md`; that file defines the journeys, while `E2E_USER_JOURNEY_RUN_RESULTS.md` records evidence.
 
 #### Assertions & Logging
