@@ -1,5 +1,6 @@
 using Maliev.Aspire.Tests.Infrastructure;
 using Microsoft.Playwright;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Maliev.Aspire.Tests.E2E;
@@ -507,6 +508,42 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await AssertIntranetRouteAsync(page, intranetBase, "/hr/profile", new Regex("profile|employee|leave|HR", RegexOptions.IgnoreCase));
     }
 
+    /// <summary>
+    /// Verifies employee-created customer records are searchable, detail pages render, and the employee project quote workspace can select a customer.
+    /// Covers executable customer/project-workspace portions of INT-003 and INT-004.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-003,INT-004")]
+    public async Task Intranet_EmployeeCreatedCustomer_CanBeOpenedAndSelectedInProjectWorkspace()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(page, intranetBase, "/customers");
+        var customer = await CreateIntranetCustomerAsync(page);
+
+        await page.GotoAsync(new Uri(intranetBase, $"/customers?search={Uri.EscapeDataString(customer.Email)}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(customer.Email, new() { Timeout = 30_000 });
+        await page.GetByText(customer.Email).ClickAsync();
+        await page.WaitForURLAsync(url => url.Contains("/customers/", StringComparison.OrdinalIgnoreCase), new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(customer.FullName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Contact information|Addresses|Projects", RegexOptions.IgnoreCase), new() { Timeout = 15_000 });
+
+        await page.GotoAsync(new Uri(intranetBase, "/sales/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync("Drop CAD files to quote", new() { Timeout = 30_000 });
+        await Expect(page.GetByText("Bill To", new() { Exact = true })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Select customer..." }).ClickAsync();
+        var customerSearch = page.Locator(".customer-picker-search-input");
+        await customerSearch.FillAsync(customer.Email);
+        await Expect(page.Locator(".customer-picker-option").Filter(new() { HasText = customer.FullName })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await page.Locator(".customer-picker-option").Filter(new() { HasText = customer.FullName }).ClickAsync();
+        await Expect(page.Locator(".ccc-root")).ToContainTextAsync(customer.FullName, new() { Timeout = 15_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Drop files here or click to upload", new() { Timeout = 15_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Quote Total", new() { Timeout = 15_000 });
+    }
+
     private async Task<IBrowserContext> NewContextAsync()
     {
         return await _browser!.NewContextAsync(new BrowserNewContextOptions
@@ -595,6 +632,61 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         throw new TimeoutException($"Intranet automation employee could not sign in before timeout. Last error: {lastError}");
     }
+
+    private static async Task<CreatedIntranetCustomer> CreateIntranetCustomerAsync(IPage page)
+    {
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var email = $"e2e.intranet.customer.{unique}@maliev.local";
+        const string firstName = "E2E";
+        const string lastName = "Project Customer";
+        const string fullName = $"{firstName} {lastName}";
+
+        var payload = new
+        {
+            customer = new
+            {
+                firstName,
+                lastName,
+                email,
+                mobile = "+66810000000",
+                segment = "Retail",
+                tier = "Bronze",
+                preferredLanguage = "en",
+                timezone = "Asia/Bangkok",
+                usesCompanyBillingAddress = true,
+                paymentTerms = "Due on receipt",
+                communicationPreferences = new Dictionary<string, bool>
+                {
+                    ["email_opt_in"] = true,
+                    ["sms_opt_in"] = false,
+                    ["marketing_opt_in"] = false
+                }
+            },
+            addresses = Array.Empty<object>(),
+            documents = Array.Empty<object>(),
+            internalNote = "Created by Aspire browser E2E for customer/project workspace verification."
+        };
+
+        var createResult = await page.EvaluateAsync<string>(
+            @"async payload => {
+                const r = await fetch('/api/v1/customers/create-basic', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            payload);
+
+        Assert.StartsWith("200", createResult, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(createResult[4..]);
+        Assert.Equal(email, document.RootElement.GetProperty("email").GetString());
+
+        return new CreatedIntranetCustomer(email, fullName, createResult);
+    }
+
+    private sealed record CreatedIntranetCustomer(string Email, string FullName, string RawCreateResponse);
 
     private static async Task AssertIntranetRouteAsync(IPage page, Uri intranetBase, string path, Regex expectedText)
     {
