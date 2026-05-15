@@ -323,6 +323,88 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies customer-owned account data cannot be mutated by another customer session and expired sessions preserve return URLs.
+    /// Covers executable Web account portions of SEC-001 and SEC-003.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "SEC-001,SEC-003,WEB-009")]
+    public async Task Web_CustomerAccountSecurity_BlocksCrossCustomerAddressMutationAndPreservesReturnUrl()
+    {
+        var webBase = GetEndpoint("WebBff");
+
+        await using var customerAContext = await NewContextAsync();
+        var customerAPage = await customerAContext.NewPageAsync();
+        var customerAEmail = await RegisterWebCustomerAsync(customerAPage, webBase, "/account");
+        await Expect(customerAPage.Locator("body")).ToContainTextAsync(customerAEmail, new() { Timeout = 30_000 });
+
+        var createAddressResult = await customerAPage.EvaluateAsync<string>(
+            @"async () => {
+                const r = await fetch('/web/v1/account/addresses', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: 'Shipping',
+                        isDefault: true,
+                        addressLine1: '101 Owner Road',
+                        city: 'Bangkok',
+                        stateProvince: 'Bangkok',
+                        postalCode: '10500',
+                        recipientName: 'Customer A Receiver',
+                        recipientPhone: '+66810000001'
+                    })
+                });
+                return `${r.status} ${await r.text()}`;
+            }");
+        Assert.StartsWith("200", createAddressResult, StringComparison.Ordinal);
+        using var addressDocument = JsonDocument.Parse(createAddressResult[4..]);
+        var addressId = addressDocument.RootElement.GetProperty("id").GetGuid();
+
+        await using var customerBContext = await NewContextAsync();
+        var customerBPage = await customerBContext.NewPageAsync();
+        var customerBEmail = await RegisterWebCustomerAsync(customerBPage, webBase, "/account");
+        await Expect(customerBPage.Locator("body")).ToContainTextAsync(customerBEmail, new() { Timeout = 30_000 });
+
+        var crossCustomerUpdate = await customerBPage.EvaluateAsync<string>(
+            @"async addressId => {
+                const r = await fetch(`/web/v1/account/addresses/${addressId}`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: 'Shipping',
+                        isDefault: true,
+                        addressLine1: '999 Attacker Road',
+                        city: 'Bangkok',
+                        stateProvince: 'Bangkok',
+                        postalCode: '10500',
+                        recipientName: 'Customer B Receiver',
+                        recipientPhone: '+66810000002',
+                        version: 0
+                    })
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            addressId);
+        Assert.StartsWith("404", crossCustomerUpdate, StringComparison.Ordinal);
+
+        await customerBContext.ClearCookiesAsync();
+        await customerBPage.GotoAsync(new Uri(webBase, "/account/addresses").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await customerBPage.WaitForURLAsync(
+            url => url.Contains("/auth/sign-in", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForURLOptions
+            {
+                Timeout = 30_000,
+                WaitUntil = WaitUntilState.Commit
+            });
+
+        var signInUrl = new Uri(customerBPage.Url);
+        Assert.Contains("returnUrl", signInUrl.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("/account/addresses", Uri.UnescapeDataString(signInUrl.Query), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Verifies an employee can publish a Commerce product and the Web storefront exposes only the published listing.
     /// Covers executable portions of WEB-008, COM-001, COM-002, COM-003, and COM-004.
     /// </summary>
