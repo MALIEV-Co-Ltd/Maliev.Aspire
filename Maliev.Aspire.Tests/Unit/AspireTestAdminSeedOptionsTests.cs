@@ -60,8 +60,14 @@ public class AspireTestAdminSeedOptionsTests
         Assert.Equal("aspire-automation@debug.com", options.Email);
         Assert.Equal("AspireTestAdminSeeder", options.LinkedService);
         Assert.Equal("roles.aspire.automation", options.RoleId);
+        Assert.Equal("aspire-limited@debug.com", options.LimitedEmail);
+        Assert.Equal("roles.aspire.limited", options.LimitedRoleIdValue);
+        Assert.Contains("auth.sessions.read", options.LimitedRolePermissions);
+        Assert.Contains("employee.profiles.read", options.LimitedRolePermissions);
         Assert.NotEqual(Guid.Empty, options.PrincipalId);
         Assert.NotEqual(Guid.Empty, options.EmployeeId);
+        Assert.NotEqual(Guid.Empty, options.LimitedPrincipalId);
+        Assert.NotEqual(Guid.Empty, options.LimitedEmployeeId);
     }
 
     /// <summary>
@@ -82,6 +88,27 @@ public class AspireTestAdminSeedOptionsTests
 
         Assert.Contains("system@maliev.com", exception.Message, StringComparison.Ordinal);
         Assert.Contains("reserved", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The limited employee must be a separate principal so negative permission checks are meaningful.
+    /// </summary>
+    [Fact]
+    public void FromConfiguration_WhenLimitedEmailMatchesAdminEmail_Throws()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["AspireTestAdmin:Enabled"] = "true",
+            ["AspireTestAdmin:Password"] = "local-only-secret",
+            ["AspireTestAdmin:Email"] = "same@debug.com",
+            ["AspireTestAdmin:LimitedEmail"] = "same@debug.com"
+        });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => AspireTestAdminSeedOptions.FromConfiguration(configuration));
+
+        Assert.Contains("LimitedEmail", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("different", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static IConfiguration BuildConfiguration(Dictionary<string, string?> values)

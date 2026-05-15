@@ -20,8 +20,15 @@ public sealed class AspireTestAdminSeedOptions
     /// </summary>
     public const string AutomationRoleId = "roles.aspire.automation";
 
+    /// <summary>
+    /// IAM role assigned to the Aspire-local limited-permission employee principal.
+    /// </summary>
+    public const string LimitedRoleId = "roles.aspire.limited";
+
     private static readonly Guid DefaultPrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111001");
     private static readonly Guid DefaultEmployeeId = Guid.Parse("11111111-1111-1111-1111-111111111002");
+    private static readonly Guid DefaultLimitedPrincipalId = Guid.Parse("11111111-1111-1111-1111-111111111101");
+    private static readonly Guid DefaultLimitedEmployeeId = Guid.Parse("11111111-1111-1111-1111-111111111102");
 
     /// <summary>
     /// Gets a value indicating whether the Aspire-local test administrator seed is enabled.
@@ -79,6 +86,55 @@ public sealed class AspireTestAdminSeedOptions
     public string RoleId { get; init; } = AutomationRoleId;
 
     /// <summary>
+    /// Gets the synthetic limited employee email used for permission-boundary browser E2E tests.
+    /// </summary>
+    public string LimitedEmail { get; init; } = "aspire-limited@debug.com";
+
+    /// <summary>
+    /// Gets the stable IAM principal identifier used by the limited employee.
+    /// </summary>
+    public Guid LimitedPrincipalId { get; init; } = DefaultLimitedPrincipalId;
+
+    /// <summary>
+    /// Gets the stable employee identifier used by the limited employee.
+    /// </summary>
+    public Guid LimitedEmployeeId { get; init; } = DefaultLimitedEmployeeId;
+
+    /// <summary>
+    /// Gets the employee number assigned to the limited employee.
+    /// </summary>
+    public string LimitedEmployeeNumber { get; init; } = "EMP-CODEX-002";
+
+    /// <summary>
+    /// Gets the first name assigned to the limited employee.
+    /// </summary>
+    public string LimitedFirstName { get; init; } = "Codex";
+
+    /// <summary>
+    /// Gets the last name assigned to the limited employee.
+    /// </summary>
+    public string LimitedLastName { get; init; } = "Limited";
+
+    /// <summary>
+    /// Gets the preferred display name assigned to the limited employee.
+    /// </summary>
+    public string LimitedPreferredName { get; init; } = "Codex Limited";
+
+    /// <summary>
+    /// Gets the dedicated IAM role assigned to the limited employee.
+    /// </summary>
+    public string LimitedRoleIdValue { get; init; } = LimitedRoleId;
+
+    /// <summary>
+    /// Gets the permissions intentionally granted to the limited employee.
+    /// </summary>
+    public IReadOnlyList<string> LimitedRolePermissions { get; init; } =
+    [
+        "auth.sessions.read",
+        "employee.profiles.read"
+    ];
+
+    /// <summary>
     /// Creates options from configuration and validates fail-closed safety rules.
     /// </summary>
     /// <param name="configuration">The application configuration.</param>
@@ -99,7 +155,15 @@ public sealed class AspireTestAdminSeedOptions
             LastName = ReadString(configuration, "AspireTestAdmin:LastName", "Admin"),
             PreferredName = ReadString(configuration, "AspireTestAdmin:PreferredName", "Codex Admin"),
             LinkedService = LinkedServiceName,
-            RoleId = AutomationRoleId
+            RoleId = AutomationRoleId,
+            LimitedEmail = ReadString(configuration, "AspireTestAdmin:LimitedEmail", "aspire-limited@debug.com"),
+            LimitedPrincipalId = ReadGuid(configuration, "AspireTestAdmin:LimitedPrincipalId", DefaultLimitedPrincipalId),
+            LimitedEmployeeId = ReadGuid(configuration, "AspireTestAdmin:LimitedEmployeeId", DefaultLimitedEmployeeId),
+            LimitedEmployeeNumber = ReadString(configuration, "AspireTestAdmin:LimitedEmployeeNumber", "EMP-CODEX-002"),
+            LimitedFirstName = ReadString(configuration, "AspireTestAdmin:LimitedFirstName", "Codex"),
+            LimitedLastName = ReadString(configuration, "AspireTestAdmin:LimitedLastName", "Limited"),
+            LimitedPreferredName = ReadString(configuration, "AspireTestAdmin:LimitedPreferredName", "Codex Limited"),
+            LimitedRoleIdValue = LimitedRoleId
         };
 
         if (options.Enabled && string.IsNullOrWhiteSpace(options.Password))
@@ -115,6 +179,21 @@ public sealed class AspireTestAdminSeedOptions
             throw new InvalidOperationException(
                 $"AspireTestAdmin:Email cannot be {ReservedSystemPrincipalEmail}. " +
                 "That address is reserved for the IAM system principal; use a synthetic automation user instead.");
+        }
+
+        if (options.Enabled &&
+            string.Equals(options.LimitedEmail, ReservedSystemPrincipalEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"AspireTestAdmin:LimitedEmail cannot be {ReservedSystemPrincipalEmail}. " +
+                "That address is reserved for the IAM system principal; use a synthetic automation user instead.");
+        }
+
+        if (options.Enabled &&
+            string.Equals(options.Email, options.LimitedEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "AspireTestAdmin:LimitedEmail must be different from AspireTestAdmin:Email so permission-boundary tests use a separate principal.");
         }
 
         return options;

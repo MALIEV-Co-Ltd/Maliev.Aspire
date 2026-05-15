@@ -46,6 +46,7 @@ public class EmployeeDatabaseSeeder : DatabaseSeeder<EmployeeDbContext>
         if (testAdminOptions.Enabled)
         {
             await SeedAspireTestAdminAsync(testAdminOptions, cancellationToken);
+            await SeedAspireLimitedEmployeeAsync(testAdminOptions, cancellationToken);
             return;
         }
 
@@ -130,5 +131,52 @@ public class EmployeeDatabaseSeeder : DatabaseSeeder<EmployeeDbContext>
             "Successfully seeded Aspire local test administrator employee {Email} with PrincipalId {PrincipalId}.",
             options.Email,
             options.PrincipalId);
+    }
+
+    private async Task SeedAspireLimitedEmployeeAsync(
+        AspireTestAdminSeedOptions options,
+        CancellationToken cancellationToken)
+    {
+        Logger.LogInformation("Seeding Aspire local limited employee {Email}...", options.LimitedEmail);
+
+        var employee = await Context.Employees
+            .FirstOrDefaultAsync(e => e.Id == options.LimitedEmployeeId || e.ContactInformation.WorkEmail == options.LimitedEmail, cancellationToken);
+
+        var isNew = employee == null;
+        employee ??= new Employee
+        {
+            Id = options.LimitedEmployeeId,
+            CreatedDate = DateTime.UtcNow
+        };
+
+        employee.PrincipalId = options.LimitedPrincipalId;
+        employee.EmployeeNumber = options.LimitedEmployeeNumber;
+        employee.LegalName = new LegalName
+        {
+            FirstName = options.LimitedFirstName,
+            LastName = options.LimitedLastName
+        };
+        employee.PreferredName = options.LimitedPreferredName;
+        employee.ContactInformation = new ContactInformation
+        {
+            WorkEmail = options.LimitedEmail
+        };
+        employee.PasswordHash = _passwordService.HashPassword(options.Password!);
+        employee.EmploymentStatus = EmploymentStatus.Active;
+        employee.EmploymentType = EmploymentType.FullTime;
+        employee.StartDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        employee.ModifiedDate = DateTime.UtcNow;
+
+        if (isNew)
+        {
+            Context.Employees.Add(employee);
+        }
+
+        await Context.SaveChangesAsync(cancellationToken);
+
+        Logger.LogInformation(
+            "Successfully seeded Aspire local limited employee {Email} with PrincipalId {PrincipalId}.",
+            options.LimitedEmail,
+            options.LimitedPrincipalId);
     }
 }

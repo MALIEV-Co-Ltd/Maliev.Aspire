@@ -662,6 +662,67 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee with only profile permissions cannot access restricted Intranet modules by API or direct URL.
+    /// Covers the authenticated permission-boundary portion of SEC-002.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "SEC-002,INT-001")]
+    public async Task Intranet_LimitedEmployee_CannotAccessRestrictedModuleApis()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(
+            page,
+            intranetBase,
+            "/hr/profile",
+            _fixture.AspireTestLimitedEmployeeEmail,
+            _fixture.AspireTestLimitedEmployeePassword,
+            permissionState =>
+                !permissionState.HasWildcard &&
+                permissionState.HasPermission("auth.sessions.read") &&
+                permissionState.HasPermission("employee.profiles.read"),
+            "limited employee profile permissions");
+
+        var permissionState = await GetIntranetPermissionStateAsync(page);
+        Assert.True(permissionState.IsAuthenticated, permissionState.Diagnostic);
+        Assert.False(permissionState.HasWildcard, permissionState.Diagnostic);
+        Assert.DoesNotContain("iam.roles.list", permissionState.Permissions);
+        Assert.DoesNotContain("employee.employees.write", permissionState.Permissions);
+
+        var profileResponse = await page.EvaluateAsync<string>(
+            @"async () => {
+                const r = await fetch('/api/v1/employees/me/profile', { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }");
+        Assert.StartsWith("200", profileResponse, StringComparison.Ordinal);
+        Assert.Contains(_fixture.AspireTestLimitedEmployeeEmail, profileResponse, StringComparison.OrdinalIgnoreCase);
+
+        await page.GotoAsync(new Uri(intranetBase, "/iam").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        Assert.DoesNotContain("/login", page.Url, StringComparison.OrdinalIgnoreCase);
+
+        var restrictedResponses = await page.EvaluateAsync<string[]>(
+            @"async () => {
+                const endpoints = [
+                    '/api/v1/iam/users',
+                    '/api/v1/iam/roles',
+                    '/api/v1/employees'
+                ];
+                const results = [];
+                for (const endpoint of endpoints) {
+                    const r = await fetch(endpoint, { credentials: 'include' });
+                    const body = await r.text();
+                    results.push(`${r.status} ${endpoint} ${body.slice(0, 120)}`);
+                }
+                return results;
+            }");
+
+        Assert.All(restrictedResponses, response => Assert.StartsWith("403", response, StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// Verifies the Aspire-local automation employee can sign into Intranet and reach protected ERP surfaces.
     /// Covers the authenticated entry portions of INT-001, INT-014, OPS-001, OPS-002, and SEC-003.
     /// </summary>
@@ -808,13 +869,32 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
     private async Task SignInToIntranetAsync(IPage page, Uri intranetBase, string returnUrl)
     {
+        await SignInToIntranetAsync(
+            page,
+            intranetBase,
+            returnUrl,
+            _fixture.AspireTestAdminEmail,
+            _fixture.AspireTestAdminPassword,
+            permissionState => permissionState.HasWildcard,
+            "wildcard automation permissions");
+    }
+
+    private async Task SignInToIntranetAsync(
+        IPage page,
+        Uri intranetBase,
+        string returnUrl,
+        string email,
+        string password,
+        Func<IntranetPermissionState, bool> isReady,
+        string readinessDescription)
+    {
         var loginUrl = new Uri(intranetBase, $"/login?returnUrl={Uri.EscapeDataString(returnUrl)}").ToString();
         var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
         string? lastError = null;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
-            await page.GotoAsync(loginUrl, new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await page.GotoAsync(loginUrl, new PageGotoOptions { WaitUntil = WaitUntilState.Commit });
             try
             {
                 await page.Locator("#login-email, #Username").First.WaitForAsync(new LocatorWaitForOptions
@@ -836,8 +916,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
             var emailInput = page.Locator("#login-email, #Username").First;
             var passwordInput = page.Locator("#login-password, #Password").First;
-            await emailInput.FillAsync(_fixture.AspireTestAdminEmail, new LocatorFillOptions { Force = true });
-            await passwordInput.FillAsync(_fixture.AspireTestAdminPassword, new LocatorFillOptions { Force = true });
+            await emailInput.FillAsync(email, new LocatorFillOptions { Force = true });
+            await passwordInput.FillAsync(password, new LocatorFillOptions { Force = true });
             var serverLoginForm = page.Locator("form[action='/api/v1/auth/login-form']").First;
             if (await serverLoginForm.CountAsync() > 0)
             {
@@ -858,14 +938,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                         WaitUntil = WaitUntilState.Commit
                     });
 
-                var permissionState = await GetIntranetAutomationPermissionStateAsync(page);
-                if (permissionState.Ready)
+                var permissionState = await GetIntranetPermissionStateAsync(page);
+                if (isReady(permissionState))
                 {
                     return;
                 }
 
-                lastError = $"Signed in but automation permissions are not ready. Auth user: {permissionState.Diagnostic}";
-                await page.GotoAsync(new Uri(intranetBase, "/api/v1/auth/logout").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+                lastError = $"Signed in as {email}, but {readinessDescription} are not ready. Auth user: {permissionState.Diagnostic}";
+                await page.GotoAsync(new Uri(intranetBase, "/api/v1/auth/logout").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.Commit });
                 await page.WaitForTimeoutAsync(2_000);
             }
             catch (TimeoutException ex)
@@ -876,29 +956,42 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             }
         }
 
-        throw new TimeoutException($"Intranet automation employee could not sign in before timeout. Last error: {lastError}");
+        throw new TimeoutException($"Intranet employee {email} could not sign in before timeout. Last error: {lastError}");
     }
 
-    private static async Task<(bool Ready, string Diagnostic)> GetIntranetAutomationPermissionStateAsync(IPage page)
+    private static async Task<IntranetPermissionState> GetIntranetPermissionStateAsync(IPage page)
     {
         var authUser = await page.EvaluateAsync<string>(
             "async () => { const r = await fetch('/api/v1/auth/user', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
 
         if (!authUser.StartsWith("200 ", StringComparison.Ordinal))
         {
-            return (false, authUser);
+            return new IntranetPermissionState(false, false, new HashSet<string>(StringComparer.OrdinalIgnoreCase), authUser);
         }
 
         using var document = JsonDocument.Parse(authUser[4..]);
         if (!document.RootElement.TryGetProperty("permissions", out var permissions) ||
             permissions.ValueKind != JsonValueKind.Array)
         {
-            return (false, authUser);
+            return new IntranetPermissionState(true, false, new HashSet<string>(StringComparer.OrdinalIgnoreCase), authUser);
         }
 
-        var hasWildcard = permissions.EnumerateArray().Any(permission =>
-            permission.GetString()?.Equals("*", StringComparison.OrdinalIgnoreCase) == true);
-        return (hasWildcard, authUser);
+        var permissionSet = permissions
+            .EnumerateArray()
+            .Select(permission => permission.GetString() ?? string.Empty)
+            .Where(permission => !string.IsNullOrWhiteSpace(permission))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var hasWildcard = permissionSet.Contains("*");
+        return new IntranetPermissionState(true, hasWildcard, permissionSet, authUser);
+    }
+
+    private sealed record IntranetPermissionState(
+        bool IsAuthenticated,
+        bool HasWildcard,
+        IReadOnlySet<string> Permissions,
+        string Diagnostic)
+    {
+        public bool HasPermission(string permission) => Permissions.Contains(permission);
     }
 
     private static async Task<string> RegisterWebCustomerAsync(IPage page, Uri webBase, string returnUrl)

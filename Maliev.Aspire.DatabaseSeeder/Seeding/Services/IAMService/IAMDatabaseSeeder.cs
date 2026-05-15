@@ -15,6 +15,7 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
 {
     private const string PlatformOwnerRoleId = "roles.platform.owner";
     private const string AutomationRoleName = "Aspire Automation";
+    private const string LimitedRoleName = "Aspire Limited Employee";
     private readonly IConfiguration _configuration;
 
     /// <summary>
@@ -46,11 +47,15 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
         await EnsureAutomationRoleAsync(options, cancellationToken);
         await RemoveLegacyPlatformOwnerBindingAsync(options, cancellationToken);
         await EnsureAutomationRoleBindingAsync(options, cancellationToken);
+        await EnsureLimitedPrincipalAsync(options, cancellationToken);
+        await EnsureLimitedRoleAsync(options, cancellationToken);
+        await RemoveUnexpectedLimitedBindingsAsync(options, cancellationToken);
+        await EnsureLimitedRoleBindingAsync(options, cancellationToken);
 
         Logger.LogInformation(
-            "Successfully seeded Aspire local test administrator IAM principal {Email} with {RoleId}.",
+            "Successfully seeded Aspire local IAM browser principals {AdminEmail} and {LimitedEmail}.",
             options.Email,
-            options.RoleId);
+            options.LimitedEmail);
     }
 
     private async Task EnsurePrincipalAsync(
@@ -160,6 +165,120 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
         await Context.SaveChangesAsync(cancellationToken);
     }
 
+    private async Task EnsureLimitedPrincipalAsync(
+        AspireTestAdminSeedOptions options,
+        CancellationToken cancellationToken)
+    {
+        var conflictingEmailPrincipal = await Context.Principals
+            .FirstOrDefaultAsync(p => p.Email == options.LimitedEmail && p.PrincipalId != options.LimitedPrincipalId, cancellationToken);
+
+        if (conflictingEmailPrincipal != null)
+        {
+            throw new InvalidOperationException(
+                $"Cannot seed Aspire limited employee because {options.LimitedEmail} is already assigned to principal " +
+                $"{conflictingEmailPrincipal.PrincipalId}.");
+        }
+
+        var principal = await Context.Principals
+            .FirstOrDefaultAsync(p => p.PrincipalId == options.LimitedPrincipalId, cancellationToken);
+
+        var isNew = principal == null;
+        principal ??= new Principal
+        {
+            PrincipalId = options.LimitedPrincipalId,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        principal.PrincipalType = "user";
+        principal.Email = options.LimitedEmail;
+        principal.DisplayName = options.LimitedPreferredName;
+        principal.IsActive = true;
+        principal.LinkedService = options.LinkedService;
+        principal.LinkedEntityId = options.LimitedEmployeeId;
+        principal.UpdatedAt = DateTime.UtcNow;
+
+        if (isNew)
+        {
+            Context.Principals.Add(principal);
+        }
+
+        await Context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task EnsureLimitedRoleAsync(
+        AspireTestAdminSeedOptions options,
+        CancellationToken cancellationToken)
+    {
+        var permissionIds = options.LimitedRolePermissions.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        foreach (var permissionId in permissionIds)
+        {
+            var permission = await Context.Permissions
+                .FirstOrDefaultAsync(p => p.PermissionId == permissionId, cancellationToken);
+
+            if (permission == null)
+            {
+                var parts = permissionId.Split('.');
+                Context.Permissions.Add(new Permission
+                {
+                    PermissionId = permissionId,
+                    ServiceName = parts[0],
+                    ResourceType = parts[1],
+                    Action = parts[2],
+                    Description = $"Aspire limited employee permission {permissionId}",
+                    RegisteredAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        var role = await Context.Roles
+            .Include(r => r.RolePermissions)
+            .FirstOrDefaultAsync(r => r.RoleId == options.LimitedRoleIdValue, cancellationToken);
+
+        if (role == null)
+        {
+            role = new Role
+            {
+                RoleId = options.LimitedRoleIdValue,
+                RoleName = LimitedRoleName,
+                ServiceName = "aspire",
+                Description = "Aspire-local limited employee role for browser permission-boundary validation",
+                IsCustom = true,
+                CreatedBy = IAMDbContext.SystemPrincipalId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            Context.Roles.Add(role);
+        }
+        else
+        {
+            role.RoleName = LimitedRoleName;
+            role.ServiceName = "aspire";
+            role.Description = "Aspire-local limited employee role for browser permission-boundary validation";
+            role.IsCustom = true;
+            role.UpdatedAt = DateTime.UtcNow;
+        }
+
+        var stalePermissions = role.RolePermissions
+            .Where(rolePermission => !permissionIds.Contains(rolePermission.PermissionId, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        Context.RolePermissions.RemoveRange(stalePermissions);
+
+        foreach (var permissionId in permissionIds)
+        {
+            if (!role.RolePermissions.Any(rolePermission => string.Equals(rolePermission.PermissionId, permissionId, StringComparison.OrdinalIgnoreCase)))
+            {
+                role.RolePermissions.Add(new RolePermission
+                {
+                    RoleId = options.LimitedRoleIdValue,
+                    PermissionId = permissionId
+                });
+            }
+        }
+
+        await Context.SaveChangesAsync(cancellationToken);
+    }
+
     private async Task RemoveLegacyPlatformOwnerBindingAsync(
         AspireTestAdminSeedOptions options,
         CancellationToken cancellationToken)
@@ -202,6 +321,56 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
             BindingId = Guid.NewGuid(),
             PrincipalId = options.PrincipalId,
             RoleId = options.RoleId,
+            ResourcePath = "*",
+            GrantedBy = IAMDbContext.SystemPrincipalId,
+            GrantedAt = DateTime.UtcNow
+        });
+
+        await Context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RemoveUnexpectedLimitedBindingsAsync(
+        AspireTestAdminSeedOptions options,
+        CancellationToken cancellationToken)
+    {
+        var unexpectedBindings = await Context.PrincipalRoleBindings
+            .Where(b => b.PrincipalId == options.LimitedPrincipalId && b.RoleId != options.LimitedRoleIdValue)
+            .ToListAsync(cancellationToken);
+
+        if (unexpectedBindings.Count == 0)
+        {
+            return;
+        }
+
+        Context.PrincipalRoleBindings.RemoveRange(unexpectedBindings);
+        await Context.SaveChangesAsync(cancellationToken);
+
+        Logger.LogInformation(
+            "Removed {Count} unexpected role binding(s) from Aspire limited employee principal {PrincipalId}.",
+            unexpectedBindings.Count,
+            options.LimitedPrincipalId);
+    }
+
+    private async Task EnsureLimitedRoleBindingAsync(
+        AspireTestAdminSeedOptions options,
+        CancellationToken cancellationToken)
+    {
+        var bindingExists = await Context.PrincipalRoleBindings.AnyAsync(
+            b => b.PrincipalId == options.LimitedPrincipalId &&
+                 b.RoleId == options.LimitedRoleIdValue &&
+                 b.ResourcePath == "*",
+            cancellationToken);
+
+        if (bindingExists)
+        {
+            return;
+        }
+
+        Context.PrincipalRoleBindings.Add(new PrincipalRoleBinding
+        {
+            BindingId = Guid.NewGuid(),
+            PrincipalId = options.LimitedPrincipalId,
+            RoleId = options.LimitedRoleIdValue,
             ResourcePath = "*",
             GrantedBy = IAMDbContext.SystemPrincipalId,
             GrantedAt = DateTime.UtcNow

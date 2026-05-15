@@ -86,6 +86,16 @@ public class AspireTestFixture : IAsyncLifetime
     public string AspireTestAdminPassword => AspireTestAdminPasswordValue;
 
     /// <summary>
+    /// Gets the Aspire-local limited employee email used by permission-boundary browser E2E tests.
+    /// </summary>
+    public string AspireTestLimitedEmployeeEmail { get; } = "aspire-limited@debug.com";
+
+    /// <summary>
+    /// Gets the generated Aspire-local limited employee password for this test process.
+    /// </summary>
+    public string AspireTestLimitedEmployeePassword => AspireTestAdminPasswordValue;
+
+    /// <summary>
     /// How long the AppHost took to start, for diagnostics.
     /// </summary>
     public TimeSpan StartupDuration { get; private set; }

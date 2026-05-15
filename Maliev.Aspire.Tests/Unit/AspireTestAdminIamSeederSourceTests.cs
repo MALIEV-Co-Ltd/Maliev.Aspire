@@ -24,6 +24,28 @@ public class AspireTestAdminIamSeederSourceTests
         Assert.DoesNotContain("RoleId = PlatformOwnerRoleId,", source, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The limited browser employee must be seeded without wildcard permissions for SEC-002 coverage.
+    /// </summary>
+    [Fact]
+    public void IamSeeder_AssignsDedicatedLimitedRoleWithoutWildcard()
+    {
+        var source = File.ReadAllText(FindSeederSource());
+        var optionsSource = File.ReadAllText(FindOptionsSource());
+        var normalizedSource = source.ReplaceLineEndings("\n");
+
+        Assert.Contains("LimitedRoleId = \"roles.aspire.limited\"", optionsSource, StringComparison.Ordinal);
+        Assert.Contains("\"auth.sessions.read\"", optionsSource, StringComparison.Ordinal);
+        Assert.Contains("\"employee.profiles.read\"", optionsSource, StringComparison.Ordinal);
+        Assert.Contains("await EnsureLimitedRoleAsync(options, cancellationToken);", source, StringComparison.Ordinal);
+        Assert.Contains("await RemoveUnexpectedLimitedBindingsAsync(options, cancellationToken);", source, StringComparison.Ordinal);
+        Assert.Contains("await EnsureLimitedRoleBindingAsync(options, cancellationToken);", source, StringComparison.Ordinal);
+        Assert.Contains("RoleId = options.LimitedRoleIdValue", source, StringComparison.Ordinal);
+        Assert.Contains("b.PrincipalId == options.LimitedPrincipalId && b.RoleId != options.LimitedRoleIdValue", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("PrincipalId = options.LimitedPrincipalId,\n            RoleId = options.RoleId", normalizedSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("PrincipalId = options.LimitedPrincipalId,\n            RoleId = PlatformOwnerRoleId", normalizedSource, StringComparison.Ordinal);
+    }
+
     private static string FindSeederSource()
     {
         foreach (var startDirectory in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
