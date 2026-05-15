@@ -1021,6 +1021,189 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee can create a customer-backed invoice, attach PO evidence, finalize it, and see the resulting invoice state.
+    /// Covers the executable invoice creation, attachment, credit-term, and status portions of FIN-001 and FIN-002.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "FIN-001,FIN-002")]
+    public async Task Intranet_FinanceInvoice_CreatesAttachesAndFinalizesCustomerInvoice()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var lineDescription = $"E2E machining services {Guid.NewGuid():N}"[..34];
+        var poNumber = $"PO-E2E-{Guid.NewGuid():N}"[..18].ToUpperInvariant();
+        var poFilePath = Path.Combine(Path.GetTempPath(), $"maliev-e2e-po-{Guid.NewGuid():N}.txt");
+        var poFileName = Path.GetFileName(poFilePath);
+
+        await File.WriteAllTextAsync(poFilePath, $"Purchase order evidence for {poNumber}");
+
+        try
+        {
+            await SignInToIntranetAsync(page, intranetBase, "/accounting/new");
+            var customer = await CreateIntranetCorporateCustomerAsync(page);
+
+            await page.GotoAsync(new Uri(intranetBase, "/accounting/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await Expect(page.Locator("body")).ToContainTextAsync("New Invoice", new() { Timeout = 30_000 });
+            var currenciesResult = await page.EvaluateAsync<string>(
+                "async () => { const r = await fetch('/api/v1/referenceData/currencies', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+            Assert.StartsWith("200 ", currenciesResult, StringComparison.Ordinal);
+            Assert.Contains("THB", currenciesResult, StringComparison.OrdinalIgnoreCase);
+
+            var customerPickerTrigger = page.Locator(".customer-picker-trigger").First;
+            try
+            {
+                await Expect(customerPickerTrigger).ToBeVisibleAsync(new() { Timeout = 30_000 });
+            }
+            catch (TimeoutException ex)
+            {
+                var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+                throw new TimeoutException(
+                    $"Invoice page did not render the customer picker. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_500)]}",
+                    ex);
+            }
+
+            await SelectCustomerInPickerAsync(page, customer.Email, customer.FullName);
+
+            await Expect(page.Locator("body")).ToContainTextAsync(customer.CompanyName, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync(customer.TaxId, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync(customer.BillingAddressLine1, new() { Timeout = 30_000 });
+
+            await page.GetByLabel("Currency").SelectOptionAsync("THB");
+            await page.GetByLabel("Customer PO number").FillAsync(poNumber);
+            await page.Locator("input[type=file]").SetInputFilesAsync(poFilePath);
+            await Expect(page.Locator(".mlv-form-help").Filter(new() { HasText = poFileName })).ToBeVisibleAsync(new() { Timeout = 15_000 });
+            await page.GetByLabel("Description").FillAsync(lineDescription);
+            await page.GetByLabel("Quantity").FillAsync("2");
+            await page.GetByLabel("Unit price").FillAsync("1250");
+            await page.GetByLabel("Tax rate").FillAsync("7");
+            await Expect(page.Locator("body")).ToContainTextAsync(customer.BillingAddressLine1, new() { Timeout = 15_000 });
+
+            await page.GetByRole(AriaRole.Button, new() { NameString = "Create Invoice" }).ClickAsync();
+            try
+            {
+                await page.WaitForURLAsync(
+                    url => Regex.IsMatch(new Uri(url).AbsolutePath, "^/accounting/[0-9a-fA-F-]{36}$"),
+                    new PageWaitForURLOptions
+                    {
+                        Timeout = 60_000,
+                        WaitUntil = WaitUntilState.NetworkIdle
+                    });
+            }
+            catch (TimeoutException ex)
+            {
+                var pageError = await page.Locator(".mlv-error").First.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 }).ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+                var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+                throw new TimeoutException(
+                    $"Invoice creation did not navigate after submit. Url: {page.Url}. Error: {pageError}. Body: {body[..Math.Min(body.Length, 2_000)]}",
+                    ex);
+            }
+
+            var invoiceIdText = Regex.Match(new Uri(page.Url).AbsolutePath, @"/accounting/(?<id>[0-9a-fA-F-]{36})").Groups["id"].Value;
+            Assert.True(Guid.TryParse(invoiceIdText, out var invoiceId), $"Invoice detail route did not contain a GUID: {page.Url}");
+
+            await Expect(page.Locator("body")).ToContainTextAsync(customer.CompanyName, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync(customer.TaxId, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync(poNumber, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync(lineDescription, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync("2.00", new() { Timeout = 15_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync("1,250.00", new() { Timeout = 15_000 });
+
+            var invoiceResult = await page.EvaluateAsync<string>(
+                @"async id => {
+                    const r = await fetch(`/api/v1/invoices/${id}`, { credentials: 'include' });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                invoiceId);
+
+            Assert.StartsWith("200 ", invoiceResult, StringComparison.Ordinal);
+            using (var invoiceDocument = JsonDocument.Parse(invoiceResult[4..]))
+            {
+                var invoice = invoiceDocument.RootElement;
+                Assert.Equal(customer.CustomerId, invoice.GetProperty("customerId").GetGuid());
+                Assert.Equal(customer.CompanyName, GetJsonString(invoice, "customerName", "CustomerName"));
+                Assert.Equal(customer.TaxId, GetJsonString(invoice, "customerTaxId", "CustomerTaxId"));
+                Assert.Equal(poNumber, GetJsonString(invoice, "poNumber", "PoNumber"));
+                Assert.Equal("THB", GetJsonString(invoice, "currency", "Currency"));
+                Assert.Equal("Draft", GetJsonString(invoice, "status", "Status"));
+                Assert.Equal(2500.00, GetJsonDouble(invoice, "subTotal", "SubTotal", "subtotal"), precision: 2);
+                Assert.Equal(175.00, GetJsonDouble(invoice, "taxAmount", "TaxAmount"), precision: 2);
+                Assert.Equal(2675.00, GetJsonDouble(invoice, "total", "Total", "grandTotal"), precision: 2);
+                Assert.True(TryGetJsonProperty(invoice, out var items, "items", "Items"));
+                Assert.Contains(items.EnumerateArray(), item =>
+                    string.Equals(lineDescription, GetJsonString(item, "description", "Description"), StringComparison.Ordinal) &&
+                    Math.Abs(GetJsonDouble(item, "quantity", "Quantity") - 2) < 0.01);
+            }
+
+            var attachmentResult = await page.EvaluateAsync<string>(
+                @"async args => {
+                    const form = new FormData();
+                    form.append('file', new Blob([args.content], { type: 'text/plain' }), args.fileName);
+                    const r = await fetch(`/api/v1/invoices/${args.invoiceId}/files?customerId=${args.customerId}&fileType=CustomerPO`, {
+                        method: 'POST',
+                        credentials: 'include',
+                        body: form
+                    });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                new
+                {
+                    invoiceId,
+                    customerId = customer.CustomerId,
+                    fileName = $"verified-{poFileName}",
+                    content = $"Verified PO attachment for {poNumber}"
+                });
+
+            Assert.StartsWith("200 ", attachmentResult, StringComparison.Ordinal);
+            using (var attachmentDocument = JsonDocument.Parse(attachmentResult[4..]))
+            {
+                var attachment = attachmentDocument.RootElement;
+                Assert.Equal(invoiceId, attachment.GetProperty("invoiceId").GetGuid());
+                Assert.Equal("CustomerPO", GetJsonString(attachment, "fileType", "FileType"));
+                Assert.Contains(customer.CustomerId.ToString(), GetJsonString(attachment, "fileUrl", "FileUrl"), StringComparison.OrdinalIgnoreCase);
+            }
+
+            var finalizeResult = await page.EvaluateAsync<string>(
+                @"async id => {
+                    const r = await fetch(`/api/v1/invoices/${id}/finalize`, {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                invoiceId);
+
+            Assert.StartsWith("200", finalizeResult, StringComparison.Ordinal);
+            var finalizedResult = await page.EvaluateAsync<string>(
+                @"async id => {
+                    const r = await fetch(`/api/v1/invoices/${id}`, { credentials: 'include' });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                invoiceId);
+
+            Assert.StartsWith("200 ", finalizedResult, StringComparison.Ordinal);
+            using (var finalizedDocument = JsonDocument.Parse(finalizedResult[4..]))
+            {
+                var finalized = finalizedDocument.RootElement;
+                Assert.Equal("Finalized", GetJsonString(finalized, "status", "Status"));
+                Assert.False(string.IsNullOrWhiteSpace(GetJsonString(finalized, "invoiceNumber", "InvoiceNumber")));
+                Assert.False(string.IsNullOrWhiteSpace(GetJsonString(finalized, "finalizedBy", "FinalizedBy")));
+            }
+
+            await page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await Expect(page.Locator("body")).ToContainTextAsync("Finalized", new() { Timeout = 30_000 });
+        }
+        finally
+        {
+            if (File.Exists(poFilePath))
+            {
+                File.Delete(poFilePath);
+            }
+        }
+    }
+
+    /// <summary>
     /// Verifies employee-created customer records are searchable, detail pages render, and the employee project quote workspace can select a customer.
     /// Covers executable customer/project-workspace portions of INT-003 and INT-004.
     /// </summary>
@@ -1633,6 +1816,171 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     private sealed record CreatedIntranetCustomer(string Email, string FullName, string RawCreateResponse);
+
+    private static async Task<CreatedCorporateIntranetCustomer> CreateIntranetCorporateCustomerAsync(IPage page)
+    {
+        var countryResult = await page.EvaluateAsync<string>(
+            @"async () => {
+                const r = await fetch('/api/v1/ReferenceData/countries', { credentials: 'include' });
+                const text = await r.text();
+                if (r.status !== 200) {
+                    return `${r.status} ${text}`;
+                }
+
+                const body = JSON.parse(text);
+                const countries = Array.isArray(body) ? body : (body.data ?? body.Data ?? body.items ?? body.Items ?? []);
+                const thailand = countries.find(country => {
+                    const code = country.iso2 ?? country.code ?? country.Code ?? country.Iso2 ?? '';
+                    const name = country.name ?? country.Name ?? '';
+                    return code.toLowerCase() === 'th' || name.toLowerCase().includes('thailand');
+                });
+
+                return thailand ? `200 ${JSON.stringify(thailand)}` : `404 ${text}`;
+            }");
+
+        Assert.StartsWith("200 ", countryResult, StringComparison.Ordinal);
+        using var countryDocument = JsonDocument.Parse(countryResult[4..]);
+        var countryId = countryDocument.RootElement.GetProperty("id").GetGuid();
+
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var email = $"e2e.finance.customer.{unique}@maliev.local";
+        const string firstName = "E2E";
+        var lastName = $"Finance {unique}";
+        var fullName = $"{firstName} {lastName}";
+        var companyName = $"E2E Finance Components {unique}";
+        var taxId = $"01055{DateTimeOffset.UtcNow:HHmmssff}";
+        const string billingAddressLine1 = "99 Invoice Verification Road";
+
+        var payload = new
+        {
+            customer = new
+            {
+                firstName,
+                lastName,
+                email,
+                mobile = "+66810000000",
+                segment = "Manufacturing",
+                tier = "Gold",
+                preferredLanguage = "en",
+                timezone = "Asia/Bangkok",
+                usesCompanyBillingAddress = true,
+                paymentTerms = "Net 30",
+                communicationPreferences = new Dictionary<string, bool>
+                {
+                    ["email_opt_in"] = true,
+                    ["sms_opt_in"] = false,
+                    ["marketing_opt_in"] = false
+                }
+            },
+            newCompany = new
+            {
+                name = companyName,
+                vatNumber = taxId,
+                registrationNumber = taxId,
+                contactEmail = email,
+                contactPhone = "+6620000000",
+                segment = "Manufacturing",
+                tier = "Gold",
+                fullNameTh = companyName,
+                isVerifiedFromBdex = false
+            },
+            companyBillingAddress = new
+            {
+                type = "Billing",
+                isDefault = true,
+                addressLine1 = billingAddressLine1,
+                addressLine2 = "Unit E2E",
+                district = "Bang Rak",
+                city = "Bangkok",
+                stateProvince = "Bangkok",
+                postalCode = "10500",
+                countryId,
+                recipientName = companyName,
+                recipientPhone = "+6620000000"
+            },
+            addresses = new[]
+            {
+                new
+                {
+                    type = "Shipping",
+                    isDefault = true,
+                    addressLine1 = "88 Finance Warehouse Lane",
+                    district = "Khlong Toei",
+                    city = "Bangkok",
+                    stateProvince = "Bangkok",
+                    postalCode = "10110",
+                    countryId,
+                    recipientName = fullName,
+                    recipientPhone = "+66810000000"
+                }
+            },
+            documents = Array.Empty<object>(),
+            internalNote = "Created by Aspire browser E2E for finance invoice verification."
+        };
+
+        var createResult = await page.EvaluateAsync<string>(
+            @"async payload => {
+                const r = await fetch('/api/v1/customers/create-basic', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            payload);
+
+        Assert.StartsWith("200", createResult, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(createResult[4..]);
+        var root = document.RootElement;
+        var customerId = root.GetProperty("id").GetGuid();
+        Assert.Equal(email, GetJsonString(root, "email", "Email"));
+
+        var detailResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/customers/${id}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            customerId);
+
+        Assert.StartsWith("200 ", detailResult, StringComparison.Ordinal);
+        using var detailDocument = JsonDocument.Parse(detailResult[4..]);
+        var detail = detailDocument.RootElement;
+        Assert.Equal(companyName, GetJsonString(detail, "companyName", "CompanyName"));
+        Assert.Equal(taxId, GetJsonString(detail, "companyVatNumber", "CompanyVatNumber"));
+        Assert.True(TryGetJsonProperty(detail, out var companyBillingAddress, "companyBillingAddress", "CompanyBillingAddress"));
+        Assert.Equal(billingAddressLine1, GetJsonString(companyBillingAddress, "addressLine1", "AddressLine1"));
+
+        return new CreatedCorporateIntranetCustomer(
+            customerId,
+            email,
+            fullName,
+            companyName,
+            taxId,
+            billingAddressLine1,
+            createResult);
+    }
+
+    private sealed record CreatedCorporateIntranetCustomer(
+        Guid CustomerId,
+        string Email,
+        string FullName,
+        string CompanyName,
+        string TaxId,
+        string BillingAddressLine1,
+        string RawCreateResponse);
+
+    private static async Task SelectCustomerInPickerAsync(IPage page, string query, string expectedName)
+    {
+        var customerPickerTrigger = page.Locator(".customer-picker-trigger").First;
+        await Expect(customerPickerTrigger).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await customerPickerTrigger.ClickAsync();
+        var customerSearch = page.Locator(".customer-picker-search-input");
+        await customerSearch.FillAsync(query);
+        var customerOption = page.Locator(".customer-picker-option").Filter(new() { HasText = expectedName });
+        await Expect(customerOption).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await customerOption.ClickAsync();
+    }
 
     private static async Task OpenCustomerCreateTabAsync(IPage page, string tabName)
     {
