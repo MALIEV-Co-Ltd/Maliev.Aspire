@@ -19,8 +19,10 @@
 |---------|--------|
 | `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 --no-restore` | Passed |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests"` | Passed: 2 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~BrowserJourneyGateTests" -p:UseSharedCompilation=false -m:1` | Passed: 14 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1` | Passed: 16 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~Intranet_LimitedEmployee_CannotAccessRestrictedModuleApis"` | Passed: 1 test |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 15 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 17 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~AspireTestAdminSeedOptionsTests\|FullyQualifiedName~AspireTestAdminIamSeederSourceTests"` | Passed: 7 tests |
 | `dotnet test B:\maliev\Maliev.CommerceService\Maliev.CommerceService.Tests\Maliev.CommerceService.Tests.csproj -p:UseSharedCompilation=false -m:1` | Passed: 9 tests |
 | `dotnet test B:\maliev\Maliev.Web\Maliev.Web.Tests\Maliev.Web.Tests.csproj -p:UseSharedCompilation=false -m:1` | Passed: 69 tests |
 
@@ -38,6 +40,7 @@
 | `QUOTE-001`, `QUOTE-005`, `QUOTE-017` | QuoteEngine real project route shows the sign-in/upload gate before customer-owned upload. Real upload retry remains blocked until authenticated project mode is service-backed. |
 | `QUOTE-008`, `QUOTE-009`, `QUOTE-010`, `QUOTE-011`, `QUOTE-012`, `QUOTE-013`, `QUOTE-014` | QuoteEngine prototype-backed profile, order tracking, NDA, and supporting document portal routes render. Real persistence, upload, ownership, and employee visibility checks remain blocked until service-backed customer projects replace prototype storage. |
 | `INT-001`, `SEC-002`, `SEC-003` | Anonymous Intranet direct access to `/projects/new` redirects to login and preserves return URL. |
+| `INT-001`, `SEC-002` | Aspire seeds a dedicated limited employee with only `auth.sessions.read` and `employee.profiles.read`. Browser E2E signs in through the real Intranet BFF/AuthService/IAM path, verifies the employee has no wildcard permission, confirms `/api/v1/employees/me/profile` is allowed, opens `/iam` by direct URL without a login loop, and verifies `/api/v1/iam/users`, `/api/v1/iam/roles`, and `/api/v1/employees` return `403`. |
 | `INT-002`, `INT-003`, `INT-010`, `INT-011`, `INT-012`, `INT-013`, `INT-014`, `COM-001`, `FIN-001`, `FIN-002`, `PROC-002`, `PROC-003`, `MFG-001`, `MFG-003`, `MFG-004`, `HR-001`, `HR-002`, `OPS-001`, `SEC-002` | Authenticated Intranet automation employee signs in through the real BFF/AuthService/IAM path and reaches dashboard, search, admin, IAM user, customer, project, commerce catalog, accounting, purchasing, manufacturing material/equipment/schedule, and HR profile module routes without login loops, startup failures, or route-level permission denial. |
 | `INT-003`, `INT-004` | Authenticated Intranet automation employee creates a new customer through `/api/v1/customers/create-basic`, finds the customer in `/customers`, opens the customer detail page, opens `/sales/projects/new`, searches the project customer picker, selects that customer, and verifies the quote workspace bill-to, upload dropzone, and quote total surfaces. |
 
@@ -59,10 +62,12 @@
 | `Maliev.Web` | `9b39065` | Replaced direct Order/Payment/Delivery checkout draft calls with CommerceService cart and checkout-session boundaries, added progressive-enhancement cart form submit, synchronized cart `localStorage` before submit, and exposed backend diagnostics only in Development/Testing. | Full Web tests passed 69 tests; signed customer browser checkout creates a draft and shows the ready state. |
 | `Maliev.Aspire` | `7e901d2` | Expanded the Commerce browser gate to cover customer registration after checkout sign-in redirect, account-session verification, signed checkout draft creation, IAM readiness retries for the automation employee, and checkout diagnostics. | `Commerce_EmployeePublishesProduct_WebCustomerCanBrowseCartAndArchivedProductIsHidden` passed; full `BrowserJourneyGateTests` passed 13 tests. |
 | `Maliev.Aspire` | `20b40c8` | Added the Web customer account security browser story for two-customer address ownership isolation and protected account return-url preservation. | `Web_CustomerAccountSecurity_BlocksCrossCustomerAddressMutationAndPreservesReturnUrl` passed; `BrowserJourneyGateTests` passed 14 tests; `Tier=E2E` passed 16 tests. |
+| `Maliev.Intranet` | `e2c9df9` | Resolved current employee profile lookups from the cookie `ClaimTypes.NameIdentifier` claim as well as raw `sub` and `user_id`, fixing `/api/v1/employees/me/profile` for browser-authenticated Intranet sessions. | `EmployeesControllerProfileTests` passed 3 tests; `dotnet build B:\maliev\Maliev.Intranet\Maliev.Intranet.slnx --configuration Release -p:UseSharedCompilation=false -m:1 --no-restore` passed. |
+| `Maliev.Aspire` | `75b56f9` | Added the limited employee seed fixture and browser journey for Intranet permission-boundary validation, plus seed source guards to prevent accidental wildcard assignment. | `Intranet_LimitedEmployee_CannotAccessRestrictedModuleApis` passed; full `BrowserJourneyGateTests` passed 15 tests; `Tier=E2E` passed 17 tests; seed option/source tests passed 7 tests. |
 
 ### Remaining Full-Catalog Blockers
 
-- Full 95-story browser verification still requires local mail capture for verification/reset links, OAuth test mode, payment completion, service-backed QuoteEngine project/quotation/order/payment workflows, cross-customer ownership checks beyond Web account addresses, low-permission employee sessions, and deeper browser actions inside each Intranet module beyond route-level authorization/rendering.
+- Full 95-story browser verification still requires local mail capture for verification/reset links, OAuth test mode, payment completion, service-backed QuoteEngine project/quotation/order/payment workflows, cross-customer ownership checks beyond Web account addresses, per-module low-permission UI/action checks, and deeper browser actions inside each Intranet module beyond route-level authorization/rendering.
 - Stories not listed above remain partial or blocked as recorded in the manual story matrix below. They must not be counted as fully verified until they have automated browser coverage or an explicitly accepted product-gap failure.
 
 ## 2026-05-15 Manual Browser E2E Correction Run
@@ -119,7 +124,7 @@
 | `QUOTE-024` | Passed after fix | Anonymous demo loaded sample file, DFM, pricing, and disabled formal artifacts. | Fixed QuoteEngine static web asset hosting. |
 | `QUOTE-025` | Blocked | Multiple quotation versions require signed real project. | Need service-backed project quotation version workflow. |
 | `QUOTE-026` | Blocked | Version comparison requires multiple generated quotation versions. | Need version-history UI and seeded/created versions. |
-| `INT-001` | Partial | Login page rendered email/password and Google; protected routes redirected. | Need enable Aspire test admin with secret-sourced password and run seeders. |
+| `INT-001` | Partial after automated run | Login page rendered email/password and Google; protected routes redirected. Later automated browser runs sign in as both the Aspire automation employee and a limited employee through the real BFF/AuthService/IAM path. | Need Google SSO/OAuth test mode and UI navigation assertions for role-shaped menus, not only API permission checks. |
 | `INT-002` | Blocked | Requires authenticated Intranet customer creation module. | Need Aspire test admin and seed/customer prerequisites. |
 | `INT-003` | Blocked | Requires authenticated customer detail module. | Need Aspire test admin and customer seed. |
 | `INT-004` | Blocked | `/projects/new` redirected to login. | Need Aspire test admin before ProjectNew verification. |
@@ -172,7 +177,7 @@
 | `HR-005` | Blocked | Requires compensation module. | Need authenticated HR/finance user and permission boundary checks. |
 | `HR-006` | Blocked | Requires performance module. | Need manager/employee identities and review records. |
 | `SEC-001` | Partial after automated run | Later automated Web E2E created two authenticated customers and verified Customer B cannot mutate Customer A's address. | Need extend the same ownership denial to QuoteEngine projects, quote versions, orders, NDAs, supporting documents, and PDFs. |
-| `SEC-002` | Partial | Anonymous direct URLs to restricted Intranet pages redirected to login. | Need low-permission employee session to verify 403/hidden modules. |
+| `SEC-002` | Partial after automated run | Anonymous direct URLs to restricted Intranet pages redirected to login. Later automated browser E2E signs in as a limited employee, verifies self-profile access, and verifies IAM users, IAM roles, and employees APIs return `403`. | Need expand the low-permission checks to every restricted Intranet module, hidden navigation item, and action-level command. |
 | `SEC-003` | Partial after automated run | Direct protected URLs preserved return URL on login redirect; later automated Web E2E also cleared a customer session and verified `/account/addresses` redirects with return URL preserved. | Need true expired-token/refresh-session behavior, not only anonymous or missing-cookie redirects. |
 | `SEC-004` | Partial | QuoteEngine demo hides formal/internal artifacts and disables PDF. | Need authenticated customer surfaces plus employee quote with internal pricing. |
 
