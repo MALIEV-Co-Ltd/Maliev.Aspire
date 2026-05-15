@@ -829,6 +829,58 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies the operational health page reports critical IAM and Geometry service readiness through the browser session.
+    /// Covers the authenticated operational monitoring portion of OPS-002.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "OPS-002,INT-014")]
+    public async Task Intranet_SystemHealth_ShowsIamAndGeometryReadiness()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(page, intranetBase, "/admin/system-health");
+        await page.GotoAsync(new Uri(intranetBase, "/admin/system-health").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "System Health" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Auto-refresh every", new() { Timeout = 15_000 });
+
+        var healthResult = await WaitForSystemHealthAsync(page, "AuthService", "IAMService", "GeometryService");
+        using var healthDocument = JsonDocument.Parse(healthResult.Body);
+        var healthRoot = healthDocument.RootElement;
+
+        Assert.NotEqual("Unhealthy", GetJsonString(healthRoot, "overallStatus", "OverallStatus"));
+        Assert.True(TryGetJsonProperty(healthRoot, out var services, "services", "Services"));
+        Assert.True(services.GetArrayLength() >= 30, $"Expected the health page to include the MALIEV service ecosystem, but found {services.GetArrayLength()} services.");
+
+        AssertCriticalHealthService(services, "AuthService", "/auth/liveness", "/auth/readiness");
+        AssertCriticalHealthService(services, "IAMService", "/iam/liveness", "/iam/readiness");
+        AssertCriticalHealthService(services, "GeometryService", "/geometry/liveness", "/geometry/readiness");
+
+        await Expect(page.Locator("body")).ToContainTextAsync("IAMService", new() { Timeout = 15_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("GeometryService", new() { Timeout = 15_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("/geometry/liveness", new() { Timeout = 15_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("/geometry/readiness", new() { Timeout = 15_000 });
+
+        var historyResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/system-health/history?days=7', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", historyResult, StringComparison.Ordinal);
+
+        using var historyDocument = JsonDocument.Parse(historyResult[4..]);
+        var historyRoot = historyDocument.RootElement;
+        Assert.True(TryGetJsonProperty(historyRoot, out var historyServices, "services", "Services"));
+        Assert.Contains(historyServices.EnumerateArray(), service =>
+            string.Equals("IAMService", GetJsonString(service, "serviceName", "ServiceName"), StringComparison.Ordinal));
+        Assert.Contains(historyServices.EnumerateArray(), service =>
+            string.Equals("GeometryService", GetJsonString(service, "serviceName", "ServiceName"), StringComparison.Ordinal));
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Refresh" }).ClickAsync();
+        await Expect(page.Locator(".system-health-probe-grid").First).ToBeVisibleAsync(new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies authenticated Intranet module routes render for the production-gate employee story groups.
     /// Covers route-level executable portions of INT-002, INT-003, INT-010, INT-011, INT-012, INT-013, INT-014,
     /// COM-001, FIN-001, FIN-002, PROC-002, PROC-003, MFG-001, MFG-003, MFG-004, HR-001, HR-002, OPS-001, and SEC-002.
@@ -1259,6 +1311,82 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         }
     }
 
+    private static async Task<SystemHealthE2EResult> WaitForSystemHealthAsync(IPage page, params string[] requiredHealthyServiceNames)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+        var required = requiredHealthyServiceNames.ToHashSet(StringComparer.Ordinal);
+        var lastDiagnostic = "No health result was returned.";
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var result = await page.EvaluateAsync<string>(
+                "async () => { const r = await fetch('/api/v1/system-health', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+
+            if (!result.StartsWith("200 ", StringComparison.Ordinal))
+            {
+                lastDiagnostic = result;
+                await page.WaitForTimeoutAsync(3_000);
+                continue;
+            }
+
+            var body = result[4..];
+            try
+            {
+                using var document = JsonDocument.Parse(body);
+                var root = document.RootElement;
+                if (!TryGetJsonProperty(root, out var services, "services", "Services"))
+                {
+                    lastDiagnostic = $"Health payload did not include services. Body: {body[..Math.Min(body.Length, 2_000)]}";
+                    await page.WaitForTimeoutAsync(3_000);
+                    continue;
+                }
+
+                var statusByService = services.EnumerateArray()
+                    .ToDictionary(
+                        service => GetJsonString(service, "serviceName", "ServiceName"),
+                        service => GetJsonString(service, "status", "Status"),
+                        StringComparer.Ordinal);
+
+                var missing = required.Where(service => !statusByService.ContainsKey(service)).ToList();
+                var unhealthy = required
+                    .Where(service => statusByService.TryGetValue(service, out var status) && !string.Equals("Healthy", status, StringComparison.Ordinal))
+                    .Select(service => $"{service}={statusByService[service]}")
+                    .ToList();
+                var overallStatus = GetJsonString(root, "overallStatus", "OverallStatus");
+
+                if (missing.Count == 0 && unhealthy.Count == 0 && !string.Equals("Unhealthy", overallStatus, StringComparison.Ordinal))
+                {
+                    return new SystemHealthE2EResult(body, overallStatus, services.GetArrayLength());
+                }
+
+                lastDiagnostic = $"Overall={overallStatus}; missing=[{string.Join(", ", missing)}]; unhealthy=[{string.Join(", ", unhealthy)}]; body={body[..Math.Min(body.Length, 2_000)]}";
+            }
+            catch (JsonException ex)
+            {
+                lastDiagnostic = $"System health returned invalid JSON: {ex.Message}. Raw result: {result[..Math.Min(result.Length, 2_000)]}";
+            }
+
+            await page.WaitForTimeoutAsync(3_000);
+        }
+
+        Assert.Fail($"System health did not report required services as healthy before timeout. {lastDiagnostic}");
+        return default;
+    }
+
+    private static void AssertCriticalHealthService(JsonElement services, string serviceName, string expectedLivenessPath, string expectedReadinessPath)
+    {
+        var service = services.EnumerateArray().SingleOrDefault(element =>
+            string.Equals(serviceName, GetJsonString(element, "serviceName", "ServiceName"), StringComparison.Ordinal));
+
+        Assert.NotEqual(default, service.ValueKind);
+        Assert.Equal("Healthy", GetJsonString(service, "status", "Status"));
+        Assert.True(GetJsonBool(service, "isCritical", "IsCritical"), $"{serviceName} should be marked critical.");
+        Assert.Equal(expectedLivenessPath, GetJsonString(service, "livenessPath", "LivenessPath"));
+        Assert.Equal(expectedReadinessPath, GetJsonString(service, "readinessPath", "ReadinessPath"));
+        Assert.True(GetJsonDouble(service, "livenessResponseTimeMs", "LivenessResponseTimeMs") >= 0);
+        Assert.True(GetJsonDouble(service, "readinessResponseTimeMs", "ReadinessResponseTimeMs") >= 0);
+    }
+
     private static async Task<IntranetPermissionState> GetIntranetPermissionStateAsync(IPage page)
     {
         var authUser = await page.EvaluateAsync<string>(
@@ -1479,6 +1607,32 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         return string.Empty;
     }
 
+    private static bool GetJsonBool(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (element.TryGetProperty(name, out var value))
+            {
+                return value.ValueKind == JsonValueKind.True;
+            }
+        }
+
+        return false;
+    }
+
+    private static double GetJsonDouble(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (element.TryGetProperty(name, out var value) && value.TryGetDouble(out var number))
+            {
+                return number;
+            }
+        }
+
+        return 0;
+    }
+
     private static bool TryGetJsonProperty(JsonElement element, out JsonElement property, params string[] names)
     {
         foreach (var name in names)
@@ -1494,6 +1648,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     private sealed record GlobalSearchE2EResult(string Title, string ResourceType, string Href);
+
+    private sealed record SystemHealthE2EResult(string Body, string OverallStatus, int ServiceCount);
 
     private static async Task<CommerceE2EProduct> CreateCommerceProductAsync(IPage page)
     {
