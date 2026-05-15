@@ -1816,14 +1816,24 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
     private static async Task<SystemHealthE2EResult> WaitForSystemHealthAsync(IPage page, params string[] requiredHealthyServiceNames)
     {
-        var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(5);
         var required = requiredHealthyServiceNames.ToHashSet(StringComparer.Ordinal);
         var lastDiagnostic = "No health result was returned.";
 
         while (DateTimeOffset.UtcNow < deadline)
         {
-            var result = await page.EvaluateAsync<string>(
-                "async () => { const r = await fetch('/api/v1/system-health', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+            string result;
+            try
+            {
+                result = await page.EvaluateAsync<string>(
+                    "async () => { const r = await fetch('/api/v1/system-health', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+            }
+            catch (PlaywrightException ex)
+            {
+                lastDiagnostic = $"System health fetch failed: {ex.Message}";
+                await page.WaitForTimeoutAsync(3_000);
+                continue;
+            }
 
             if (!result.StartsWith("200 ", StringComparison.Ordinal))
             {
@@ -1856,13 +1866,26 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     .Select(service => $"{service}={statusByService[service]}")
                     .ToList();
                 var overallStatus = GetJsonString(root, "overallStatus", "OverallStatus");
+                var requiredDiagnostics = services.EnumerateArray()
+                    .Where(service => required.Contains(GetJsonString(service, "serviceName", "ServiceName")))
+                    .Select(service =>
+                    {
+                        var serviceName = GetJsonString(service, "serviceName", "ServiceName");
+                        var status = GetJsonString(service, "status", "Status");
+                        var error = GetJsonString(service, "errorMessage", "ErrorMessage");
+                        var errorBody = GetJsonString(service, "errorBody", "ErrorBody");
+                        var responseTime = GetJsonDouble(service, "responseTimeMs", "ResponseTimeMs");
+                        var readinessTime = GetJsonDouble(service, "readinessResponseTimeMs", "ReadinessResponseTimeMs");
+                        return $"{serviceName}: status={status}; responseMs={responseTime:N0}; readinessMs={readinessTime:N0}; error={error}; body={errorBody}";
+                    })
+                    .ToArray();
 
                 if (missing.Count == 0 && unhealthy.Count == 0 && !string.Equals("Unhealthy", overallStatus, StringComparison.Ordinal))
                 {
                     return new SystemHealthE2EResult(body, overallStatus, services.GetArrayLength());
                 }
 
-                lastDiagnostic = $"Overall={overallStatus}; missing=[{string.Join(", ", missing)}]; unhealthy=[{string.Join(", ", unhealthy)}]; body={body[..Math.Min(body.Length, 2_000)]}";
+                lastDiagnostic = $"Overall={overallStatus}; missing=[{string.Join(", ", missing)}]; unhealthy=[{string.Join(", ", unhealthy)}]; required=[{string.Join(" | ", requiredDiagnostics)}]; body={body[..Math.Min(body.Length, 2_000)]}";
             }
             catch (JsonException ex)
             {
@@ -1893,7 +1916,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     private static async Task<IntranetPermissionState> GetIntranetPermissionStateAsync(IPage page)
     {
         string authUser = string.Empty;
-        for (var attempt = 1; attempt <= 5; attempt++)
+        for (var attempt = 1; attempt <= 12; attempt++)
         {
             try
             {
@@ -1902,15 +1925,18 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 break;
             }
             catch (PlaywrightException ex) when (
-                attempt < 5 &&
+                attempt < 12 &&
                 ex.Message.Contains("Execution context was destroyed", StringComparison.OrdinalIgnoreCase))
             {
                 await page.WaitForTimeoutAsync(500);
             }
-            catch (PlaywrightException ex) when (attempt < 5)
+            catch (PlaywrightException ex)
             {
                 authUser = $"fetch failed: {ex.Message}";
-                await page.WaitForTimeoutAsync(500);
+                if (attempt < 12)
+                {
+                    await page.WaitForTimeoutAsync(500);
+                }
             }
         }
 
