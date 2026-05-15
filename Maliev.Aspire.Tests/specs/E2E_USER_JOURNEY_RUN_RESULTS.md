@@ -19,8 +19,8 @@
 |---------|--------|
 | `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 --no-restore` | Passed |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests"` | Passed: 2 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 12 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 14 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 13 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E"` | Passed: 15 tests |
 
 ### Automated Story Coverage Added
 
@@ -30,7 +30,7 @@
 | `WEB-002`, `WEB-012` | Web contact/support route renders the contact form, submits a real inquiry through the Web BFF to ContactService, and shows the customer success state. Employee-side inquiry processing still requires authenticated Intranet coverage. |
 | `WEB-003`, `WEB-005`, `WEB-009` | Email/password registration creates a customer session through AuthService/CustomerService, lands on the protected account page, opens profile, creates an address, signs out, and confirms protected account access redirects back to sign-in. Email verification remains a required product gap. |
 | `WEB-006`, `WEB-007` | Google sign-in and password reset entry points render through browser routes. Completion remains blocked by local OAuth/test-token and local mail/reset-token fixtures. |
-| `WEB-008`, `COM-003` | Web shop and cart routes render storefront search/category and cart surfaces. Product detail, add-to-cart, quantity editing, and checkout draft still require published commerce seed products. |
+| `WEB-008`, `COM-001`, `COM-002`, `COM-003`, `COM-004` | Authenticated Intranet employee creates a draft Commerce product through `/api/v1/commerce/products`, verifies the draft is visible to employees but hidden from Web, publishes it, verifies Web shop/product detail/cart add/quantity edit/checkout sign-in redirect, archives it, and verifies the public product URL returns the customer-facing not-found state. Signed checkout draft creation remains a separate blocker. |
 | `QUOTE-002`, `QUOTE-003`, `QUOTE-004`, `QUOTE-018`, `QUOTE-019`, `QUOTE-020`, `QUOTE-024` | QuoteEngine anonymous demo loads the MALIEV sample file, shows the prototype viewer and DFM checks, switches to FDM, recalculates standard price, recalculates express lead-time price, recalculates after quantity edit, keeps formal PDF disabled, and states that no customer data is created. |
 | `QUOTE-001`, `QUOTE-005`, `QUOTE-017` | QuoteEngine real project route shows the sign-in/upload gate before customer-owned upload. Real upload retry remains blocked until authenticated project mode is service-backed. |
 | `QUOTE-008`, `QUOTE-009`, `QUOTE-010`, `QUOTE-011`, `QUOTE-012`, `QUOTE-013`, `QUOTE-014` | QuoteEngine prototype-backed profile, order tracking, NDA, and supporting document portal routes render. Real persistence, upload, ownership, and employee visibility checks remain blocked until service-backed customer projects replace prototype storage. |
@@ -50,10 +50,12 @@
 | `Maliev.Web` | `ea8c3a4` | Added stable names and accessible labels to account address fields so address entry is testable and accessible. | `dotnet build B:\maliev\Maliev.Web\Maliev.Web.slnx -p:UseSharedCompilation=false -m:1 --no-restore` passed; full Web tests passed 69 tests. |
 | `Maliev.Aspire` | `c8f4b97` | Added executable Web contact and customer registration/account browser stories, preferred secure endpoints in browser tests, and wired Web quote CTAs to the secure local QuoteEngine endpoint. | `BrowserJourneyGateTests` passed 11 tests; `Tier=E2E` passed 13 tests; `AppHostReferenceTests` passed 10 tests. |
 | `Maliev.Aspire` | `97793a1` | Added the first deeper authenticated Intranet browser story for employee customer creation, customer detail verification, and Project quote workspace customer selection. The test intentionally avoids `/api/v1/seed/customers` because that seed endpoint uses service-account clients and currently returns downstream CustomerService 403 in the Aspire browser context. | `Intranet_EmployeeCreatedCustomer_CanBeOpenedAndSelectedInProjectWorkspace` passed; `BrowserJourneyGateTests` passed 12 tests; `Tier=E2E` passed 14 tests. |
+| `Maliev.Web` | `a81ecc8` | Awaited storefront cart persistence from product grid/detail add-to-cart handlers so fast navigation to `/cart` cannot beat the localStorage write and lose the item. | `dotnet build B:\maliev\Maliev.Web\Maliev.Web.slnx -p:UseSharedCompilation=false -m:1 --no-restore` passed; full Web tests passed 69 tests; full Aspire browser gate passed after rebuild. |
+| `Maliev.Aspire` | `b725e1d` | Added the Commerce storefront browser journey covering employee draft/publish/archive and customer Web shop/product/cart/checkout sign-in behavior. | `Commerce_EmployeePublishesProduct_WebCustomerCanBrowseCartAndArchivedProductIsHidden` passed; `BrowserJourneyGateTests` passed 13 tests; `Tier=E2E` passed 15 tests. |
 
 ### Remaining Full-Catalog Blockers
 
-- Full 95-story browser verification still requires multi-customer session fixtures for ownership/security checks, local mail capture for verification/reset links, OAuth test mode, published commerce seed products, service-backed QuoteEngine project/quotation/order/payment workflows, and deeper browser actions inside each Intranet module beyond route-level authorization/rendering.
+- Full 95-story browser verification still requires multi-customer session fixtures for ownership/security checks, local mail capture for verification/reset links, OAuth test mode, signed storefront checkout draft/payment completion, service-backed QuoteEngine project/quotation/order/payment workflows, and deeper browser actions inside each Intranet module beyond route-level authorization/rendering.
 - Stories not listed above remain partial or blocked as recorded in the manual story matrix below. They must not be counted as fully verified until they have automated browser coverage or an explicitly accepted product-gap failure.
 
 ## 2026-05-15 Manual Browser E2E Correction Run
