@@ -353,9 +353,21 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             }
         };
         webPage.PageError += (_, exception) => webDiagnostics.Add($"pageerror: {exception}");
+        webPage.Request += (_, request) =>
+        {
+            if (request.Url.Contains("/web/v1/checkout", StringComparison.OrdinalIgnoreCase) ||
+                request.Url.Contains("/_blazor", StringComparison.OrdinalIgnoreCase) ||
+                request.Url.Contains("/_framework/blazor", StringComparison.OrdinalIgnoreCase))
+            {
+                webDiagnostics.Add($"request: {request.Method} {request.Url}");
+            }
+        };
         webPage.Response += (_, response) =>
         {
-            if (response.Status >= 400)
+            if (response.Status >= 400 ||
+                response.Url.Contains("/web/v1/checkout", StringComparison.OrdinalIgnoreCase) ||
+                response.Url.Contains("/_blazor", StringComparison.OrdinalIgnoreCase) ||
+                response.Url.Contains("/_framework/blazor", StringComparison.OrdinalIgnoreCase))
             {
                 webDiagnostics.Add($"response: {response.Status} {response.Url}");
             }
@@ -409,6 +421,56 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await webPage.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Continue to checkout|ดำเนินการชำระเงิน", RegexOptions.IgnoreCase) }).ClickAsync();
         await webPage.WaitForURLAsync(url => url.Contains("/auth/sign-in", StringComparison.OrdinalIgnoreCase), new() { Timeout = 30_000 });
         Assert.Contains("returnUrl", webPage.Url, StringComparison.OrdinalIgnoreCase);
+
+        var checkoutCustomerEmail = await RegisterWebCustomerAsync(webPage, webBase, "/cart");
+        await Expect(webPage.Locator("body")).ToContainTextAsync(product.Title, new() { Timeout = 30_000 });
+        var accountSession = await webPage.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/web/v1/account/session', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200", accountSession, StringComparison.Ordinal);
+        Assert.Contains(checkoutCustomerEmail, accountSession, StringComparison.OrdinalIgnoreCase);
+        await webPage.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        var storedCartJsonBeforeCheckout = await webPage.EvaluateAsync<string?>("() => window.localStorage.getItem('maliev.cart.v1')");
+        var hiddenCartJsonBeforeCheckout = await webPage.Locator("input[name='ItemsJson']").InputValueAsync();
+        var checkoutFormSyncAvailable = await webPage.EvaluateAsync<bool>("() => typeof window.malievCart?.syncCheckoutForm === 'function'");
+        Assert.Contains(product.Handle, storedCartJsonBeforeCheckout ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.True(checkoutFormSyncAvailable, "Cart checkout form localStorage sync script was not loaded.");
+        var checkoutButton = webPage.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Continue to checkout|ดำเนินการชำระเงิน", RegexOptions.IgnoreCase) });
+        await Expect(checkoutButton).ToBeEnabledAsync(new() { Timeout = 30_000 });
+        var checkoutNavigationTask = webPage.WaitForURLAsync(
+            url => url.Contains("checkout=ready", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForURLOptions
+            {
+                Timeout = 45_000,
+                WaitUntil = WaitUntilState.Commit
+            });
+        await checkoutButton.ClickAsync();
+        try
+        {
+            await checkoutNavigationTask;
+        }
+        catch (TimeoutException ex)
+        {
+            var buttonMarkup = await checkoutButton.EvaluateAsync<string>("button => button.outerHTML");
+            var blazorState = await webPage.EvaluateAsync<string>(
+                "() => JSON.stringify({ hasBlazor: !!window.Blazor, scripts: Array.from(document.scripts).map(s => s.src).filter(src => src.includes('blazor')) })");
+            var checkoutApiDiagnostic = await webPage.EvaluateAsync<string>(
+                @"async cartJson => {
+                    const items = JSON.parse(cartJson || '[]');
+                    const r = await fetch('/web/v1/checkout/draft', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ culture: document.documentElement.dataset.culture || 'en-US', items })
+                    });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                storedCartJsonBeforeCheckout);
+            var body = await webPage.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+            throw new TimeoutException(
+                $"Checkout button click did not complete the checkout form flow. Button: {buttonMarkup}. Blazor: {blazorState}. Stored cart JSON before checkout: {storedCartJsonBeforeCheckout ?? "<null>"}. Hidden cart JSON before checkout: {hiddenCartJsonBeforeCheckout}. Checkout API diagnostic: {checkoutApiDiagnostic}. Url: {webPage.Url}. Body: {body[..Math.Min(body.Length, 1_000)]}. Browser diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, webDiagnostics)}",
+                ex);
+        }
+        await Expect(webPage.Locator("body")).ToContainTextAsync(new Regex("Checkout is ready|พร้อมดำเนินการชำระเงินแล้ว", RegexOptions.IgnoreCase), new() { Timeout = 45_000 });
 
         await ArchiveCommerceProductAsync(intranetPage, product);
         await webPage.GotoAsync(new Uri(webBase, $"/shop/{product.Handle}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
@@ -713,7 +775,16 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                         Timeout = 10_000,
                         WaitUntil = WaitUntilState.Commit
                     });
-                return;
+
+                var permissionState = await GetIntranetAutomationPermissionStateAsync(page);
+                if (permissionState.Ready)
+                {
+                    return;
+                }
+
+                lastError = $"Signed in but automation permissions are not ready. Auth user: {permissionState.Diagnostic}";
+                await page.GotoAsync(new Uri(intranetBase, "/api/v1/auth/logout").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+                await page.WaitForTimeoutAsync(2_000);
             }
             catch (TimeoutException ex)
             {
@@ -724,6 +795,66 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         }
 
         throw new TimeoutException($"Intranet automation employee could not sign in before timeout. Last error: {lastError}");
+    }
+
+    private static async Task<(bool Ready, string Diagnostic)> GetIntranetAutomationPermissionStateAsync(IPage page)
+    {
+        var authUser = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/auth/user', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+
+        if (!authUser.StartsWith("200 ", StringComparison.Ordinal))
+        {
+            return (false, authUser);
+        }
+
+        using var document = JsonDocument.Parse(authUser[4..]);
+        if (!document.RootElement.TryGetProperty("permissions", out var permissions) ||
+            permissions.ValueKind != JsonValueKind.Array)
+        {
+            return (false, authUser);
+        }
+
+        var hasWildcard = permissions.EnumerateArray().Any(permission =>
+            permission.GetString()?.Equals("*", StringComparison.OrdinalIgnoreCase) == true);
+        return (hasWildcard, authUser);
+    }
+
+    private static async Task<string> RegisterWebCustomerAsync(IPage page, Uri webBase, string returnUrl)
+    {
+        var unique = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var email = $"e2e-checkout-{unique}@example.com";
+        const string password = "E2e-Checkout-12345!";
+
+        await page.GotoAsync(
+            new Uri(webBase, $"/auth/sign-up?returnUrl={Uri.EscapeDataString(returnUrl)}").ToString(),
+            new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+
+        var signUpForm = page.Locator("form.auth-form[action='/auth/sign-up/email']");
+        if (!await signUpForm.IsVisibleAsync())
+        {
+            await page.Locator("details.auth-email-panel summary").ClickAsync();
+        }
+
+        await Expect(signUpForm).ToBeVisibleAsync();
+        await signUpForm.Locator("input[name='FirstName']").FillAsync("E2E");
+        await signUpForm.Locator("input[name='LastName']").FillAsync("Checkout");
+        await signUpForm.Locator("input[name='Email']").FillAsync(email);
+        await signUpForm.Locator("input[name='Password']").FillAsync(password);
+        await signUpForm.EvaluateAsync("form => form.requestSubmit()");
+
+        await page.WaitForURLAsync(
+            url =>
+            {
+                var current = new Uri(url);
+                return current.AbsolutePath.Equals(returnUrl, StringComparison.OrdinalIgnoreCase);
+            },
+            new PageWaitForURLOptions
+            {
+                Timeout = 45_000,
+                WaitUntil = WaitUntilState.Commit
+            });
+
+        return email;
     }
 
     private static async Task<CreatedIntranetCustomer> CreateIntranetCustomerAsync(IPage page)
