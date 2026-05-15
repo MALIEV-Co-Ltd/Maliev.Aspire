@@ -340,7 +340,7 @@ dotnet test Maliev.OrderService.Tests/ -v n
 
 | Gap | Impact | Action |
 |-----|--------|--------|
-| Partial E2E browser automation | Only the currently executable Web, QuoteEngine demo, QuoteEngine upload gate, and anonymous Intranet auth-boundary journeys are automated | Expand `Maliev.Aspire.Tests/E2E` until all 95 catalog stories have passing browser coverage or explicit accepted product-gap failures |
+| Partial E2E browser automation | Currently executable coverage includes Web trust/conversion, contact/support/account/auth entry points, shop/cart route surfaces, QuoteEngine demo/upload gate/prototype portal routes, and anonymous Intranet auth-boundary journeys | Expand `Maliev.Aspire.Tests/E2E` until all 95 catalog stories have passing browser coverage or explicit accepted product-gap failures |
 | Missing deterministic E2E identities and data | Authenticated customer, employee, cross-customer, admin, commerce, finance, HR, procurement, and manufacturing journeys remain blocked | Enable Aspire-local test admin/customer seeding, local mail sink, OAuth test mode, published commerce seed products, and seeded project/order/payment/manufacturing fixtures |
 | QuoteEngine production integration | Dedicated customer quoting remains partial | QuoteEngine is wired into Aspire; keep anonymous demo mode non-mutating, then replace prototype-backed signed project flows with real Upload/Geometry/Pricing/Project/QuotationVersion/PDF/Order/Payment/Delivery journeys |
 | Customer email verification | Self-service account trust cannot be proven | Implement token issuance, email delivery, link redirect, token validation, and verified account status |

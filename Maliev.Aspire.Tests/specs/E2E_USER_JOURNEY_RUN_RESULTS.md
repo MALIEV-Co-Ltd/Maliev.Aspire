@@ -18,20 +18,24 @@
 |---------|--------|
 | `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 --no-restore` | Passed |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests"` | Passed: 2 tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 4 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 8 tests |
 
 ### Automated Story Coverage Added
 
 | Story ids | Automated browser coverage |
 |-----------|----------------------------|
 | `WEB-001`, `WEB-010`, `WEB-011`, `WEB-013` | Web home, services, shop, cookie consent, `/quote`, and local QuoteEngine demo handoff. |
+| `WEB-002`, `WEB-012` | Web contact/support route renders the contact form and submit control surface. Submission and employee processing still require a deterministic test mailbox/form-submit path. |
+| `WEB-003`, `WEB-005`, `WEB-006`, `WEB-007`, `WEB-009` | Web sign-up, sign-in, Google entry, password reset, and account-protection entry points render through browser routes. Full account creation, verification, session refresh, and sign-out still require local mail/OAuth/test-customer credentials. |
+| `WEB-008`, `COM-003` | Web shop and cart routes render storefront search/category and cart surfaces. Product detail, add-to-cart, quantity editing, and checkout draft still require published commerce seed products. |
 | `QUOTE-003`, `QUOTE-024` | QuoteEngine anonymous demo loads the MALIEV sample file, switches to FDM, recalculates price, and keeps formal PDF disabled. |
 | `QUOTE-005` | QuoteEngine real project route shows the sign-in/upload gate before customer-owned upload. |
+| `QUOTE-008`, `QUOTE-009`, `QUOTE-010`, `QUOTE-011`, `QUOTE-012`, `QUOTE-013`, `QUOTE-014` | QuoteEngine prototype-backed profile, order tracking, NDA, and supporting document portal routes render. Real persistence, upload, ownership, and employee visibility checks remain blocked until service-backed customer projects replace prototype storage. |
 | `INT-001`, `SEC-002`, `SEC-003` | Anonymous Intranet direct access to `/projects/new` redirects to login and preserves return URL. |
 
 ### Remaining Full-Catalog Blockers
 
-- Full 95-story browser verification still requires deterministic customer and employee browser sessions, local mail capture for verification/reset links, OAuth test mode, published commerce seed products, and service-backed QuoteEngine project/quotation workflows.
+- Full 95-story browser verification still requires deterministic customer and employee browser sessions, local mail capture for verification/reset links, OAuth test mode, published commerce seed products, and service-backed QuoteEngine project/quotation/order/payment workflows.
 - Stories not listed above remain partial or blocked as recorded in the manual story matrix below. They must not be counted as fully verified until they have automated browser coverage or an explicitly accepted product-gap failure.
 
 ## 2026-05-15 Manual Browser E2E Correction Run
