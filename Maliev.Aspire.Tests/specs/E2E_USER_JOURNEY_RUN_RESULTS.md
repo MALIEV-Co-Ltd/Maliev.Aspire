@@ -3,6 +3,37 @@
 > Dated execution evidence for the production-gate E2E journey catalog and Aspire integrated environment checks.
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 
+## 2026-05-15 Automated Playwright E2E Bootstrap Run
+
+### Scope
+
+- Added executable Playwright browser tests in `Maliev.Aspire.Tests/E2E/BrowserJourneyGateTests.cs`.
+- Added catalog traceability checks in `Maliev.Aspire.Tests/E2E/E2EStoryCatalogTraceabilityTests.cs`.
+- Installed the matching .NET Playwright Chromium runtime with:
+  - `pwsh B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\bin\Debug\net10.0\playwright.ps1 install chromium`
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 --no-restore` | Passed |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests"` | Passed: 2 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests"` | Passed: 4 tests |
+
+### Automated Story Coverage Added
+
+| Story ids | Automated browser coverage |
+|-----------|----------------------------|
+| `WEB-001`, `WEB-010`, `WEB-011`, `WEB-013` | Web home, services, shop, cookie consent, `/quote`, and local QuoteEngine demo handoff. |
+| `QUOTE-003`, `QUOTE-024` | QuoteEngine anonymous demo loads the MALIEV sample file, switches to FDM, recalculates price, and keeps formal PDF disabled. |
+| `QUOTE-005` | QuoteEngine real project route shows the sign-in/upload gate before customer-owned upload. |
+| `INT-001`, `SEC-002`, `SEC-003` | Anonymous Intranet direct access to `/projects/new` redirects to login and preserves return URL. |
+
+### Remaining Full-Catalog Blockers
+
+- Full 95-story browser verification still requires deterministic customer and employee browser sessions, local mail capture for verification/reset links, OAuth test mode, published commerce seed products, and service-backed QuoteEngine project/quotation workflows.
+- Stories not listed above remain partial or blocked as recorded in the manual story matrix below. They must not be counted as fully verified until they have automated browser coverage or an explicitly accepted product-gap failure.
+
 ## 2026-05-15 Manual Browser E2E Correction Run
 
 ### Scope

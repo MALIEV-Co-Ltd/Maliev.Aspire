@@ -303,6 +303,12 @@ dotnet test --filter "FullyQualifiedName~Domain.Commercial"
 # Discover browser E2E tests
 dotnet test --filter "Tier=E2E" --list-tests
 
+# Install the Playwright browser runtime after package restore or version changes
+pwsh Maliev.Aspire.Tests/bin/Debug/net10.0/playwright.ps1 install chromium
+
+# Run production-gate browser E2E and catalog traceability checks
+dotnet test Maliev.Aspire.Tests/Maliev.Aspire.Tests.csproj --filter "Tier=E2E"
+
 # Run with coverage
 dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults
 
@@ -334,7 +340,8 @@ dotnet test Maliev.OrderService.Tests/ -v n
 
 | Gap | Impact | Action |
 |-----|--------|--------|
-| No E2E browser automation | UI flows unverified | Use `specs/E2E_USER_JOURNEY_STORIES.md` as the required catalog, then create Playwright suites for Web, QuoteEngine, and Intranet |
+| Partial E2E browser automation | Only the currently executable Web, QuoteEngine demo, QuoteEngine upload gate, and anonymous Intranet auth-boundary journeys are automated | Expand `Maliev.Aspire.Tests/E2E` until all 95 catalog stories have passing browser coverage or explicit accepted product-gap failures |
+| Missing deterministic E2E identities and data | Authenticated customer, employee, cross-customer, admin, commerce, finance, HR, procurement, and manufacturing journeys remain blocked | Enable Aspire-local test admin/customer seeding, local mail sink, OAuth test mode, published commerce seed products, and seeded project/order/payment/manufacturing fixtures |
 | QuoteEngine production integration | Dedicated customer quoting remains partial | QuoteEngine is wired into Aspire; keep anonymous demo mode non-mutating, then replace prototype-backed signed project flows with real Upload/Geometry/Pricing/Project/QuotationVersion/PDF/Order/Payment/Delivery journeys |
 | Customer email verification | Self-service account trust cannot be proven | Implement token issuance, email delivery, link redirect, token validation, and verified account status |
 | No load/performance tests | Performance regressions undetected | Consider k6 or NBomber |
