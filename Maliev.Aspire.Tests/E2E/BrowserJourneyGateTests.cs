@@ -269,6 +269,41 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await Expect(page.Locator("body")).ToContainTextAsync(new Regex("project|quote|customer", RegexOptions.IgnoreCase), new() { Timeout = 15_000 });
     }
 
+    /// <summary>
+    /// Verifies authenticated Intranet module routes render for the production-gate employee story groups.
+    /// Covers route-level executable portions of INT-002, INT-003, INT-010, INT-011, INT-012, INT-013, INT-014,
+    /// COM-001, FIN-001, FIN-002, PROC-002, PROC-003, MFG-001, MFG-003, MFG-004, HR-001, HR-002, OPS-001, and SEC-002.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-002,INT-003,INT-010,INT-011,INT-012,INT-013,INT-014,COM-001,FIN-001,FIN-002,PROC-002,PROC-003,MFG-001,MFG-003,MFG-004,HR-001,HR-002,OPS-001,SEC-002")]
+    public async Task Intranet_AutomationEmployee_ModuleRoutesRenderWithoutAuthOrStartupFailures()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(page, intranetBase, "/");
+
+        await AssertIntranetRouteAsync(page, intranetBase, "/", new Regex("Dashboard|Good afternoon", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/search", new Regex("Search|result", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/admin", new Regex("Admin|System|IAM", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/iam", new Regex("IAM|user|role", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/iam/users/new", new Regex("user|role|permission", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/sales/customers", new Regex("customer|company", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/sales/customers/new", new Regex("customer|company|address", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/sales/projects", new Regex("project|quote", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/commerce/catalog", new Regex("catalog|product|commerce", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/accounting", new Regex("invoice|accounting|finance", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/accounting/new", new Regex("invoice|customer|billing", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/purchasing", new Regex("purchase|supplier|procurement|PO", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/purchasing/new", new Regex("purchase|supplier|procurement|PO", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/mfg/materials", new Regex("material|inventory|manufacturing", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/mfg/equipment", new Regex("equipment|facility|machine", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/mfg/production-schedule", new Regex("production|schedule|job", RegexOptions.IgnoreCase));
+        await AssertIntranetRouteAsync(page, intranetBase, "/hr/profile", new Regex("profile|employee|leave|HR", RegexOptions.IgnoreCase));
+    }
+
     private async Task<IBrowserContext> NewContextAsync()
     {
         return await _browser!.NewContextAsync(new BrowserNewContextOptions
@@ -356,6 +391,26 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         }
 
         throw new TimeoutException($"Intranet automation employee could not sign in before timeout. Last error: {lastError}");
+    }
+
+    private static async Task AssertIntranetRouteAsync(IPage page, Uri intranetBase, string path, Regex expectedText)
+    {
+        await page.GotoAsync(new Uri(intranetBase, path).ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        Assert.DoesNotContain("/login", page.Url, StringComparison.OrdinalIgnoreCase);
+        await Expect(page.Locator("body")).Not.ToBeEmptyAsync(new() { Timeout = 15_000 });
+        try
+        {
+            await Expect(page.Locator("body")).ToContainTextAsync(expectedText, new() { Timeout = 15_000 });
+        }
+        catch (Exception ex)
+        {
+            var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+            var authUser = await page.EvaluateAsync<string>(
+                "async () => { const r = await fetch('/api/v1/auth/user', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+            throw new InvalidOperationException(
+                $"Intranet route {path} did not render expected text. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_000)]}. Auth user: {authUser}",
+                ex);
+        }
     }
 
     private static ILocatorAssertions Expect(ILocator locator)
