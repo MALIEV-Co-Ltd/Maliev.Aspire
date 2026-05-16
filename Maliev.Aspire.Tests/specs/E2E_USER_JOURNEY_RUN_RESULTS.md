@@ -4,6 +4,41 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-05-16 Delivery Note E2E Run
+
+### Scope
+
+- Added executable browser coverage for `INT-009` through the authenticated Intranet logistics workflow.
+- Fixed the Intranet delivery-note UI/BFF boundary so employees can create DeliveryService-backed delivery notes from an order context, update shipment status, request the delivery PDF queue, and verify persisted state.
+- Kept this as the logistics portion of `INT-009`; customer-visible order status, delivery evidence upload, and artifact download checks remain separate gaps.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test B:\maliev\Maliev.Intranet\Maliev.Intranet.Tests\Maliev.Intranet.Tests.csproj --filter "FullyQualifiedName~DeliveryServiceClientTests\|FullyQualifiedName~DtoSerializationTests" --logger "console;verbosity=minimal"` | Passed: 17 tests |
+| `dotnet test B:\maliev\Maliev.Intranet\Maliev.Intranet.Tests\Maliev.Intranet.Tests.csproj --logger "console;verbosity=minimal"` | Passed: 602 tests, 7 skipped |
+| `dotnet build B:\maliev\Maliev.Intranet\Maliev.Intranet.slnx --configuration Release --no-restore --verbosity minimal` | Passed: 0 warnings, 0 errors |
+| `dotnet test B:\maliev\Maliev.Intranet\Maliev.Intranet.Tests\Maliev.Intranet.Tests.csproj --filter "FullyQualifiedName~ProgramHttpClientConfigurationTests\|FullyQualifiedName~DeliveryServiceClientTests" --logger "console;verbosity=minimal"` | Passed: 9 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~Intranet_DeliveryNotes_CreatesTracksPdfAndDeliveredStatus" --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests" --logger "console;verbosity=minimal"` | Passed: 2 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~BrowserJourneyGateTests" --logger "console;verbosity=minimal"` | Passed: 30 browser E2E tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "Tier=E2E" --logger "console;verbosity=minimal"` | Passed: 32 E2E tests |
+
+### Automated Story Coverage Updated
+
+| Story ids | Automated browser coverage |
+|-----------|----------------------------|
+| `INT-009` | Authenticated Intranet employee signs in through the real BFF/AuthService/IAM path, creates a corporate customer, creates a real OrderService source order, opens `/finance/delivery-notes/new`, creates a DeliveryService delivery note with carrier, tracking, destination, contact, shipping cost, and item quantities, verifies the generated `DN-yyyy-nnnnnn` detail route, marks the shipment `InTransit`, marks it `Delivered` with receiver and actual delivery time, requests the delivery-note PDF queue, verifies persisted DeliveryService/BFF detail JSON, and verifies the delivered note appears in the list. Remaining gaps are proof-of-delivery evidence file/signature/photo upload, delivery PDF artifact download/content verification, customer-visible Web/QuoteEngine order status, notification delivery, partial delivery quantities, and low-permission negative checks. |
+
+### Fixes Made During E2E Execution
+
+| Repo | Commit | Fix | Evidence |
+|------|--------|-----|----------|
+| `Maliev.Intranet` | `6c42a1a` | Replaced placeholder DeliveryService client methods with real service-contract calls, added delivery-note list/create/detail pages, exposed finance navigation, and added DTO/client regression tests. | Full Intranet tests passed 602 with 7 skipped; Release build passed with 0 warnings; focused Aspire delivery browser journey passed after the interface registration fix. |
+| `Maliev.Intranet` | `958ee58` | Registered `IDeliveryServiceClient` against `DeliveryServiceClient`, fixing the BFF 500 when `DeliveryNotesController` was first activated by the browser create request. | `ProgramHttpClientConfigurationTests` and `DeliveryServiceClientTests` passed 9/9; focused Aspire delivery browser journey passed. |
+| `Maliev.Aspire` | Current delivery E2E slice | Added `Intranet_DeliveryNotes_CreatesTracksPdfAndDeliveredStatus` to the browser production-gate suite. | Focused browser E2E passed 1/1. |
+
 ## 2026-05-16 Finance Payment And Receipt E2E Run
 
 ### Scope
@@ -99,6 +134,7 @@
 | `INT-002`, `INT-003` | Authenticated Intranet employee opens `/sales/customers/new`, verifies BFF country reference data includes Thailand with `iso2 = TH`, enters customer profile fields, company fields, company billing address, customer billing and shipping addresses, and an internal note, submits the form, lands on `/customers/{id}`, verifies CustomerService detail JSON contains the customer, company, addresses, company billing address, and note data, then verifies the rendered Addresses and Notes tabs show the saved values. Remaining INT-002 gaps are registry lookup, address autocomplete, document upload, and NDA/customer-document separation. Remaining INT-003 gaps are document propagation and related-workflow propagation beyond customer list/search. |
 | `INT-003` | Authenticated Intranet employee creates a corporate customer, opens `/customers/{id}`, edits full name, phone, lifecycle status, payment terms, and shipping address through the rendered customer detail UI, verifies the Intranet BFF and CustomerService detail JSON reflect the profile/payment/status/address mutations, verifies the audit trail shows profile and status changes, and verifies the customer list/search view reflects the edited record. Remaining INT-003 gaps are customer/NDA document upload and related-workflow propagation beyond the customer list. |
 | `INT-003`, `INT-004` | Authenticated Intranet automation employee creates a new customer through `/api/v1/customers/create-basic`, finds the customer in `/customers`, opens the customer detail page, opens `/sales/projects/new`, searches the project customer picker, selects that customer, and verifies the quote workspace bill-to, upload dropzone, and quote total surfaces. |
+| `INT-009` | Authenticated Intranet employee creates a DeliveryService-backed delivery note from a real OrderService order, verifies carrier/tracking/customer/item state, transitions status to `InTransit` and `Delivered`, requests the delivery PDF queue, reads persisted BFF detail JSON, and verifies the delivered note is listed. Remaining gaps are proof-of-delivery evidence upload, delivery PDF artifact download/content verification, customer-visible order status, notifications, partial deliveries, and low-permission negative checks. |
 | `OPS-001`, `INT-003` | Authenticated Intranet employee creates a customer, waits for CustomerService's search upsert event to reach SearchService, verifies `/api/v1/search` returns a customer result with `/customers` navigation, uses the top-bar global search UI, verifies click-away closes the result panel, clicks the result, and lands on the customer list with the created customer visible. |
 | `OPS-002`, `INT-014` | Authenticated Intranet employee opens `/admin/system-health`, verifies the System Health dashboard renders auto-refresh information, fetches `/api/v1/system-health` through the browser session, waits until AuthService, IAMService, and GeometryService are healthy, verifies their service-owned `/liveness` and `/readiness` paths, verifies the history API includes IAMService and GeometryService, and clicks Refresh to confirm the live probe grid remains available. Longer multi-hour auto-refresh validation remains a separate endurance gate. |
 | `HR-001`, `INT-001`, `SEC-002` | Limited employee signs in with only session/profile permissions, opens `/hr/profile`, updates preferred name, personal email, and mobile phone through the browser UI, reloads to verify persistence, and remains denied from broad `/api/v1/employees` access. |
@@ -228,7 +264,7 @@
 | `INT-006` | Blocked | Requires authenticated duplicate/reorder project flow. | Need source project and accepted quote/order state. |
 | `INT-007` | Blocked | Requires quotation acceptance into order/job. | Need authenticated project quotation version. |
 | `INT-008` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, creates and finalizes a customer-backed invoice, records a full payment from invoice detail, verifies paid/balance state, creates a receipt, and verifies the receipt through UI and BFF data. | Need invoice and receipt PDF artifact checks, accounting journal/export effects, partial payment UI, void/refund behavior, and Omise sandbox completion. |
-| `INT-009` | Blocked | Requires delivery module and order state. | Need authenticated order/delivery records. |
+| `INT-009` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, creates a corporate customer and real OrderService order, creates a DeliveryService delivery note through `/finance/delivery-notes/new`, verifies carrier/tracking/item/customer state, marks the shipment `InTransit` and `Delivered`, requests the delivery PDF queue, verifies persisted detail JSON, and verifies the note appears in the list. | Need proof-of-delivery evidence upload, delivery PDF artifact download/content verification, customer-visible order status, notification delivery, partial delivery quantities, and low-permission negative checks. |
 | `INT-010` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, creates a new IAM principal through `/iam/users/new`, assigns the `roles.aspire.limited` role, verifies the principal through the BFF/IAM API, opens the user detail page, and verifies the role binding. | Need invited-user activation/session verification, role-change effects on a signed-in target user, disable/offboard behavior, and permission-scoped UI assertions beyond the created binding. |
 | `INT-011` | Partial after automated run | Later automated browser E2E opens IAM roles, verifies the `roles.aspire.limited` role detail page, verifies the BFF permission matrix, and confirms expected profile permissions are granted. | Need role create/edit/delete UI, category grouping assertions, high-risk permission guardrails, and assigned-user visibility where supported. |
 | `INT-012` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, opens `/mfg/materials`, creates a material, edits quote-critical material fields, and verifies persisted BFF/MaterialService detail data. | Need process/color/post-processing assignment UI, supplier linkage, bulk import/export, inventory lot movement, and low-permission action checks. |

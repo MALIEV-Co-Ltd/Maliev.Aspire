@@ -2138,6 +2138,147 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee can create a delivery note, progress shipment status, request the delivery PDF, and verify proof-of-delivery state.
+    /// Covers the executable logistics portion of INT-009.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-009")]
+    public async Task Intranet_DeliveryNotes_CreatesTracksPdfAndDeliveredStatus()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..12].ToUpperInvariant();
+        var trackingNumber = $"TH-E2E-{unique}";
+        var receiverName = $"E2E Receiver {unique[..6]}";
+        var productCode = $"MLV-{unique[..6]}";
+        var productName = $"E2E Delivery Bracket {unique[..6]}";
+
+        await SignInToIntranetAsync(page, intranetBase, "/finance/delivery-notes/new");
+        var customer = await CreateIntranetCorporateCustomerAsync(page);
+        var order = await AspireTestData.CreateOrderAsync(
+            _fixture,
+            customer.CustomerId,
+            $"Delivery note source order {unique}");
+        var sourceOrderId = GetJsonString(order, "orderId", "OrderId");
+        Assert.False(string.IsNullOrWhiteSpace(sourceOrderId), $"OrderService did not return an order id: {order}");
+
+        await page.GotoAsync(new Uri(intranetBase, "/finance/delivery-notes/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "New Delivery Note" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        await page.GetByLabel("Source order ID").FillAsync(sourceOrderId);
+        await page.GetByLabel("Customer ID").FillAsync(customer.CustomerId.ToString());
+        await page.GetByLabel("Customer name").FillAsync(customer.CompanyName);
+        await page.GetByLabel("Carrier").FillAsync("Flash Express");
+        await page.GetByLabel("Tracking number").FillAsync(trackingNumber);
+        await page.GetByLabel("Shipping cost").FillAsync("180.50");
+        await page.GetByLabel("Shipping currency").FillAsync("THB");
+        await page.GetByLabel("Address line 1").FillAsync(customer.BillingAddressLine1);
+        await page.GetByLabel("Address line 2").FillAsync("Logistics dock");
+        await page.GetByLabel("City").FillAsync("Bangkok");
+        await page.GetByLabel("Province").FillAsync("Bangkok");
+        await page.GetByLabel("Postal code").FillAsync("10500");
+        await page.GetByLabel("Country").FillAsync("Thailand");
+        await page.GetByLabel("Contact name").FillAsync(receiverName);
+        await page.GetByLabel("Contact phone").FillAsync("+66810000999");
+        await page.GetByLabel("Contact email").FillAsync(customer.Email);
+        await page.GetByLabel("Delivery instructions").FillAsync("Call before arrival and capture receiver signature.");
+        await page.GetByLabel("Product code").FillAsync(productCode);
+        await page.GetByLabel("Product name").FillAsync(productName);
+        await page.GetByLabel("Description").FillAsync("Machined aluminium verification part");
+        await page.GetByLabel("Ordered quantity").FillAsync("2");
+        await page.GetByLabel("Manufactured quantity").FillAsync("2");
+        await page.GetByLabel("Delivered quantity").FillAsync("2");
+        await page.GetByLabel("Unit").FillAsync("pcs");
+        await page.GetByLabel("Item notes").FillAsync("Packed in one shipment.");
+
+        var createResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/deliverynotes", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Create Delivery Note" }).ClickAsync();
+        var createResponse = await createResponseTask;
+        var createBody = await ReadResponseTextOrEmptyAsync(createResponse);
+        Assert.True(createResponse.Ok, $"Delivery note create failed with HTTP {createResponse.Status}: {createBody}");
+
+        using var createDocument = JsonDocument.Parse(createBody);
+        var created = createDocument.RootElement;
+        var deliveryNoteId = GetJsonString(created, "deliveryNoteId", "DeliveryNoteId", "id", "Id");
+        Assert.Matches(@"^DN-\d{4}-\d{6}$", deliveryNoteId);
+
+        await page.WaitForURLAsync(
+            url => new Uri(url).AbsolutePath.Contains($"/finance/delivery-notes/{deliveryNoteId}", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForURLOptions { Timeout = 60_000, WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(deliveryNoteId, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(customer.CompanyName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(trackingNumber, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(productCode, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Pending", new() { Timeout = 30_000 });
+
+        var inTransitResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/deliverynotes/{deliveryNoteId}/status", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "PATCH", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Mark In Transit" }).ClickAsync();
+        var inTransitResponse = await inTransitResponseTask;
+        Assert.True(inTransitResponse.Ok, $"Delivery in-transit update failed with HTTP {inTransitResponse.Status}: {await ReadResponseTextOrEmptyAsync(inTransitResponse)}");
+        await Expect(page.Locator("body")).ToContainTextAsync("In Transit", new() { Timeout = 30_000 });
+
+        await page.GetByLabel("Received by").FillAsync(receiverName);
+        await page.GetByLabel("Actual delivery time").FillAsync(DateTime.Now.ToString("yyyy-MM-ddTHH:mm"));
+
+        var deliveredResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/deliverynotes/{deliveryNoteId}/status", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "PATCH", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Mark Delivered" }).ClickAsync();
+        var deliveredResponse = await deliveredResponseTask;
+        var deliveredBody = await ReadResponseTextOrEmptyAsync(deliveredResponse);
+        Assert.True(deliveredResponse.Ok, $"Delivery delivered update failed with HTTP {deliveredResponse.Status}: {deliveredBody}");
+        await Expect(page.Locator("body")).ToContainTextAsync("Delivered", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(receiverName, new() { Timeout = 30_000 });
+
+        var pdfResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/deliverynotes/{deliveryNoteId}/pdf", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Request PDF" }).ClickAsync();
+        var pdfResponse = await pdfResponseTask;
+        var pdfBody = await ReadResponseTextOrEmptyAsync(pdfResponse);
+        Assert.True(pdfResponse.Ok, $"Delivery PDF request failed with HTTP {pdfResponse.Status}: {pdfBody}");
+        await Expect(page.Locator("body")).ToContainTextAsync("Requested", new() { Timeout = 30_000 });
+
+        var detailResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/deliverynotes/${id}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            deliveryNoteId);
+        Assert.StartsWith("200 ", detailResult, StringComparison.Ordinal);
+        using (var detailDocument = JsonDocument.Parse(detailResult[4..]))
+        {
+            var detail = detailDocument.RootElement;
+            Assert.Equal(deliveryNoteId, GetJsonString(detail, "deliveryNoteId", "DeliveryNoteId"));
+            Assert.Equal("Delivered", GetJsonString(detail, "status", "Status"));
+            Assert.Equal(receiverName, GetJsonString(detail, "receivedByName", "ReceivedByName"));
+            Assert.Equal(trackingNumber, GetJsonString(detail, "trackingNumber", "TrackingNumber"));
+            Assert.True(TryGetJsonProperty(detail, out var items, "items", "Items"));
+            Assert.Contains(items.EnumerateArray(), item =>
+                string.Equals(productCode, GetJsonString(item, "productCode", "ProductCode"), StringComparison.Ordinal) &&
+                Math.Abs(GetJsonDouble(item, "quantityDelivered", "QuantityDelivered") - 2) < 0.01);
+        }
+
+        await page.GotoAsync(new Uri(intranetBase, "/finance/delivery-notes").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(deliveryNoteId, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Delivered", new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies employee-created customer records are searchable, detail pages render, and the employee project quote workspace can select a customer.
     /// Covers executable customer/project-workspace portions of INT-003 and INT-004.
     /// </summary>
