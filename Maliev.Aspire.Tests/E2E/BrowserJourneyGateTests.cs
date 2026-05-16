@@ -1477,12 +1477,12 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Verifies an employee can create a customer-backed invoice, attach PO evidence, finalize it, and see the resulting invoice state.
-    /// Covers the executable invoice creation, attachment, credit-term, and status portions of FIN-001 and FIN-002.
+    /// Verifies an employee can create a customer-backed invoice, attach PO evidence, finalize it, record payment, and create a receipt.
+    /// Covers the executable invoice creation, attachment, credit-term, payment-status, and receipt portions of FIN-001, FIN-002, and INT-008.
     /// </summary>
     [Fact]
     [Trait("Tier", "E2E")]
-    [Trait("Stories", "FIN-001,FIN-002")]
+    [Trait("Stories", "FIN-001,FIN-002,INT-008")]
     public async Task Intranet_FinanceInvoice_CreatesAttachesAndFinalizesCustomerInvoice()
     {
         await using var context = await NewContextAsync();
@@ -1490,6 +1490,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var intranetBase = GetEndpoint("IntranetBff");
         var lineDescription = $"E2E machining services {Guid.NewGuid():N}"[..34];
         var poNumber = $"PO-E2E-{Guid.NewGuid():N}"[..18].ToUpperInvariant();
+        var paymentReference = $"BANK-E2E-{Guid.NewGuid():N}"[..22].ToUpperInvariant();
         var poFilePath = Path.Combine(Path.GetTempPath(), $"maliev-e2e-po-{Guid.NewGuid():N}.txt");
         var poFileName = Path.GetFileName(poFilePath);
 
@@ -1649,6 +1650,53 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
             await page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.NetworkIdle });
             await Expect(page.Locator("body")).ToContainTextAsync("Finalized", new() { Timeout = 30_000 });
+
+            await page.GetByLabel("Reference").FillAsync(paymentReference);
+            await page.GetByLabel("Notes").FillAsync("Verified bank transfer evidence during Aspire E2E.");
+            await page.GetByRole(AriaRole.Button, new() { NameString = "Record Payment" }).ClickAsync();
+            await Expect(page.Locator("body")).ToContainTextAsync("Fully Paid", new() { Timeout = 60_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync("2,675.00", new() { Timeout = 15_000 });
+
+            var paidResult = await page.EvaluateAsync<string>(
+                @"async id => {
+                    const r = await fetch(`/api/v1/invoices/${id}`, { credentials: 'include' });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                invoiceId);
+
+            Assert.StartsWith("200 ", paidResult, StringComparison.Ordinal);
+            using (var paidDocument = JsonDocument.Parse(paidResult[4..]))
+            {
+                var paid = paidDocument.RootElement;
+                Assert.Equal("FullyPaid", GetJsonString(paid, "status", "Status"));
+                Assert.Equal(2675.00, GetJsonDouble(paid, "paidAmount", "PaidAmount"), precision: 2);
+                Assert.Equal(0.00, GetJsonDouble(paid, "balance", "Balance", "outstandingBalance", "OutstandingBalance"), precision: 2);
+            }
+
+            await page.GetByRole(AriaRole.Button, new() { NameString = "Create Receipt" }).ClickAsync();
+            await Expect(page.Locator("body")).ToContainTextAsync("Pending Pdf", new() { Timeout = 60_000 });
+
+            var receiptsResult = await page.EvaluateAsync<string>(
+                @"async id => {
+                    const r = await fetch('/api/v1/receipts?page=1&pageSize=50', { credentials: 'include' });
+                    return `${r.status} ${await r.text()}`;
+                }",
+                invoiceId);
+
+            Assert.StartsWith("200 ", receiptsResult, StringComparison.Ordinal);
+            using (var receiptsDocument = JsonDocument.Parse(receiptsResult[4..]))
+            {
+                var receipt = receiptsDocument.RootElement
+                    .GetProperty("data")
+                    .EnumerateArray()
+                    .FirstOrDefault(item => item.TryGetProperty("invoiceId", out var invoiceIdProperty) && invoiceIdProperty.GetGuid() == invoiceId);
+
+                Assert.NotEqual(JsonValueKind.Undefined, receipt.ValueKind);
+                Assert.False(string.IsNullOrWhiteSpace(GetJsonString(receipt, "receiptNumber", "ReceiptNumber")));
+                Assert.Equal("PendingPdf", GetJsonString(receipt, "status", "Status"));
+                Assert.Equal("Bank Transfer", GetJsonString(receipt, "paymentMethod", "PaymentMethod"));
+                Assert.Equal(2675.00, GetJsonDouble(receipt, "totalAmount", "TotalAmount", "amount", "Amount"), precision: 2);
+            }
         }
         finally
         {
