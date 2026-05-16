@@ -886,6 +886,116 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies the manager dashboard detects pending work, shows source-service business widgets,
+    /// and navigates from the action item into the approval workflow.
+    /// Covers the executable dashboard/business overview portion of INT-014.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-014,HR-002")]
+    public async Task Intranet_DashboardBusinessOverview_SurfacesPendingLeaveApproval()
+    {
+        await AspireTestData.EnsureAnnualLeavePolicyAsync(_fixture);
+
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var reason = $"E2E dashboard leave action {unique}";
+        var startDate = DateTime.UtcNow.Date.AddDays(45 + Random.Shared.Next(1, 30));
+        var endDate = startDate.AddDays(1);
+
+        await SignInToIntranetAsync(
+            page,
+            intranetBase,
+            "/hr/leave",
+            _fixture.AspireTestLimitedEmployeeEmail,
+            _fixture.AspireTestLimitedEmployeePassword,
+            permissionState =>
+                permissionState.HasPermission("leave.balances.read") &&
+                permissionState.HasPermission("leave.requests.read") &&
+                permissionState.HasPermission("leave.requests.create"),
+            "limited employee leave read/create permissions");
+
+        await page.GetByLabel("Leave type").SelectOptionAsync("Annual");
+        await page.GetByLabel("Start date").FillAsync(startDate.ToString("yyyy-MM-dd"));
+        await page.GetByLabel("End date").FillAsync(endDate.ToString("yyyy-MM-dd"));
+        await page.GetByLabel("Reason").FillAsync(reason);
+
+        var submitResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/timeoff/requests", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Submit leave request" }).ClickAsync();
+        var submitResponse = await submitResponseTask;
+        var submitBody = await ReadResponseTextOrEmptyAsync(submitResponse);
+        Assert.True(submitResponse.Ok, $"Dashboard fixture leave request failed with HTTP {submitResponse.Status}: {submitBody}");
+        using var submitDocument = JsonDocument.Parse(submitBody);
+        var leaveRequestId = submitDocument.RootElement.GetProperty("id").GetGuid();
+        Assert.NotEqual(Guid.Empty, leaveRequestId);
+
+        await page.GotoAsync(new Uri(intranetBase, "/api/v1/auth/logout").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.Commit });
+
+        await SignInToIntranetAsync(page, intranetBase, "/");
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "Dashboard" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var dashboardResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/dashboard', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", dashboardResult, StringComparison.Ordinal);
+        using (var dashboardDocument = JsonDocument.Parse(dashboardResult[4..]))
+        {
+            var dashboardRoot = dashboardDocument.RootElement;
+            Assert.True(TryGetJsonProperty(dashboardRoot, out var widgets, "widgets", "Widgets"));
+            var sourceServices = widgets
+                .EnumerateArray()
+                .Select(widget => GetJsonString(widget, "sourceService", "SourceService"))
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .ToList();
+
+            Assert.Contains("PaymentService", sourceServices);
+            Assert.Contains("OrderService", sourceServices);
+            Assert.Contains("QuotationService", sourceServices);
+            Assert.Contains("EmployeeService", sourceServices);
+        }
+
+        await WaitForIntranetApiTextContainsAsync(page, "/api/v1/dashboard/action-items", "leave request");
+        var actionItemsResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/dashboard/action-items', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", actionItemsResult, StringComparison.Ordinal);
+        using (var actionItemsDocument = JsonDocument.Parse(actionItemsResult[4..]))
+        {
+            var actionItemsRoot = actionItemsDocument.RootElement;
+            Assert.True(TryGetJsonProperty(actionItemsRoot, out var categories, "categories", "Categories"));
+            Assert.Contains(categories.EnumerateArray(), category =>
+                GetJsonString(category, "label", "Label").Contains("leave request", StringComparison.OrdinalIgnoreCase) &&
+                GetJsonDouble(category, "count", "Count") >= 1 &&
+                GetJsonString(category, "navigateTo", "NavigateTo").Contains("/hr/leave", StringComparison.OrdinalIgnoreCase));
+        }
+
+        var leaveAction = page.Locator(".mlv-list-row").Filter(new() { HasText = "leave request" }).First;
+        await Expect(leaveAction).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await leaveAction.ClickAsync();
+        await page.WaitForURLAsync(
+            url => new Uri(url).AbsolutePath.Equals("/hr/leave", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForURLOptions { Timeout = 30_000, WaitUntil = WaitUntilState.NetworkIdle });
+
+        var approvalRow = page.Locator(".mlv-list-row").Filter(new() { HasText = reason });
+        await Expect(approvalRow).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var decisionResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/timeoff/requests/{leaveRequestId}/decision", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await approvalRow.GetByRole(AriaRole.Button, new() { NameString = "Approve request" }).ClickAsync();
+        var decisionResponse = await decisionResponseTask;
+        var decisionBody = await ReadResponseTextOrEmptyAsync(decisionResponse);
+        Assert.True(decisionResponse.Ok, $"Dashboard cleanup leave approval failed with HTTP {decisionResponse.Status}: {decisionBody}");
+        await Expect(approvalRow).ToBeHiddenAsync(new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies the Aspire-local automation employee can sign into Intranet and reach protected ERP surfaces.
     /// Covers the authenticated entry portions of INT-001, INT-014, OPS-001, OPS-002, and SEC-003.
     /// </summary>
