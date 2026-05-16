@@ -103,7 +103,7 @@ public static class MassTransitExtensions
         builder.Services.Configure<MassTransitHostOptions>(options =>
         {
             options.WaitUntilStarted = !skipBusWait; // In tests, don't wait - let bus start in background
-            options.StartTimeout = TimeSpan.FromSeconds(skipBusWait ? 5 : 60);
+            options.StartTimeout = TimeSpan.FromSeconds(60);
             options.StopTimeout = TimeSpan.FromSeconds(30);
         });
 
