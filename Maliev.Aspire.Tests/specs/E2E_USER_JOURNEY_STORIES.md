@@ -3173,11 +3173,11 @@ This catalog now assumes the following production contract:
 - Target domain service traces show the tool-originated call.
 - Unauthorized tool attempts are denied and logged safely.
 
-**Current implementation status:** Required gap unless the assistant surface and tool callbacks are already deployed.
+**Current implementation status:** Partial. The authenticated Intranet assistant surface opens through Aspire, can initiate a ChatbotService session, execute a quotation-oriented assistant prompt, and preserve suggested-action context for a reminder follow-up. Broader tool coverage, production LLM behavior, and negative permission tests remain required.
 
 **Product direction implied by story:** AI assistance must be permission-aware, auditable, and useful inside real employee workflows.
 
-**Known product gaps:** Define supported assistant tools, approval policy for mutating actions, retention policy, and redaction rules.
+**Known product gaps:** Define the full supported assistant tool catalog, approval policy for each mutating action, retention policy, redaction rules, production callback allow-list configuration, and permission-negative tests for restricted records/actions.
 
 ---
 

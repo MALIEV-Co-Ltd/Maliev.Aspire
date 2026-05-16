@@ -996,6 +996,94 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies the authenticated Intranet AI assistant opens from the employee shell, reaches ChatbotService,
+    /// executes a quotation operation prompt, and keeps suggested-action context for a reminder follow-up.
+    /// Covers the executable assistant/tool-callback portion of INT-015.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-015")]
+    public async Task Intranet_AiAssistant_ExecutesQuotationOperationAndSuggestedAction()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var diagnostics = new List<string>();
+
+        page.Console += (_, message) =>
+        {
+            if (message.Type is "error" or "warning")
+            {
+                diagnostics.Add($"{message.Type}: {message.Text}");
+            }
+        };
+        page.PageError += (_, exception) => diagnostics.Add($"pageerror: {exception}");
+        page.RequestFailed += (_, request) =>
+            diagnostics.Add($"request-failed: {request.Method} {request.Url} {request.Failure}");
+        page.Response += (_, response) =>
+        {
+            if (response.Status >= 400 &&
+                (response.Url.Contains("/api/v1/chat", StringComparison.OrdinalIgnoreCase) ||
+                 response.Url.Contains("/api/v1/aiprocessing", StringComparison.OrdinalIgnoreCase)))
+            {
+                diagnostics.Add($"response: {response.Status} {response.Url}");
+            }
+        };
+
+        await SignInToIntranetAsync(page, intranetBase, "/");
+
+        var aiHealth = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/aiprocessing/health', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", aiHealth, StringComparison.Ordinal);
+        Assert.Contains("canInitiateSession", aiHealth, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("true", aiHealth, StringComparison.OrdinalIgnoreCase);
+
+        await page.Locator(".topbar-chat-toggle").ClickAsync();
+        var assistant = page.GetByLabel("AI assistant conversation");
+        await Expect(assistant).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.GetByText("How can I help?", new() { Exact = true })).ToBeVisibleAsync(new() { Timeout = 60_000 });
+
+        var sessionResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/chat/session", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+        var quoteResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/chat/message", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await page.Locator(".sidekick-composer-input").FillAsync("Check quotation Q-2026-000001 and suggest next action");
+        await page.GetByLabel("Send message").ClickAsync();
+
+        var sessionResponse = await sessionResponseTask;
+        var sessionBody = await ReadResponseTextOrEmptyAsync(sessionResponse);
+        Assert.True(sessionResponse.Ok, $"Chat session initiation failed with HTTP {sessionResponse.Status}: {sessionBody}. Diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, diagnostics)}");
+
+        var quoteResponse = await quoteResponseTask;
+        var quoteBody = await ReadResponseTextOrEmptyAsync(quoteResponse);
+        Assert.True(quoteResponse.Ok, $"Chat quotation operation failed with HTTP {quoteResponse.Status}: {quoteBody}. Diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, diagnostics)}");
+        Assert.Contains("Q-2026-000001", quoteBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Send Reminder", quoteBody, StringComparison.OrdinalIgnoreCase);
+
+        await Expect(page.Locator("body")).ToContainTextAsync("Quotation Q-2026-000001", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("ABC Manufacturing", new() { Timeout = 30_000 });
+        await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "Send Reminder" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var reminderResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/chat/message", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Send Reminder" }).ClickAsync();
+        var reminderResponse = await reminderResponseTask;
+        var reminderBody = await ReadResponseTextOrEmptyAsync(reminderResponse);
+        Assert.True(reminderResponse.Ok, $"Chat suggested reminder failed with HTTP {reminderResponse.Status}: {reminderBody}. Diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, diagnostics)}");
+        Assert.Contains("Reminder sent successfully", reminderBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Q-2026-000001", reminderBody, StringComparison.OrdinalIgnoreCase);
+        await Expect(page.Locator("body")).ToContainTextAsync("Reminder sent successfully for quotation Q-2026-000001", new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies the Aspire-local automation employee can sign into Intranet and reach protected ERP surfaces.
     /// Covers the authenticated entry portions of INT-001, INT-014, OPS-001, OPS-002, and SEC-003.
     /// </summary>

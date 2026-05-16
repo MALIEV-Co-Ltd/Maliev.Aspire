@@ -4,6 +4,46 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-05-16 Intranet AI Assistant E2E Run
+
+### Scope
+
+- Added executable browser coverage for the core `INT-015` assistant/tool-callback path.
+- Fixed the Intranet assistant suggested-action boundary so a ChatbotService action with quotation context keeps that context when the employee clicks the action button.
+- Fixed ChatbotService Aspire `Testing` runtime so assistant prompts are deterministic without a Gemini secret and Redis-backed session locks are available when AppHost wires Redis.
+- Kept this as partial `INT-015` coverage; the full production gate still needs broader assistant tool coverage, production LLM behavior, full audit review surfaces, and permission-negative checks.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test B:\maliev\Maliev.Intranet\Maliev.Intranet.Tests\Maliev.Intranet.Tests.csproj --filter "FullyQualifiedName~ChatDrawerTests" --logger "console;verbosity=minimal"` | Passed: 3 tests |
+| `dotnet test B:\maliev\Maliev.Intranet\Maliev.Intranet.Tests\Maliev.Intranet.Tests.csproj --filter "FullyQualifiedName~ChatControllerTests" --logger "console;verbosity=minimal"` | Passed: 3 tests |
+| `dotnet build B:\maliev\Maliev.Intranet\Maliev.Intranet.slnx --configuration Release --no-restore --verbosity minimal` | Passed: 0 warnings, 0 errors |
+| `dotnet test B:\maliev\Maliev.ChatbotService\Maliev.ChatbotService.Tests\Maliev.ChatbotService.Tests.csproj --filter "FullyQualifiedName~MessagesApiTests" --logger "console;verbosity=minimal"` | Passed: 7 tests |
+| `dotnet build B:\maliev\Maliev.ChatbotService\Maliev.ChatbotService.slnx --configuration Release --no-restore --verbosity minimal` | Passed: 0 warnings, 0 errors |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~Intranet_AiAssistant_ExecutesQuotationOperationAndSuggestedAction" --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests" --logger "console;verbosity=minimal"` | Passed: 2 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests" --logger "console;verbosity=minimal"` | Passed: 31 browser E2E tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E" --logger "console;verbosity=minimal"` | Passed: 33 E2E tests |
+| `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --configuration Release --no-restore --verbosity minimal` | Passed: 0 warnings, 0 errors |
+
+### Automated Story Coverage Updated
+
+| Story ids | Automated browser coverage |
+|-----------|----------------------------|
+| `INT-015` | Authenticated Intranet employee signs in through the real BFF/AuthService/IAM path, verifies `/api/v1/aiprocessing/health`, opens the assistant drawer from the employee shell, initiates a real ChatbotService session, sends a prompt for the seeded quotation number, receives a quotation response containing customer context and a `Send Reminder` suggested action, clicks that suggested action, and verifies the reminder follow-up keeps the quotation id and succeeds. Remaining gaps are production Gemini/tool-calling behavior beyond the deterministic Aspire client, complete supported-tool catalog, explicit user confirmation policy for each mutation, assistant audit-log review UI, production callback allow-list configuration, and permission-negative tests against restricted records/actions. |
+
+### Fixes Made During E2E Execution
+
+| Repo | Commit | Fix | Evidence |
+|------|--------|-----|----------|
+| `Maliev.Intranet` | `8762951` | Preserved assistant suggested-action data when rendering action buttons, so clicking `Send Reminder` carries the quotation id instead of sending only the display text. | Focused `ChatDrawerTests` passed 3/3; focused Aspire assistant browser journey passed. |
+| `Maliev.Intranet` | `40f373d` | Surfaced downstream ChatbotService failure details from the BFF in non-production, keeping production responses generic while making Aspire E2E failures actionable. | Focused `ChatControllerTests` passed 3/3; Intranet Release build passed with 0 warnings. |
+| `Maliev.ChatbotService` | `7f0aef8` | Added deterministic `TestingGeminiClient` and non-production loopback callback support so Aspire E2E does not depend on external Gemini secrets and can call the Intranet BFF callback endpoint. | Focused `MessagesApiTests` passed 7/7; ChatbotService Release build passed with 0 warnings. |
+| `Maliev.ChatbotService` | `0bdcb18` | Registered a Redis `IConnectionMultiplexer` in Aspire `Testing` when a Redis connection string is present, fixing ChatbotService session-lock DI failure during browser E2E. | Focused Aspire assistant browser journey passed 1/1. |
+| `Maliev.Aspire` | Current assistant E2E slice | Added `Intranet_AiAssistant_ExecutesQuotationOperationAndSuggestedAction` to the browser production-gate suite. | Focused browser E2E passed 1/1. |
+
 ## 2026-05-16 Delivery Note E2E Run
 
 ### Scope
@@ -270,7 +310,7 @@
 | `INT-012` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, opens `/mfg/materials`, creates a material, edits quote-critical material fields, and verifies persisted BFF/MaterialService detail data. | Need process/color/post-processing assignment UI, supplier linkage, bulk import/export, inventory lot movement, and low-permission action checks. |
 | `INT-013` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, registers equipment through `/mfg/equipment`, verifies generated asset detail, appends an operating note, appends a maintenance log, and verifies persisted BFF/FacilityService state. | Need equipment update/status-transition UI, attachment management, low-permission action checks, job availability effects, maintenance author identity, and scheduled work-center assignment. |
 | `INT-014` | Partial after automated run | Later automated browser E2E signs in as a limited employee to create a pending leave approval, signs in as the manager, verifies the dashboard service widgets and action-item BFF payload, clicks the leave action item, and verifies the approval row in `/hr/leave`. | Need seeded commercial/order/procurement action items, dashboard chart interactions, per-role dashboard customization, and long-running refresh checks under real operational volume. |
-| `INT-015` | Blocked | Requires authenticated chat/AI assistant. | Need Aspire test admin and tool callback fixture. |
+| `INT-015` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, verifies assistant health, opens the Intranet assistant drawer, initiates a ChatbotService session, sends a prompt for the seeded quotation number, verifies a quotation response and `Send Reminder` suggested action, clicks the action, and verifies the reminder follow-up keeps the quotation id. | Need production Gemini/tool-calling behavior beyond deterministic Aspire client, full supported-tool catalog, explicit confirmation policy for mutations, assistant audit-log review UI, production callback allow-list configuration, and permission-negative checks against restricted records/actions. |
 | `INT-016` | Blocked | Requires authenticated project draft autosave. | Need Aspire test admin and ProjectNew access. |
 | `INT-017` | Blocked | Requires authenticated multi-file resumable upload. | Need Aspire test admin and CAD file fixtures. |
 | `INT-018` | Blocked | Requires project viewer/thumbnails/drawings/DFM after upload. | Need authenticated project upload and GeometryService artifacts. |
