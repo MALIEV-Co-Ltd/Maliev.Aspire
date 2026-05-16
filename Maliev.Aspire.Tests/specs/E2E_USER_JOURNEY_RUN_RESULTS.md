@@ -4,6 +4,41 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-05-16 QuoteEngine Signed Customer And Full E2E Gate Run
+
+### Scope
+
+- Added executable browser coverage for the signed customer QuoteEngine prototype path: email sign-in fallback, customer-owned file upload, live SignalR analysis notification, DFM finding visibility, process/material/quantity configuration, estimate, formal quote creation, order creation, and account quote/order history APIs.
+- Implemented the missing QuoteEngine client SignalR subscription to `/hubs/quote-notifications` so upload analysis events are visible in the browser and can be asserted by `QUOTE-015`.
+- Re-ran the complete Aspire `Tier=E2E` gate after the QuoteEngine change. The current executable gate is 36 passing tests: 34 browser journey tests plus 2 story-catalog traceability tests.
+- This remains partial QuoteEngine production coverage because the signed path still uses `QuoteEnginePrototypeStore`; the production gap is replacing it with ProjectService, UploadService, GeometryService, PricingService, QuotationService, PdfService, OrderService, PaymentService/Omise, DeliveryService, and customer ownership checks.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet build B:\maliev\Maliev.QuoteEngine\Maliev.QuoteEngine.slnx --configuration Release --no-restore -p:UseSharedCompilation=false -m:1 /nr:false --verbosity minimal` | Passed: 0 warnings, 0 errors |
+| `dotnet test B:\maliev\Maliev.QuoteEngine\Maliev.QuoteEngine.slnx --configuration Release --no-build -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 8 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_PrototypeSignedCustomer_UploadsEstimatesQuotesOrdersAndRecordsHistory" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 4 QuoteEngine browser E2E tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 36 E2E tests |
+
+### Automated Story Coverage Updated
+
+| Story ids | Automated browser coverage |
+|-----------|----------------------------|
+| `QUOTE-001`, `QUOTE-005`, `QUOTE-017` | Signed customer opens QuoteEngine through `/auth/sign-in?returnUrl=/projects/new`, authenticates with the email/password fallback, lands on `/projects/new`, and sees the signed customer project boundary before uploading a customer-owned file. Remaining gaps are Google SSO completion, anonymous-work linking after sign-in, real ProjectService project ownership, and upload retry/invalid-file fixtures. |
+| `QUOTE-002`, `QUOTE-003`, `QUOTE-018`, `QUOTE-019`, `QUOTE-020` | Signed customer uploads a STEP file, sees prototype analysis complete, sees the DFM warning `Threaded features should be confirmed`, receives the live SignalR analysis message, selects CNC machining and Aluminum 6061, acknowledges DFM review, changes quantity, estimates, and sees a THB total. Remaining gaps are real UploadService storage, GeometryService analysis/viewer/thumbnail output, PricingService explainable breakdown, multi-file editing, lead-time matrix coverage beyond the existing demo assertions, and stale-result prevention after reupload. |
+| `QUOTE-006`, `QUOTE-007`, `QUOTE-009`, `QUOTE-011`, `QUOTE-012`, `QUOTE-022`, `QUOTE-025` | Signed customer requests a formal quote, sees an `MQ-yyyyMMdd-nnnn` quote number, creates an order, sees an `MO-yyyyMMdd-nnnn` order number with `Order received`, and verifies account quote/order APIs contain the new quote and order. Remaining gaps are service-backed QuotationVersion snapshots, real PDF artifact generation/download, quote terms/PO acceptance UI, OrderService/PaymentService/DeliveryService integration, multiple immutable versions on one project, and version comparison. |
+| `QUOTE-015` | QuoteEngine client now opens a SignalR connection, joins the uploaded file group before completion, receives `FileAnalysisCompleted`, and renders `Analysis complete for <file>` in a live status region verified by Playwright. Remaining gaps are order/payment/manufacturing notification events, reconnect recovery, notification preferences, and customer-visible notification history. |
+
+### Fixes Made During E2E Execution
+
+| Repo | Commit | Fix | Evidence |
+|------|--------|-----|----------|
+| `Maliev.QuoteEngine` | `231896b` | Added QuoteEngine client SignalR subscription for upload analysis completion and rendered a live status region for browser-visible notifications. | QuoteEngine Release build passed; QuoteEngine tests passed 8/8; focused signed QuoteEngine browser E2E passed. |
+| `Maliev.Aspire` | Current QuoteEngine E2E slice | Added the signed customer QuoteEngine browser journey and tightened selectors around repeated file/material/quote text. | Focused signed QuoteEngine E2E passed; QuoteEngine browser subset passed 4/4; full `Tier=E2E` passed 36/36. |
+
 ## 2026-05-16 Project Quote Lifecycle E2E Run
 
 ### Scope
@@ -346,32 +381,32 @@
 | `WEB-011` | Passed | Cookie settings opened; `Accept optional` dismissed consent panel. | No immediate fix. |
 | `WEB-012` | Partial | Contact/support information and contact form rendered. | Need contact form submission after email-input automation issue is removed. |
 | `WEB-013` | Passed after fix | `/quote` rendered local `Try demo` and `Start project`; clicking `Try demo` loaded QuoteEngine demo. | Fixed Web quote base URL override in Aspire. |
-| `QUOTE-001` | Partial | QuoteEngine real project route opened and showed signed-upload gate. | Need authenticated customer session to create/resume real project. |
-| `QUOTE-002` | Partial | Demo loaded MALIEV-owned STEP sample, viewer slot, DFM, and metadata. | Need signed customer upload path and GeometryService analysis for customer file. |
-| `QUOTE-003` | Passed in demo | Changed process to FDM and clicked `Estimate`; total recalculated to `2,596.00 THB`. | Need repeat against service-backed authenticated project. |
-| `QUOTE-004` | Partial | Demo configuration update refreshed estimate after process change. | Need upload/reupload and stale-analysis checks in real project mode. |
-| `QUOTE-005` | Passed | Signed-upload gate showed Google primary path and email/password fallback. | Need complete authenticated login and anonymous-work linking. |
-| `QUOTE-006` | Partial | Demo correctly disabled formal PDF generation. | Need real ProjectService to QuotationService to PdfService quote-version PDF path. |
-| `QUOTE-007` | Blocked | Demo mode blocks order/payment/delivery creation. | Need authenticated accepted quotation version and Omise sandbox checkout path. |
-| `QUOTE-008` | Partial | `NDAs` and `Documents` nav exists. | Need authenticated NDA/supporting-document upload and employee visibility checks. |
-| `QUOTE-009` | Partial | `Orders` nav exists. | Need authenticated history data and order/manufacturing status records. |
-| `QUOTE-010` | Partial | `Profile` nav exists. | Need authenticated customer profile/preferences flow. |
-| `QUOTE-011` | Partial | Quote/history shell navigation exists. | Need real project and quotation-version history data. |
-| `QUOTE-012` | Partial | `Orders` shell navigation exists. | Need order list/detail records. |
-| `QUOTE-013` | Partial | `NDAs` shell navigation exists. | Need NDA upload/list/delete flow. |
-| `QUOTE-014` | Partial | `Documents` shell navigation exists. | Need supporting document upload/list/delete flow. |
-| `QUOTE-015` | Blocked | SignalR notification journey was not executable anonymously. | Need authenticated customer session and event trigger. |
-| `QUOTE-016` | Blocked | Multi-part workspace requires customer file upload. | Need signed customer project with multiple files. |
-| `QUOTE-017` | Blocked | Upload failure/retry requires real upload controls and files. | Need signed upload path plus invalid/large file fixtures. |
-| `QUOTE-018` | Partial | Demo DFM warnings/info rendered and `DFM reviewed` control exists. | Need real DFM warning fixture and acknowledgement enforcement. |
-| `QUOTE-019` | Partial | Lead-time choices rendered with economy/standard/express modifiers. | Need verify deterministic total changes for each lead-time option. |
-| `QUOTE-020` | Blocked | Real quote draft editing requires authenticated project. | Need customer login and service-backed draft state. |
-| `QUOTE-021` | Blocked | Employee review request requires Intranet/authenticated workflow. | Need employee test login and review request event. |
-| `QUOTE-022` | Blocked | Formal quote acceptance requires generated quotation version. | Need quote-version generation and terms/PO UI. |
-| `QUOTE-023` | Blocked | Artifact downloads require generated quote/order/manufacturing records. | Need service-backed artifacts and authorization checks. |
+| `QUOTE-001` | Partial after automated run | Signed customer opens QuoteEngine with email/password fallback, lands on `/projects/new`, uploads a customer file, and sees quote workspace state through the prototype store. | Need real ProjectService create/resume, persisted project ownership, Google SSO completion, and cross-device resume. |
+| `QUOTE-002` | Partial after automated run | Anonymous demo loads the sample STEP; signed prototype run uploads a STEP file, completes resumable upload, shows analyzed state, DFM finding, and live analysis notification. | Need real UploadService storage, GeometryService analysis, GLB viewer, thumbnail, and DFM status for customer files. |
+| `QUOTE-003` | Partial after automated run | Demo verifies deterministic price changes for process/lead time/quantity; signed prototype run selects CNC machining and Aluminum 6061, changes quantity, estimates, and sees THB total. | Need real PricingService breakdown, pricing determinism assertions by material/process/finish/tolerance, and production quote explanation. |
+| `QUOTE-004` | Partial | Demo configuration update refreshes estimate after process/lead-time/quantity changes. | Need signed reupload/change/reanalysis path and stale-result prevention in real project mode. |
+| `QUOTE-005` | Partial after automated run | Signed-upload gate shows Google primary and email fallback; signed prototype run completes email/password sign-in and continues to the upload workspace. | Need Google SSO test mode and anonymous-work-to-customer-account linking for real projects. |
+| `QUOTE-006` | Partial after automated run | Signed prototype run generates an `MQ-yyyyMMdd-nnnn` formal quote and verifies it appears in account quote history. | Need ProjectService -> QuotationService immutable version creation and PdfService-generated quote PDF artifact. |
+| `QUOTE-007` | Partial after automated run | Signed prototype run creates an `MO-yyyyMMdd-nnnn` order from the generated quote and verifies `Order received`. | Need OrderService record, PaymentService/Omise checkout, DeliveryService delivery intent, and version-specific acceptance. |
+| `QUOTE-008` | Partial | `NDAs` and `Documents` portal routes render. | Need authenticated NDA/supporting-document upload, separation from CAD files, employee visibility, and authorization checks. |
+| `QUOTE-009` | Partial after automated run | Signed prototype run verifies account quote and order APIs contain the created quote/order; portal order route also renders. | Need real quote history, order status, payment status, and manufacturing progress records. |
+| `QUOTE-010` | Partial | `Profile` route renders against prototype-backed account data. | Need authenticated customer profile/preferences update flow and persistence. |
+| `QUOTE-011` | Partial after automated run | Signed prototype run verifies account quote API contains the generated quote number. | Need real project list, quotation-version list/detail, PDF links, and version history UI. |
+| `QUOTE-012` | Partial after automated run | Signed prototype run verifies account order API contains the generated order number. | Need real OrderService list/detail, payment/delivery/manufacturing status, and customer status visibility. |
+| `QUOTE-013` | Partial | `NDAs` route renders. | Need NDA upload/list/delete, employee visibility, retention, and ownership denial checks. |
+| `QUOTE-014` | Partial | `Documents` route renders. | Need supporting document upload/list/delete, document-type separation, employee visibility, and ownership denial checks. |
+| `QUOTE-015` | Partial after automated run | QuoteEngine client now joins the upload SignalR group, receives `FileAnalysisCompleted`, and renders `Analysis complete for <file>` in a live status region. | Need order/payment/manufacturing notifications, reconnect recovery, preferences, and notification history. |
+| `QUOTE-016` | Blocked | Multi-part workspace still requires customer-owned multi-file workflow beyond the current single-file prototype run. | Need signed customer project with multiple files and per-part configuration assertions. |
+| `QUOTE-017` | Partial after automated run | Signed prototype run proves customer-owned upload is blocked before sign-in and succeeds after sign-in. | Need invalid file, large file, retry/resume, cancel, and failure-recovery fixtures. |
+| `QUOTE-018` | Partial after automated run | Demo and signed prototype run show DFM warnings/info and `DFM reviewed`; signed run acknowledges DFM before quote. | Need real DFM warning fixture, hard-stop behavior before acknowledgement, and reanalysis after customer changes. |
+| `QUOTE-019` | Partial after automated run | Demo verifies economy/standard/express price modifiers and quantity changes; signed run verifies configured estimate before quote. | Need full lead-time matrix assertions on authenticated PricingService-backed quotes. |
+| `QUOTE-020` | Partial after automated run | Signed prototype run edits process/material/quantity before quote generation. | Need service-backed draft autosave, restore, multi-part editing, and save-conflict handling. |
+| `QUOTE-021` | Blocked | Employee review request requires an authenticated customer-to-employee review workflow. | Need QuoteEngine request-review UI/event and Intranet employee review queue. |
+| `QUOTE-022` | Partial after automated run | Signed prototype run generates a formal quote and creates an order from that quote. | Need explicit quote terms/PO acceptance UI, version-specific accepted quotation, and immutable accepted snapshot. |
+| `QUOTE-023` | Blocked | Artifact downloads still require generated service-backed quote/order/manufacturing records. | Need authenticated PDF/artifact download endpoints and ownership checks. |
 | `QUOTE-024` | Passed after fix | Anonymous demo loaded sample file, DFM, pricing, and disabled formal artifacts. | Fixed QuoteEngine static web asset hosting. |
-| `QUOTE-025` | Blocked | Multiple quotation versions require signed real project. | Need service-backed project quotation version workflow. |
-| `QUOTE-026` | Blocked | Version comparison requires multiple generated quotation versions. | Need version-history UI and seeded/created versions. |
+| `QUOTE-025` | Partial after automated run | Signed prototype run creates one quote/order and verifies history APIs. | Need one real project with multiple immutable QuotationVersion records. |
+| `QUOTE-026` | Blocked | Version comparison requires multiple generated quotation versions. | Need version-history UI and seeded/created service-backed versions. |
 | `INT-001` | Partial after automated run | Login page rendered email/password and Google; protected routes redirected. Later automated browser runs sign in as both the Aspire automation employee and a limited employee through the real BFF/AuthService/IAM path. | Need Google SSO/OAuth test mode and UI navigation assertions for role-shaped menus, not only API permission checks. |
 | `INT-002` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, opens `/sales/customers/new`, verifies Thailand country reference data, creates a customer with company, company billing address, customer billing/shipping addresses, and internal note, then verifies persisted CustomerService detail JSON. | Need registry/company lookup, address autocomplete, document upload, and NDA/customer-document separation coverage. |
 | `INT-003` | Partial after automated run | Later automated browser E2E verifies the created customer detail page renders the profile, company, addresses, and notes data; separate global-search automation verifies search propagation to customer navigation; later customer-detail automation verifies profile, lifecycle status, payment terms, shipping address, audit trail, and list/search propagation. | Need customer/NDA document upload and related workflow propagation beyond customer list/search. |
@@ -400,11 +435,11 @@
 | `INT-026` | Blocked | Requires duplicate-part action in project draft. | Need authenticated ProjectNew draft. |
 | `INT-027` | Partial after automated run | Later automated browser E2E exposed and fixed multiple real upload/PDF boundary failures before the project quote lifecycle could pass. | Need deterministic fault-injection controls for upload, geometry, pricing, and SignalR reconnect without relying on incidental defects. |
 | `INT-028` | Partial after automated run | Later automated browser E2E creates two versions on one quotation, verifies version 1/version 2/current marker in the project quote tab, and verifies version PDF artifact linkage. | Need side-by-side comparison UI, non-current version permissions, and PDF content validation per version. |
-| `COM-001` | Blocked | Requires authenticated Intranet catalog product editor. | Need Aspire test admin. |
-| `COM-002` | Blocked | Requires publishing product from Intranet and Web visibility check. | Need Aspire test admin and product seed/editor. |
-| `COM-003` | Partial | Web storefront rendered empty category/search state. | Seed/publish product so browse/detail/cart/checkout can pass. |
-| `COM-004` | Blocked | Requires product archive/unpublish flow. | Need authenticated catalog admin and published product. |
-| `OPS-001` | Blocked | Requires authenticated global search. | Need Aspire test admin and searchable seed data. |
+| `COM-001` | Partial after automated run | Authenticated Intranet employee creates a draft Commerce product and verifies employee-side draft visibility. | Need full catalog media/category/editor validation, bulk edits, low-permission action checks, and production media storage checks. |
+| `COM-002` | Partial after automated run | Authenticated Intranet employee publishes the product; Web storefront shows the published product while hiding the draft before publish. | Need scheduled publishing, channel/region rules, SEO metadata, and cache invalidation checks. |
+| `COM-003` | Partial after automated run | Web customer browses shop, opens product detail, adds item to cart, edits quantity, signs in from checkout, and creates a checkout draft. | Need Omise payment completion, tax/shipping rules, inventory reservation, and order confirmation. |
+| `COM-004` | Partial after automated run | Authenticated employee archives the product; Web product detail returns customer-facing not-found state. | Need unpublish-vs-archive distinction, search index removal, and cache invalidation checks. |
+| `OPS-001` | Partial after automated run | Authenticated employee creates a customer, waits for SearchService indexing, searches through the BFF and top-bar UI, click-away closes results, and clicking the result navigates to the customer list. | Need permission-scoped search across projects, orders, catalog, purchase orders, invoices, and restricted-record denial checks. |
 | `OPS-002` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, opens `/admin/system-health`, verifies AuthService, IAMService, and GeometryService are healthy through BFF `/api/v1/system-health`, verifies `/liveness` and `/readiness` paths, verifies history contains IAMService and GeometryService, and verifies the Refresh action keeps the probe grid available. | Need endurance-style validation that the page continues auto-refreshing correctly during a long-running session. |
 | `OPS-003` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, creates a customer, verifies NotificationService preference/channel provisioning, sends a customer email notification from Intranet customer detail, verifies delivered delivery-log state and provider/simulated provider id, opts out of a notification category, sends that category again, and verifies the skipped/opted-out log. | Need customer/employee notification center UI, read/unread state, live push surface, broader automatic event mappings, external provider sandbox delivery, and low-permission negative checks. |
 | `FIN-001` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, creates a corporate customer, creates a draft invoice with PO evidence, verifies persisted billing, line, tax, total, and attachment data, finalizes the invoice, and reloads invoice detail. | Need billing-note creation, credit-term selection beyond default payment terms, invoice PDF artifact checks, and accounting export effects. |

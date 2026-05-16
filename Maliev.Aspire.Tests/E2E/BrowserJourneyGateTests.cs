@@ -618,6 +618,97 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies the prototype-backed signed customer path can upload, estimate, create a quote, create an order,
+    /// and expose the resulting history through account APIs. This is intentionally partial until QuoteEngine is
+    /// service-backed by ProjectService, UploadService, GeometryService, PricingService, QuotationService, and OrderService.
+    /// Covers executable prototype portions of QUOTE-001, QUOTE-002, QUOTE-003, QUOTE-005, QUOTE-006, QUOTE-007,
+    /// QUOTE-009, QUOTE-011, QUOTE-012, QUOTE-015, QUOTE-017, QUOTE-020, QUOTE-022, and QUOTE-025.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "QUOTE-001,QUOTE-002,QUOTE-003,QUOTE-005,QUOTE-006,QUOTE-007,QUOTE-009,QUOTE-011,QUOTE-012,QUOTE-015,QUOTE-017,QUOTE-020,QUOTE-022,QUOTE-025")]
+    public async Task QuoteEngine_PrototypeSignedCustomer_UploadsEstimatesQuotesOrdersAndRecordsHistory()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var fileName = $"quote-engine-e2e-{unique}.step";
+
+        await page.GotoAsync(new Uri(quoteBase, "/auth/sign-in?returnUrl=/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.GetByLabel("Email").FillAsync($"quote.customer.{unique}@example.com");
+        await page.GetByLabel("Password").FillAsync("PrototypeOnly123!");
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Sign in with email" }).ClickAsync();
+        await page.WaitForURLAsync(url => url.Contains("/projects/new", StringComparison.OrdinalIgnoreCase), new() { Timeout = 30_000 });
+        await Expect(page.GetByText("Signed-in customer project boundary", new() { Exact = false })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        await page.Locator("#quote-cad-files").SetInputFilesAsync(new FilePayload
+        {
+            Name = fileName,
+            MimeType = "application/step",
+            Buffer = System.Text.Encoding.UTF8.GetBytes(
+                """
+                ISO-10303-21;
+                HEADER;
+                FILE_DESCRIPTION(('MALIEV QuoteEngine prototype E2E'),'2;1');
+                FILE_NAME('quote-engine-e2e.step','2026-05-16T00:00:00',('MALIEV'),('MALIEV'),'Aspire E2E','MALIEV','');
+                ENDSEC;
+                DATA;
+                ENDSEC;
+                END-ISO-10303-21;
+                """)
+        });
+
+        await Expect(page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex(Regex.Escape(fileName), RegexOptions.IgnoreCase) }).First).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.GetByText("ANALYZED", new() { Exact = false })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.GetByText("Threaded features should be confirmed", new() { Exact = false })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator("[role='status']")).ToContainTextAsync($"Analysis complete for {fileName}", new() { Timeout = 30_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "CNC Machining", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Aluminum 6061", RegexOptions.IgnoreCase) }).First).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await page.GetByLabel("DFM reviewed").CheckAsync();
+        await page.GetByLabel("Quantity").FillAsync("2");
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Estimate" }).ClickAsync();
+        await Expect(page.Locator(".qe-qsb-total")).ToContainTextAsync(new Regex(@"[0-9,.]+\s+THB", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+        var quoteButton = page.GetByRole(AriaRole.Button, new() { NameString = "Quote", Exact = true });
+        await Expect(quoteButton).ToBeEnabledAsync(new() { Timeout = 30_000 });
+
+        await quoteButton.ClickAsync();
+        await Expect(page.GetByText(new Regex(@"MQ-\d{8}-\d{4}"))).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "Create order" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Create order" }).ClickAsync();
+        await Expect(page.GetByText(new Regex(@"MO-\d{8}-\d{4}"))).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.GetByText("Order received", new() { Exact = false })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var accountState = await page.EvaluateAsync<string>(
+            @"async () => {
+                const [profile, quotes, orders] = await Promise.all([
+                    fetch('/quote/v1/account/profile', { credentials: 'include' }),
+                    fetch('/quote/v1/account/quotes', { credentials: 'include' }),
+                    fetch('/quote/v1/account/orders', { credentials: 'include' })
+                ]);
+                return JSON.stringify({
+                    profileStatus: profile.status,
+                    profile: await profile.json(),
+                    quotesStatus: quotes.status,
+                    quotes: await quotes.json(),
+                    ordersStatus: orders.status,
+                    orders: await orders.json()
+                });
+            }");
+        using var accountDocument = JsonDocument.Parse(accountState);
+        var root = accountDocument.RootElement;
+        Assert.Equal(200, GetJsonInt(root, "profileStatus"));
+        Assert.Equal(200, GetJsonInt(root, "quotesStatus"));
+        Assert.Equal(200, GetJsonInt(root, "ordersStatus"));
+        Assert.True(TryGetJsonProperty(root, out var quotes, "quotes"));
+        Assert.Contains(quotes.EnumerateArray(), quote => GetJsonString(quote, "quotationNumber", "quoteNumber", "QuoteNumber").StartsWith("MQ-", StringComparison.Ordinal));
+        Assert.True(TryGetJsonProperty(root, out var orders, "orders"));
+        Assert.Contains(orders.EnumerateArray(), order => GetJsonString(order, "orderNumber", "OrderNumber").StartsWith("MO-", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// Verifies QuoteEngine-local portal routes render against the prototype-backed store.
     /// Covers the currently executable portions of QUOTE-008, QUOTE-009, QUOTE-010, QUOTE-011, QUOTE-012, QUOTE-013, and QUOTE-014.
     /// </summary>
