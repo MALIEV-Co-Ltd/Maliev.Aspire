@@ -2142,6 +2142,124 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies customer detail maintenance persists profile, payment-term, status, and address changes.
+    /// Covers the executable customer-maintenance portion of INT-003.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-003")]
+    public async Task Intranet_CustomerDetail_EditsProfilePaymentTermsAndAddress()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var editedFullName = $"E2E Edited Customer {unique}";
+        var editedPhone = $"+6681{Random.Shared.Next(1000000, 9999999)}";
+        var editedRecipient = $"Receiving Team {unique}";
+        var editedStreet = $"55 Revised Warehouse Road {unique}";
+        const string editedDistrict = "Bang Na Nuea";
+        const string editedCity = "Bang Na";
+        const string editedProvince = "Bangkok";
+        const string editedPostalCode = "10260";
+
+        await SignInToIntranetAsync(page, intranetBase, "/customers");
+        var customer = await CreateIntranetCorporateCustomerAsync(page);
+
+        await page.GotoAsync(new Uri(intranetBase, $"/customers/{customer.CustomerId}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(customer.FullName, new() { Timeout = 30_000 });
+
+        await page.GetByLabel("Full name").FillAsync(editedFullName);
+        await page.GetByLabel("Phone").FillAsync(editedPhone);
+        await page.GetByLabel("Status").SelectOptionAsync("Lead");
+        await page.Locator(".customer-payment-term-trigger").ClickAsync();
+        await page.Locator(".customer-payment-term-option").Filter(new() { HasText = "Due on receipt" }).First.ClickAsync();
+
+        var updateResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/customers/{customer.CustomerId}", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "PATCH", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Save" }).ClickAsync();
+        var updateResponse = await updateResponseTask;
+        var updateBody = await ReadResponseTextOrEmptyAsync(updateResponse);
+        Assert.True(updateResponse.Ok, $"Customer detail profile update failed with HTTP {updateResponse.Status}: {updateBody}");
+        await Expect(page.GetByLabel("Full name")).ToHaveValueAsync(editedFullName, new() { Timeout = 15_000 });
+
+        var updatedDetail = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/customers/${id}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            customer.CustomerId);
+
+        Assert.StartsWith("200 ", updatedDetail, StringComparison.Ordinal);
+        using (var document = JsonDocument.Parse(updatedDetail[4..]))
+        {
+            var root = document.RootElement;
+            Assert.Equal(editedFullName, GetJsonString(root, "name", "Name"));
+            Assert.Equal(editedPhone, GetJsonString(root, "mobile", "Mobile"));
+            Assert.Equal("Lead", GetJsonString(root, "status", "Status"));
+            Assert.Equal("Due on receipt", GetJsonString(root, "paymentTerms", "PaymentTerms"));
+        }
+
+        await page.Locator(".customer-record-tabs button[data-tab='addresses']").ClickAsync();
+        var shippingAddressCard = page.Locator(".customer-address-card").Filter(new() { HasText = "88 Finance Warehouse Lane" }).First;
+        await Expect(shippingAddressCard).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await shippingAddressCard.GetByLabel("Edit address").ClickAsync();
+
+        var addressModal = page.Locator(".customer-modal-address").First;
+        await Expect(addressModal).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await addressModal.Locator(".customer-field").Filter(new() { HasText = "Recipient name" }).Locator("input").FillAsync(editedRecipient);
+        await addressModal.Locator(".customer-field").Filter(new() { HasText = "Street" }).First.Locator("input").FillAsync(editedStreet);
+        await addressModal.Locator(".customer-field").Filter(new() { HasText = "District / sub-district" }).Locator("input").FillAsync(editedDistrict);
+        await addressModal.Locator(".customer-field").Filter(new() { HasText = "City" }).Locator("input").FillAsync(editedCity);
+        await addressModal.Locator(".customer-field").Filter(new() { HasText = "State / province" }).Locator("input").FillAsync(editedProvince);
+        await addressModal.Locator(".customer-field").Filter(new() { HasText = "Postal" }).Locator("input").FillAsync(editedPostalCode);
+
+        var addressResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/customers/addresses/", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "PATCH", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await addressModal.GetByRole(AriaRole.Button, new() { NameString = "Save" }).ClickAsync();
+        var addressResponse = await addressResponseTask;
+        var addressBody = await ReadResponseTextOrEmptyAsync(addressResponse);
+        Assert.True(addressResponse.Ok, $"Customer address update failed with HTTP {addressResponse.Status}: {addressBody}");
+        await Expect(page.Locator(".customer-tab-panel[data-section='addresses']")).ToContainTextAsync(editedStreet, new() { Timeout = 30_000 });
+
+        var addressDetail = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/customers/${id}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            customer.CustomerId);
+
+        Assert.StartsWith("200 ", addressDetail, StringComparison.Ordinal);
+        using (var document = JsonDocument.Parse(addressDetail[4..]))
+        {
+            var root = document.RootElement;
+            Assert.True(TryGetJsonProperty(root, out var addresses, "addresses", "Addresses"));
+            Assert.Contains(addresses.EnumerateArray(), address =>
+                string.Equals("Shipping", GetJsonString(address, "type", "Type"), StringComparison.OrdinalIgnoreCase)
+                && string.Equals(editedRecipient, GetJsonString(address, "recipientName", "RecipientName"), StringComparison.Ordinal)
+                && string.Equals(editedStreet, GetJsonString(address, "addressLine1", "AddressLine1"), StringComparison.Ordinal)
+                && string.Equals(editedDistrict, GetJsonString(address, "district", "District"), StringComparison.Ordinal)
+                && string.Equals(editedCity, GetJsonString(address, "city", "City"), StringComparison.Ordinal)
+                && string.Equals(editedProvince, GetJsonString(address, "stateProvince", "StateProvince"), StringComparison.Ordinal)
+                && string.Equals(editedPostalCode, GetJsonString(address, "postalCode", "PostalCode"), StringComparison.Ordinal));
+        }
+
+        await page.Locator(".customer-record-tabs button[data-tab='activity']").ClickAsync();
+        await Expect(page.Locator(".customer-activity-panel[data-section='activity']")).ToContainTextAsync("Updated customer profile", new() { Timeout = 30_000 });
+        await Expect(page.Locator(".customer-activity-panel[data-section='activity']")).ToContainTextAsync("Changed status from 'Active' to 'Lead'", new() { Timeout = 30_000 });
+
+        await page.GotoAsync(new Uri(intranetBase, $"/customers?search={Uri.EscapeDataString(editedFullName)}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(editedFullName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Lead", new() { Timeout = 15_000 });
+    }
+
+    /// <summary>
     /// Verifies global search returns newly created customer records and navigates to the customer workflow.
     /// Covers the indexed, permission-scoped search portion of OPS-001.
     /// </summary>
