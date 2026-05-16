@@ -1230,6 +1230,143 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee can register equipment, inspect the generated asset record, append an operating note,
+    /// and append a maintenance log through the FacilityService boundary.
+    /// Covers the executable equipment/facility master-data portion of INT-013.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-013")]
+    public async Task Intranet_EquipmentMasterData_RegistersNotesAndMaintenance()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var equipmentName = $"E2E CNC Mill {unique}";
+        var serial = $"E2E-SN-{unique % 1_000_000:D6}";
+        var noteText = $"E2E spindle alignment note {unique}";
+        var maintenanceDescription = $"E2E calibration maintenance record {unique}";
+
+        await SignInToIntranetAsync(page, intranetBase, "/mfg/equipment");
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "Equipment" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Add Equipment" }).ClickAsync();
+        var createPanel = page.Locator(".mlv-panel-card").Filter(new() { HasText = "Register equipment" }).First;
+        await Expect(createPanel).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await createPanel.GetByLabel("Name").FillAsync(equipmentName);
+        await createPanel
+            .Locator("xpath=.//label[contains(concat(' ', normalize-space(@class), ' '), ' mlv-form-field ')][span[normalize-space(.) = 'Category']]//select")
+            .SelectOptionAsync("CncMachine");
+        await createPanel.GetByLabel("Brand").FillAsync("Haas");
+        await createPanel.GetByLabel("Model").FillAsync("VF-2SS");
+        await createPanel.GetByLabel("Serial").FillAsync(serial);
+        await createPanel.GetByLabel("Sub-category").FillAsync("3-axis machining center");
+        await createPanel.GetByLabel("Price THB").FillAsync("750000");
+
+        var createResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/equipments", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await createPanel.GetByRole(AriaRole.Button, new() { NameString = "Register" }).ClickAsync();
+        var createResponse = await createResponseTask;
+        var createBody = await ReadResponseTextOrEmptyAsync(createResponse);
+        Assert.True(createResponse.Ok, $"Equipment registration failed with HTTP {createResponse.Status}: {createBody}");
+
+        using var createDocument = JsonDocument.Parse(createBody);
+        var created = createDocument.RootElement;
+        var equipmentId = created.GetProperty("id").GetGuid();
+        var assetCode = GetJsonString(created, "assetCode", "AssetCode");
+        Assert.Equal(equipmentName, GetJsonString(created, "name", "Name"));
+        Assert.Equal("CncMachine", GetJsonString(created, "category", "Category"));
+        Assert.Equal("Active", GetJsonString(created, "status", "Status"));
+        Assert.False(string.IsNullOrWhiteSpace(assetCode));
+
+        await page.GotoAsync(new Uri(intranetBase, $"/mfg/equipment/{equipmentId}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(equipmentName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(assetCode, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Haas", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("VF-2SS", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(serial, new() { Timeout = 30_000 });
+
+        var noteResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/equipments/{equipmentId}/notes", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await page.Locator("textarea[placeholder^='Maintenance observation']").FillAsync(noteText);
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Add Note" }).ClickAsync();
+        var noteResponse = await noteResponseTask;
+        var noteBody = await ReadResponseTextOrEmptyAsync(noteResponse);
+        Assert.True(noteResponse.Ok, $"Equipment note create failed with HTTP {noteResponse.Status}: {noteBody}");
+        using (var noteDocument = JsonDocument.Parse(noteBody))
+        {
+            var note = noteDocument.RootElement;
+            Assert.Equal(equipmentId, note.GetProperty("equipmentId").GetGuid());
+            Assert.Equal(noteText, GetJsonString(note, "content", "Content"));
+        }
+
+        await Expect(page.Locator("body")).ToContainTextAsync(noteText, new() { Timeout = 30_000 });
+
+        await page.GetByLabel("Type").FillAsync("Calibration");
+        await page.GetByLabel("Vendor").FillAsync("E2E Calibration Lab");
+        await page.GetByLabel("Cost THB").FillAsync("3500");
+        await page.GetByLabel("Description").FillAsync(maintenanceDescription);
+
+        var maintenanceResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/equipments/{equipmentId}/maintenance", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Add Maintenance" }).ClickAsync();
+        var maintenanceResponse = await maintenanceResponseTask;
+        var maintenanceBody = await ReadResponseTextOrEmptyAsync(maintenanceResponse);
+        Assert.True(maintenanceResponse.Ok, $"Equipment maintenance create failed with HTTP {maintenanceResponse.Status}: {maintenanceBody}");
+        using (var maintenanceDocument = JsonDocument.Parse(maintenanceBody))
+        {
+            var maintenance = maintenanceDocument.RootElement;
+            Assert.Equal(equipmentId, maintenance.GetProperty("equipmentId").GetGuid());
+            Assert.Equal("Calibration", GetJsonString(maintenance, "type", "Type"));
+            Assert.Equal(maintenanceDescription, GetJsonString(maintenance, "description", "Description"));
+            Assert.Equal("E2E Calibration Lab", GetJsonString(maintenance, "vendorName", "VendorName"));
+            Assert.Equal(3500, (int)GetJsonDouble(maintenance, "costTHB", "costThb", "CostTHB"));
+        }
+
+        await Expect(page.Locator("body")).ToContainTextAsync("Calibration", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(maintenanceDescription, new() { Timeout = 30_000 });
+
+        var persistedResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const [detail, notes, maintenance] = await Promise.all([
+                    fetch(`/api/v1/equipments/${id}`, { credentials: 'include' }),
+                    fetch(`/api/v1/equipments/${id}/notes`, { credentials: 'include' }),
+                    fetch(`/api/v1/equipments/${id}/maintenance`, { credentials: 'include' })
+                ]);
+                return JSON.stringify({
+                    detailStatus: detail.status,
+                    detail: await detail.json(),
+                    notesStatus: notes.status,
+                    notes: await notes.json(),
+                    maintenanceStatus: maintenance.status,
+                    maintenance: await maintenance.json()
+                });
+            }",
+            equipmentId);
+
+        using var persistedDocument = JsonDocument.Parse(persistedResult);
+        var persisted = persistedDocument.RootElement;
+        Assert.Equal(200, persisted.GetProperty("detailStatus").GetInt32());
+        Assert.Equal(200, persisted.GetProperty("notesStatus").GetInt32());
+        Assert.Equal(200, persisted.GetProperty("maintenanceStatus").GetInt32());
+        Assert.Equal(equipmentName, GetJsonString(persisted.GetProperty("detail"), "name", "Name"));
+        Assert.Contains(persisted.GetProperty("notes").EnumerateArray(), note =>
+            string.Equals(noteText, GetJsonString(note, "content", "Content"), StringComparison.Ordinal));
+        Assert.Contains(persisted.GetProperty("maintenance").EnumerateArray(), maintenance =>
+            string.Equals(maintenanceDescription, GetJsonString(maintenance, "description", "Description"), StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// Verifies an employee can create a customer-backed invoice, attach PO evidence, finalize it, and see the resulting invoice state.
     /// Covers the executable invoice creation, attachment, credit-term, and status portions of FIN-001 and FIN-002.
     /// </summary>
