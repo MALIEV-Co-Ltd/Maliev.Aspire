@@ -81,7 +81,7 @@ public static class MalievResourceExtensions
 
         if (targetService.ApplicationBuilder.Environment.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
         {
-            targetService.WaitFor(seeder);
+            targetService.WaitForCompletion(seeder);
         }
         else
         {

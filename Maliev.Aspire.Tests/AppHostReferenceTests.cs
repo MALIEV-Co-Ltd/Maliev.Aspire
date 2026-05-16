@@ -67,7 +67,7 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".SeedDatabase<CountryDatabaseSeeder>(databases.Country", appHostSource, StringComparison.Ordinal);
         Assert.Contains(".SeedDatabase<EmployeeDatabaseSeeder>(databases.Employee", appHostSource, StringComparison.Ordinal);
         Assert.Contains(".SeedDatabase<IAMDatabaseSeeder>(databases.IAM", appHostSource, StringComparison.Ordinal);
-        Assert.Contains("targetService.WaitFor(seeder);", resourceExtensionSource, StringComparison.Ordinal);
+        Assert.Contains("targetService.WaitForCompletion(seeder);", resourceExtensionSource, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -209,6 +209,27 @@ public sealed class AppHostReferenceTests
 
         Assert.Contains(".WithEnvironment(\"QuoteEngine__BaseUrl\", quoteEngineBff.GetEndpoint(\"https\"))", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/web/aspire-liveness\")", webBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Aspire browser E2E must use deterministic UploadService storage instead of external GCS credentials.
+    /// </summary>
+    [Fact]
+    public void AppHost_UploadService_UsesMockStorageForIntegratedE2E()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var uploadBlockStart = appHostSource.IndexOf(
+            "var uploadService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+        var customerBlockStart = appHostSource.IndexOf(
+            "var customerService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+
+        Assert.True(uploadBlockStart >= 0, "UploadService resource declaration was not found.");
+        Assert.True(customerBlockStart > uploadBlockStart, "CustomerService resource declaration was not found after UploadService.");
+
+        var uploadBlock = appHostSource[uploadBlockStart..customerBlockStart];
+        Assert.Contains(".WithEnvironment(\"GoogleCloud__Enabled\", \"false\")", uploadBlock, StringComparison.Ordinal);
     }
 
     /// <summary>

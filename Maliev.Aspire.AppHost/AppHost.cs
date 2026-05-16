@@ -346,6 +346,7 @@ static partial class Program
             grafana,
             otelCollector,
             environmentName)
+            .WithEnvironment("GoogleCloud__Enabled", "false")
             .WithEnvironment("GCP__ProjectId", config.GcpProjectId)
             .WithEnvironment("GCP__ServiceAccountKeyBase64", config.GcpServiceAccountKeyBase64);
 

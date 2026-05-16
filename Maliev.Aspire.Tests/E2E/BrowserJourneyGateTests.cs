@@ -2405,6 +2405,153 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee project can move from uploaded/configured part through DFM acknowledgement,
+    /// immutable quotation versions, quote PDF attachment, acceptance, and reorder duplication.
+    /// Covers executable project quote lifecycle portions of INT-005, INT-006, INT-007, INT-016, INT-017,
+    /// INT-018, INT-019, INT-021, INT-022, INT-023, INT-024, INT-025, INT-027, and INT-028.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-005,INT-006,INT-007,INT-016,INT-017,INT-018,INT-019,INT-021,INT-022,INT-023,INT-024,INT-025,INT-027,INT-028")]
+    public async Task Intranet_ProjectQuoteLifecycle_GeneratesVersionsPdfAcceptanceAndDuplicate()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var projectTitle = $"E2E revision workspace {unique}";
+        var secondChangeSummary = $"Updated quantity and commercial terms {unique}";
+
+        await SignInToIntranetAsync(page, intranetBase, "/");
+        var customer = await CreateIntranetCorporateCustomerAsync(page);
+        var project = await CreateIntranetProjectAsync(page, customer.CustomerId, customer.FullName, projectTitle);
+        var modelUpload = await UploadProjectFileAsync(page, project.ProjectId, customer.CustomerId, $"e2e-bracket-{unique}.step", "application/step");
+        var part = await AddConfiguredProjectPartAsync(page, project.ProjectId, customer.CustomerId, modelUpload, quantity: 2, dfmAcknowledged: false);
+
+        var drawing = await UploadProjectAttachmentAsync(page, project.ProjectId, customer.CustomerId, part.PartId, "Drawing", $"drawing-{unique}.pdf", "application/pdf");
+        var supportDocument = await UploadProjectAttachmentAsync(page, project.ProjectId, customer.CustomerId, part.PartId, "Supplementary", $"setup-photo-{unique}.jpg", "image/jpeg");
+        part = await UpdateProjectPartConfigurationAsync(
+            page,
+            project.ProjectId,
+            part.PartId,
+            modelUpload,
+            quantity: 2,
+            dfmAcknowledged: false,
+            drawing,
+            supportDocument);
+
+        await page.GotoAsync(new Uri(intranetBase, $"/sales/projects/{project.ProjectId}?tab=parts").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(projectTitle, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(modelUpload.FileName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("DFM warnings", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(drawing.FileName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(supportDocument.FileName, new() { Timeout = 30_000 });
+
+        var acknowledgeResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/projects/{project.ProjectId}/parts/{part.PartId}", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "PUT", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+        await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Acknowledge", RegexOptions.IgnoreCase) }).ClickAsync();
+        var acknowledgeResponse = await acknowledgeResponseTask;
+        var acknowledgeBody = await ReadResponseTextOrEmptyAsync(acknowledgeResponse);
+        Assert.True(acknowledgeResponse.Ok, $"DFM acknowledgement failed with HTTP {acknowledgeResponse.Status}: {acknowledgeBody}");
+        await Expect(page.Locator("body")).ToContainTextAsync("DFM acknowledged", new() { Timeout = 30_000 });
+
+        var acknowledgedProject = await GetIntranetProjectAsync(page, project.ProjectId);
+        var acknowledgedPart = FindProjectPart(acknowledgedProject, part.PartId);
+        Assert.True(GetJsonBool(acknowledgedPart, "dfmAcknowledged", "DfmAcknowledged"));
+        Assert.True(GetJsonBool(acknowledgedPart, "hasDfmWarnings", "HasDfmWarnings"));
+
+        await ConfirmProjectPartPriceAsync(page, project.ProjectId, part.PartId, 1250m);
+        var firstQuote = await GenerateProjectQuotationAsync(
+            page,
+            project.ProjectId,
+            "Initial employee quote version from Aspire E2E.",
+            manualDiscountAmount: 100m,
+            shippingCost: 250m);
+        var quotationId = GetJsonGuid(firstQuote, "quotationId", "QuotationId");
+        var quotationNumber = GetJsonString(firstQuote, "quotationNumber", "QuotationNumber");
+        Assert.NotEqual(Guid.Empty, quotationId);
+        Assert.False(string.IsNullOrWhiteSpace(quotationNumber));
+        Assert.Equal(1, GetJsonInt(firstQuote, "currentQuotationVersionNumber", "CurrentQuotationVersionNumber"));
+
+        part = await UpdateProjectPartConfigurationAsync(
+            page,
+            project.ProjectId,
+            part.PartId,
+            modelUpload,
+            quantity: 4,
+            dfmAcknowledged: true,
+            drawing,
+            supportDocument);
+        await ConfirmProjectPartPriceAsync(page, project.ProjectId, part.PartId, 1175m);
+        var secondQuote = await GenerateProjectQuotationAsync(
+            page,
+            project.ProjectId,
+            secondChangeSummary,
+            manualDiscountAmount: 175m,
+            shippingCost: 300m);
+        Assert.Equal(quotationId, GetJsonGuid(secondQuote, "quotationId", "QuotationId"));
+        Assert.Equal(2, GetJsonInt(secondQuote, "currentQuotationVersionNumber", "CurrentQuotationVersionNumber"));
+
+        var quotation = await GetIntranetQuotationAsync(page, quotationId);
+        Assert.Equal(2, GetJsonInt(quotation, "currentVersionNumber", "CurrentVersionNumber"));
+        Assert.True(TryGetJsonProperty(quotation, out var versions, "versions", "Versions"));
+        Assert.True(versions.GetArrayLength() >= 2);
+        Assert.Contains(versions.EnumerateArray(), version =>
+            GetJsonInt(version, "versionNumber", "VersionNumber") == 2 &&
+            GetJsonString(version, "changeSummary", "ChangeSummary").Contains(secondChangeSummary, StringComparison.Ordinal));
+        Assert.All(versions.EnumerateArray(), version =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(GetJsonString(version, "projectSnapshotJson", "ProjectSnapshotJson")));
+            Assert.False(string.IsNullOrWhiteSpace(GetJsonString(version, "projectSnapshotHash", "ProjectSnapshotHash")));
+        });
+
+        var latestPdf = await GetLatestQuotationPdfAsync(page, quotationId);
+        Assert.False(string.IsNullOrWhiteSpace(latestPdf));
+
+        await page.GotoAsync(new Uri(intranetBase, $"/sales/projects/{project.ProjectId}?tab=quote").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync("Quote document", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Quote revision history", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Version 2", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Version 1", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Current", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(secondChangeSummary, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Open version PDF", new() { Timeout = 30_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Accept quote" }).First.ClickAsync();
+        var acceptDialog = page.Locator(".project-accept-dialog");
+        await Expect(acceptDialog).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        var acceptResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/projects/{project.ProjectId}/accept-quotation", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+        await acceptDialog.GetByRole(AriaRole.Button, new() { NameString = "Accept quote" }).ClickAsync();
+        var acceptResponse = await acceptResponseTask;
+        var acceptBody = await ReadResponseTextOrEmptyAsync(acceptResponse);
+        Assert.True(acceptResponse.Ok, $"Quote acceptance failed with HTTP {acceptResponse.Status}: {acceptBody}");
+        await Expect(page.Locator("body")).ToContainTextAsync("Accepted", new() { Timeout = 30_000 });
+
+        var acceptedProject = await GetIntranetProjectAsync(page, project.ProjectId);
+        Assert.Equal("QuotationAccepted", GetJsonString(acceptedProject, "status", "Status"));
+
+        var duplicate = await DuplicateIntranetProjectAsync(page, project.ProjectId, $"{projectTitle} reorder");
+        Assert.NotEqual(project.ProjectId, GetJsonGuid(duplicate, "id", "Id"));
+        Assert.Equal(project.ProjectId, GetJsonGuid(duplicate, "sourceProjectId", "SourceProjectId"));
+        Assert.Equal(GetJsonString(acceptedProject, "projectNumber", "ProjectNumber"), GetJsonString(duplicate, "sourceProjectNumber", "SourceProjectNumber"));
+        Assert.True(TryGetJsonProperty(duplicate, out var duplicatedParts, "parts", "Parts"));
+        Assert.Contains(duplicatedParts.EnumerateArray(), duplicatePart =>
+            string.Equals(modelUpload.FileName, GetJsonString(duplicatePart, "fileName", "FileName"), StringComparison.Ordinal) &&
+            GetJsonInt(duplicatePart, "quantity", "Quantity") == 4);
+
+        var duplicateId = GetJsonGuid(duplicate, "id", "Id");
+        await page.GotoAsync(new Uri(intranetBase, $"/sales/projects/{duplicateId}?tab=overview").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync($"{projectTitle} reorder", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Duplicated from", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(modelUpload.FileName, new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies an employee can create a customer from the Intranet onboarding UI with company, address, and note data.
     /// Covers the manual employee onboarding portions of INT-002 and the customer-detail propagation portions of INT-003.
     /// </summary>
@@ -3503,6 +3650,485 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         string BillingAddressLine1,
         string RawCreateResponse);
 
+    private static async Task<CreatedIntranetProject> CreateIntranetProjectAsync(
+        IPage page,
+        Guid customerId,
+        string customerName,
+        string title)
+    {
+        var createResult = await page.EvaluateAsync<string>(
+            @"async payload => {
+                const r = await fetch('/api/v1/projects', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new
+            {
+                customerId,
+                customerName,
+                title,
+                description = "Created by Aspire browser E2E for project quotation lifecycle validation.",
+                currency = "THB"
+            });
+
+        Assert.True(
+            createResult.StartsWith("201 ", StringComparison.Ordinal) ||
+            createResult.StartsWith("200 ", StringComparison.Ordinal),
+            $"Project create failed. Result: {createResult}");
+        using var document = JsonDocument.Parse(createResult[4..]);
+        var root = document.RootElement;
+        var projectId = GetJsonGuid(root, "id", "Id");
+        Assert.NotEqual(Guid.Empty, projectId);
+        Assert.Equal(title, GetJsonString(root, "title", "Title"));
+        return new CreatedIntranetProject(projectId, GetJsonString(root, "projectNumber", "ProjectNumber"), title);
+    }
+
+    private static async Task<UploadedProjectFile> UploadProjectFileAsync(
+        IPage page,
+        Guid projectId,
+        Guid customerId,
+        string fileName,
+        string contentType)
+    {
+        var uploadResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const step = `ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('MALIEV Aspire E2E demo bracket'),'2;1');
+FILE_NAME('${args.fileName}','2026-05-16T00:00:00',('MALIEV'),('MALIEV'),'Aspire E2E','MALIEV','');
+ENDSEC;
+DATA;
+ENDSEC;
+END-ISO-10303-21;`;
+                const bytes = new TextEncoder().encode(step);
+                const initiate = await fetch('/api/v1/uploads/resumable', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        projectId: args.projectId,
+                        customerId: args.customerId,
+                        fileName: args.fileName,
+                        contentType: args.contentType,
+                        fileSize: bytes.byteLength
+                    })
+                });
+                const initiateText = await initiate.text();
+                if (!initiate.ok) {
+                    return `initiate ${initiate.status} ${initiateText}`;
+                }
+
+                const session = JSON.parse(initiateText);
+                const uploadId = session.uploadId ?? session.UploadId;
+                const storagePath = session.storagePath ?? session.StoragePath;
+                const put = await fetch(`/api/v1/uploads/resumable/${encodeURIComponent(uploadId)}`, {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': args.contentType,
+                        'Content-Range': `bytes 0-${bytes.byteLength - 1}/${bytes.byteLength}`
+                    },
+                    body: bytes
+                });
+                const putText = await put.text();
+                if (!put.ok) {
+                    return `resume ${put.status} ${putText}`;
+                }
+
+                const complete = await fetch(`/api/v1/uploads/resumable/${encodeURIComponent(uploadId)}/complete`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: '{}'
+                });
+                const completeText = await complete.text();
+                if (!complete.ok) {
+                    return `complete ${complete.status} ${completeText}`;
+                }
+
+                const completed = JSON.parse(completeText);
+                completed.uploadId ??= uploadId;
+                completed.storagePath ??= storagePath;
+                completed.fileName ??= args.fileName;
+                return `${complete.status} ${JSON.stringify(completed)}`;
+            }",
+            new
+            {
+                projectId,
+                customerId,
+                fileName,
+                contentType
+            });
+
+        if (!uploadResult.StartsWith("200 ", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Project model upload failed. Result: {uploadResult}");
+        }
+        using var document = JsonDocument.Parse(uploadResult[4..]);
+        var root = document.RootElement;
+        var uploadIdText = GetJsonString(root, "uploadId", "UploadId");
+        Assert.True(Guid.TryParse(uploadIdText, out var uploadId), $"Upload id was not a GUID. Result: {uploadResult}");
+        var storagePath = GetJsonString(root, "storagePath", "StoragePath", "fileReference", "FileReference");
+        Assert.False(string.IsNullOrWhiteSpace(storagePath));
+        return new UploadedProjectFile(uploadId, fileName, storagePath, contentType);
+    }
+
+    private static async Task<UploadedProjectAttachment> UploadProjectAttachmentAsync(
+        IPage page,
+        Guid projectId,
+        Guid customerId,
+        Guid partId,
+        string kind,
+        string fileName,
+        string contentType)
+    {
+        var uploadResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const file = new File([`MALIEV ${args.kind} attachment ${args.fileName}`], args.fileName, { type: args.contentType });
+                const form = new FormData();
+                form.append('files', file);
+                const url = `/api/v1/uploads/attachments?projectId=${encodeURIComponent(args.projectId)}&customerId=${encodeURIComponent(args.customerId)}&partId=${encodeURIComponent(args.partId)}&kind=${encodeURIComponent(args.kind)}`;
+                const r = await fetch(url, { method: 'POST', credentials: 'include', body: form });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new
+            {
+                projectId,
+                customerId,
+                partId,
+                kind,
+                fileName,
+                contentType
+            });
+
+        Assert.StartsWith("200 ", uploadResult, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(uploadResult[4..]);
+        Assert.True(document.RootElement.ValueKind == JsonValueKind.Array);
+        var attachment = Assert.Single(document.RootElement.EnumerateArray());
+        var fileId = GetJsonGuid(attachment, "fileId", "FileId");
+        var storagePath = GetJsonString(attachment, "storagePath", "StoragePath");
+        Assert.NotEqual(Guid.Empty, fileId);
+        Assert.False(string.IsNullOrWhiteSpace(storagePath));
+        return new UploadedProjectAttachment(
+            fileId,
+            FirstNonEmpty(GetJsonString(attachment, "fileName", "FileName"), GetJsonString(attachment, "name", "Name"), fileName) ?? fileName,
+            storagePath,
+            FirstNonEmpty(GetJsonString(attachment, "contentType", "ContentType"), GetJsonString(attachment, "fileType", "FileType"), contentType) ?? contentType,
+            GetJsonInt(attachment, "sizeBytes", "SizeBytes", "fileSizeBytes", "FileSizeBytes"));
+    }
+
+    private static async Task<CreatedProjectPart> AddConfiguredProjectPartAsync(
+        IPage page,
+        Guid projectId,
+        Guid customerId,
+        UploadedProjectFile upload,
+        int quantity,
+        bool dfmAcknowledged)
+    {
+        var addResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch(`/api/v1/projects/${args.projectId}/parts`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(args.payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new
+            {
+                projectId,
+                payload = BuildProjectPartPayload(customerId, upload, quantity, dfmAcknowledged, null, null)
+            });
+
+        Assert.True(
+            addResult.StartsWith("200 ", StringComparison.Ordinal) ||
+            addResult.StartsWith("201 ", StringComparison.Ordinal),
+            $"Project part add failed. Result: {addResult}");
+        using var document = JsonDocument.Parse(addResult[4..]);
+        var root = document.RootElement;
+        var partId = GetJsonGuid(root, "id", "Id");
+        Assert.NotEqual(Guid.Empty, partId);
+        return new CreatedProjectPart(partId, GetJsonString(root, "fileName", "FileName"));
+    }
+
+    private static async Task<CreatedProjectPart> UpdateProjectPartConfigurationAsync(
+        IPage page,
+        Guid projectId,
+        Guid partId,
+        UploadedProjectFile upload,
+        int quantity,
+        bool dfmAcknowledged,
+        UploadedProjectAttachment drawing,
+        UploadedProjectAttachment supportDocument)
+    {
+        var updateResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch(`/api/v1/projects/${args.projectId}/parts/${args.partId}`, {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(args.payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new
+            {
+                projectId,
+                partId,
+                payload = BuildProjectPartPayload(Guid.Empty, upload, quantity, dfmAcknowledged, drawing, supportDocument)
+            });
+
+        Assert.StartsWith("204 ", updateResult, StringComparison.Ordinal);
+        return new CreatedProjectPart(partId, upload.FileName);
+    }
+
+    private static object BuildProjectPartPayload(
+        Guid customerId,
+        UploadedProjectFile upload,
+        int quantity,
+        bool dfmAcknowledged,
+        UploadedProjectAttachment? drawing,
+        UploadedProjectAttachment? supportDocument)
+    {
+        object[] drawingFiles = drawing is null ? [] : [BuildAttachmentPayload(drawing)];
+        object[] supplementaryFiles = supportDocument is null ? [] : [BuildAttachmentPayload(supportDocument)];
+
+        return new
+        {
+            fileId = upload.UploadId,
+            fileReference = upload.StoragePath,
+            fileName = upload.FileName,
+            processType = "CNC_MILL",
+            materialId = customerId == Guid.Empty ? Guid.Parse("11111111-1111-1111-1111-111111111111") : Guid.NewGuid(),
+            materialName = "Aluminium 6061-T6",
+            materialCode = "AL6061-T6",
+            quantity,
+            finish = "Anodized",
+            color = "Black",
+            tolerance = "ISO 2768-m",
+            partNotes = "Aspire E2E configured CNC project part.",
+            roughnessCode = "Ra1.6",
+            dfmAcknowledged,
+            hasDfmWarnings = true,
+            hasThreadedHoles = true,
+            threadedHoleSpec = "M6 x 1.0",
+            threadedHoleCount = 4,
+            hasInserts = false,
+            insertCount = 0,
+            bagAndTag = true,
+            certificates = new[] { "MaterialCert", "CoC" },
+            drawingFiles,
+            supplementaryFiles,
+            processConfig = new Dictionary<string, string>
+            {
+                ["anodizeColor"] = "Black",
+                ["fixtureSide"] = "A"
+            },
+            bodyCount = 1,
+            bodiesJson = """[{"index":0,"name":"E2E Body"}]""",
+            selectedBodyIndex = 0,
+            volumeCm3 = 15.25m,
+            supportVolumeCm3 = 0m,
+            surfaceAreaCm2 = 84.4m,
+            boundingBoxX = 120m,
+            boundingBoxY = 80m,
+            boundingBoxZ = 35m,
+            isManifold = true
+        };
+    }
+
+    private static object BuildAttachmentPayload(UploadedProjectAttachment attachment) => new
+    {
+        fileId = attachment.FileId,
+        fileName = attachment.FileName,
+        storagePath = attachment.StoragePath,
+        contentType = attachment.ContentType,
+        sizeBytes = attachment.SizeBytes,
+        uploadedAt = DateTime.UtcNow
+    };
+
+    private static async Task ConfirmProjectPartPriceAsync(IPage page, Guid projectId, Guid partId, decimal unitPrice)
+    {
+        var result = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch(`/api/v1/projects/${args.projectId}/parts/${args.partId}/confirm-price`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirmedUnitPrice: args.unitPrice })
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new { projectId, partId, unitPrice });
+
+        Assert.True(
+            result.StartsWith("204 ", StringComparison.Ordinal) ||
+            result.StartsWith("200 ", StringComparison.Ordinal),
+            $"Project part price confirmation failed. Result: {result}");
+    }
+
+    private static async Task<JsonElement> GenerateProjectQuotationAsync(
+        IPage page,
+        Guid projectId,
+        string changeSummary,
+        decimal manualDiscountAmount,
+        decimal shippingCost)
+    {
+        var result = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch(`/api/v1/projects/${args.projectId}/generate-quotation`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        validityDays: 30,
+                        deliveryExpectations: 'Standard production lead time, verified by Aspire E2E.',
+                        bulkDiscountAmount: 0,
+                        manualDiscountAmount: args.manualDiscountAmount,
+                        shippingCost: args.shippingCost,
+                        taxAmount: 0,
+                        quotationTerms: 'E2E commercial terms for immutable quotation snapshot verification.',
+                        changeSummary: args.changeSummary,
+                        idempotencyKey: `${args.projectId}:${Date.now()}`
+                    })
+                });
+                const body = await r.text();
+                if (!r.ok) {
+                    const projectResponse = await fetch(`/api/v1/projects/${args.projectId}`, { credentials: 'include' });
+                    const projectBody = await projectResponse.text();
+                    let projectDiagnostic = `${projectResponse.status}`;
+                    let quotationDiagnostic = '<not available>';
+                    let latestPdfDiagnostic = '<not available>';
+
+                    try {
+                        const projectJson = JSON.parse(projectBody);
+                        const quotationId = projectJson.quotationId ?? projectJson.QuotationId;
+                        const quotationNumber = projectJson.quotationNumber ?? projectJson.QuotationNumber;
+                        const currentVersion = projectJson.currentQuotationVersionNumber ?? projectJson.CurrentQuotationVersionNumber;
+                        const projectStatus = projectJson.status ?? projectJson.Status;
+                        projectDiagnostic = `${projectResponse.status} quotationId=${quotationId ?? '<null>'} quotationNumber=${quotationNumber ?? '<null>'} currentVersion=${currentVersion ?? '<null>'} status=${projectStatus ?? '<null>'}`;
+                        if (quotationId) {
+                            const quotationResponse = await fetch(`/api/v1/quotations/${quotationId}`, { credentials: 'include' });
+                            const quotationText = await quotationResponse.text();
+                            quotationDiagnostic = `${quotationResponse.status} ${quotationText.substring(0, 1200)}`;
+                            const latestPdfResponse = await fetch(`/api/v1/quotations/${quotationId}/pdf/latest`, { credentials: 'include' });
+                            const latestPdfText = await latestPdfResponse.text();
+                            latestPdfDiagnostic = `${latestPdfResponse.status} ${latestPdfText.substring(0, 1200)}`;
+                        }
+                    } catch (error) {
+                        quotationDiagnostic = `diagnostic error: ${error}`;
+                    }
+
+                    return `${r.status} ${body} | project=${projectDiagnostic} | quotation=${quotationDiagnostic} | latestPdf=${latestPdfDiagnostic}`;
+                }
+
+                const projectResponse = await fetch(`/api/v1/projects/${args.projectId}`, { credentials: 'include' });
+                return `${projectResponse.status} ${await projectResponse.text()}`;
+            }",
+            new
+            {
+                projectId,
+                changeSummary,
+                manualDiscountAmount,
+                shippingCost
+            });
+
+        Assert.True(
+            result.StartsWith("200 ", StringComparison.Ordinal),
+            $"Project quotation generation failed. Result: {result}");
+        using var document = JsonDocument.Parse(result[4..]);
+        return document.RootElement.Clone();
+    }
+
+    private static async Task<JsonElement> GetIntranetProjectAsync(IPage page, Guid projectId)
+    {
+        var result = await page.EvaluateAsync<string>(
+            @"async projectId => {
+                const r = await fetch(`/api/v1/projects/${projectId}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            projectId);
+
+        Assert.StartsWith("200 ", result, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(result[4..]);
+        return document.RootElement.Clone();
+    }
+
+    private static async Task<JsonElement> GetIntranetQuotationAsync(IPage page, Guid quotationId)
+    {
+        var result = await page.EvaluateAsync<string>(
+            @"async quotationId => {
+                const r = await fetch(`/api/v1/quotations/${quotationId}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            quotationId);
+
+        Assert.StartsWith("200 ", result, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(result[4..]);
+        return document.RootElement.Clone();
+    }
+
+    private static async Task<string> GetLatestQuotationPdfAsync(IPage page, Guid quotationId)
+    {
+        var result = await page.EvaluateAsync<string>(
+            @"async quotationId => {
+                const r = await fetch(`/api/v1/quotations/${quotationId}/pdf/latest`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            quotationId);
+
+        Assert.StartsWith("200 ", result, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(result[4..]);
+        return GetJsonString(document.RootElement, "storageUrl", "StorageUrl", "url", "Url");
+    }
+
+    private static async Task<JsonElement> DuplicateIntranetProjectAsync(IPage page, Guid projectId, string title)
+    {
+        var result = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch(`/api/v1/projects/${args.projectId}/duplicate`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: args.title })
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new { projectId, title });
+
+        Assert.StartsWith("200 ", result, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(result[4..]);
+        return document.RootElement.Clone();
+    }
+
+    private static JsonElement FindProjectPart(JsonElement project, Guid partId)
+    {
+        Assert.True(TryGetJsonProperty(project, out var parts, "parts", "Parts"));
+        foreach (var part in parts.EnumerateArray())
+        {
+            if (GetJsonGuid(part, "id", "Id") == partId)
+            {
+                return part.Clone();
+            }
+        }
+
+        Assert.Fail($"Project part {partId} was not found.");
+        return default;
+    }
+
+    private sealed record CreatedIntranetProject(Guid ProjectId, string ProjectNumber, string Title);
+
+    private sealed record UploadedProjectFile(Guid UploadId, string FileName, string StoragePath, string ContentType);
+
+    private sealed record UploadedProjectAttachment(Guid FileId, string FileName, string StoragePath, string ContentType, int SizeBytes);
+
+    private sealed record CreatedProjectPart(Guid PartId, string FileName);
+
     private static async Task<CreatedIntranetSupplier> CreateIntranetSupplierAsync(IPage page)
     {
         var unique = Guid.NewGuid().ToString("N")[..12];
@@ -3724,6 +4350,50 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         }
 
         return string.Empty;
+    }
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+    private static Guid GetJsonGuid(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value))
+            {
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return Guid.Empty;
+    }
+
+    private static int GetJsonInt(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value))
+            {
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number))
+            {
+                return number;
+            }
+
+            if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return 0;
     }
 
     private static bool GetJsonBool(JsonElement element, params string[] names)
