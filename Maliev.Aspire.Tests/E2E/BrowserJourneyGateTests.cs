@@ -635,11 +635,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var unique = Guid.NewGuid().ToString("N")[..8];
         var fileName = $"quote-engine-e2e-{unique}.step";
 
-        await page.GotoAsync(new Uri(quoteBase, "/auth/sign-in?returnUrl=/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-        await page.GetByLabel("Email").FillAsync($"quote.customer.{unique}@example.com");
-        await page.GetByLabel("Password").FillAsync("PrototypeOnly123!");
-        await page.GetByRole(AriaRole.Button, new() { NameString = "Sign in with email" }).ClickAsync();
-        await page.WaitForURLAsync(url => url.Contains("/projects/new", StringComparison.OrdinalIgnoreCase), new() { Timeout = 30_000 });
+        await SignInToQuoteEngineAsync(page, quoteBase, $"quote.customer.{unique}@example.com");
         await Expect(page.GetByText("Signed-in customer project boundary", new() { Exact = false })).ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         await page.Locator("#quote-cad-files").SetInputFilesAsync(new FilePayload
@@ -706,6 +702,117 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Contains(quotes.EnumerateArray(), quote => GetJsonString(quote, "quotationNumber", "quoteNumber", "QuoteNumber").StartsWith("MQ-", StringComparison.Ordinal));
         Assert.True(TryGetJsonProperty(root, out var orders, "orders"));
         Assert.Contains(orders.EnumerateArray(), order => GetJsonString(order, "orderNumber", "OrderNumber").StartsWith("MO-", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Verifies QuoteEngine customer quote/order history is scoped to the signed-in customer boundary.
+    /// Covers the QuoteEngine-owned executable portion of SEC-001 for quote and order records.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "SEC-001,QUOTE-009,QUOTE-011,QUOTE-012")]
+    public async Task QuoteEngine_CustomerIsolation_BlocksCrossCustomerQuoteOrderHistoryAccess()
+    {
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        await using var customerAContext = await NewContextAsync();
+        var customerAPage = await customerAContext.NewPageAsync();
+        await SignInToQuoteEngineAsync(customerAPage, quoteBase, $"quote.owner.a.{unique}@example.com");
+        var customerAState = await customerAPage.EvaluateAsync<string>(
+            @"async () => {
+                const quoteResponse = await fetch('/quote/v1/quotes/formal', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        projectId: crypto.randomUUID(),
+                        quoteSessionId: `isolation-${crypto.randomUUID()}`,
+                        parts: [],
+                        notes: 'Customer A quote.'
+                    })
+                });
+                const quote = await quoteResponse.json();
+                const orderResponse = await fetch('/quote/v1/orders', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        quoteId: quote.quoteId,
+                        customerPoNumber: '',
+                        notes: 'Customer A accepted.'
+                    })
+                });
+                const order = await orderResponse.json();
+                const quotesResponse = await fetch('/quote/v1/account/quotes', { credentials: 'include' });
+                const ordersResponse = await fetch('/quote/v1/account/orders', { credentials: 'include' });
+                return JSON.stringify({
+                    quoteStatus: quoteResponse.status,
+                    orderStatus: orderResponse.status,
+                    quote,
+                    order,
+                    quotesStatus: quotesResponse.status,
+                    quotes: await quotesResponse.json(),
+                    ordersStatus: ordersResponse.status,
+                    orders: await ordersResponse.json()
+                });
+            }");
+        using var customerADocument = JsonDocument.Parse(customerAState);
+        var customerARoot = customerADocument.RootElement;
+        Assert.Equal(200, GetJsonInt(customerARoot, "quoteStatus"));
+        Assert.Equal(200, GetJsonInt(customerARoot, "orderStatus"));
+        Assert.True(TryGetJsonProperty(customerARoot, out var customerAQuote, "quote"));
+        Assert.True(TryGetJsonProperty(customerARoot, out var customerAOrder, "order"));
+        var customerAQuoteId = GetJsonString(customerAQuote, "quoteId", "QuoteId");
+        var customerAOrderId = GetJsonString(customerAOrder, "orderId", "OrderId");
+        Assert.StartsWith("MQ-", GetJsonString(customerAQuote, "quoteNumber", "QuoteNumber"), StringComparison.Ordinal);
+        Assert.StartsWith("MO-", GetJsonString(customerAOrder, "orderNumber", "OrderNumber"), StringComparison.Ordinal);
+        Assert.True(TryGetJsonProperty(customerARoot, out var customerAQuotes, "quotes"));
+        Assert.Contains(customerAQuotes.EnumerateArray(), quote => string.Equals(customerAQuoteId, GetJsonString(quote, "quoteId", "QuoteId"), StringComparison.OrdinalIgnoreCase));
+        Assert.True(TryGetJsonProperty(customerARoot, out var customerAOrders, "orders"));
+        Assert.Contains(customerAOrders.EnumerateArray(), order => string.Equals(customerAOrderId, GetJsonString(order, "orderId", "OrderId"), StringComparison.OrdinalIgnoreCase));
+
+        await using var customerBContext = await NewContextAsync();
+        var customerBPage = await customerBContext.NewPageAsync();
+        await SignInToQuoteEngineAsync(customerBPage, quoteBase, $"quote.owner.b.{unique}@example.com");
+        var customerBState = await customerBPage.EvaluateAsync<string>(
+            @"async quoteId => {
+                const profileResponse = await fetch('/quote/v1/account/profile', { credentials: 'include' });
+                const quotesResponse = await fetch('/quote/v1/account/quotes', { credentials: 'include' });
+                const ordersResponse = await fetch('/quote/v1/account/orders', { credentials: 'include' });
+                const crossOrderResponse = await fetch('/quote/v1/orders', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        quoteId,
+                        customerPoNumber: '',
+                        notes: 'Cross-customer order attempt.'
+                    })
+                });
+                return JSON.stringify({
+                    profileStatus: profileResponse.status,
+                    profile: await profileResponse.json(),
+                    quotesStatus: quotesResponse.status,
+                    quotes: await quotesResponse.json(),
+                    ordersStatus: ordersResponse.status,
+                    orders: await ordersResponse.json(),
+                    crossOrderStatus: crossOrderResponse.status
+                });
+            }",
+            customerAQuoteId);
+        using var customerBDocument = JsonDocument.Parse(customerBState);
+        var customerBRoot = customerBDocument.RootElement;
+        Assert.Equal(200, GetJsonInt(customerBRoot, "profileStatus"));
+        Assert.Equal(200, GetJsonInt(customerBRoot, "quotesStatus"));
+        Assert.Equal(200, GetJsonInt(customerBRoot, "ordersStatus"));
+        Assert.Equal(404, GetJsonInt(customerBRoot, "crossOrderStatus"));
+        Assert.True(TryGetJsonProperty(customerBRoot, out var customerBProfile, "profile"));
+        Assert.Equal($"quote.owner.b.{unique}@example.com", GetJsonString(customerBProfile, "email", "Email"));
+        Assert.True(TryGetJsonProperty(customerBRoot, out var customerBQuotes, "quotes"));
+        Assert.DoesNotContain(customerBQuotes.EnumerateArray(), quote => string.Equals(customerAQuoteId, GetJsonString(quote, "quoteId", "QuoteId"), StringComparison.OrdinalIgnoreCase));
+        Assert.True(TryGetJsonProperty(customerBRoot, out var customerBOrders, "orders"));
+        Assert.DoesNotContain(customerBOrders.EnumerateArray(), order => string.Equals(customerAOrderId, GetJsonString(order, "orderId", "OrderId"), StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -3044,6 +3151,17 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         {
             return _fixture.AppFactory!.GetEndpoint(resourceName, "http");
         }
+    }
+
+    private static async Task SignInToQuoteEngineAsync(IPage page, Uri quoteBase, string email, string returnUrl = "/projects/new")
+    {
+        await page.GotoAsync(
+            new Uri(quoteBase, $"/auth/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}").ToString(),
+            new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.GetByLabel("Email").FillAsync(email);
+        await page.GetByLabel("Password").FillAsync("PrototypeOnly123!");
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Sign in with email" }).ClickAsync();
+        await page.WaitForURLAsync(url => url.Contains(returnUrl, StringComparison.OrdinalIgnoreCase), new() { Timeout = 30_000 });
     }
 
     private async Task SignInToIntranetAsync(IPage page, Uri intranetBase, string returnUrl)

@@ -9,8 +9,9 @@
 ### Scope
 
 - Added executable browser coverage for the signed customer QuoteEngine prototype path: email sign-in fallback, customer-owned file upload, live SignalR analysis notification, DFM finding visibility, process/material/quantity configuration, estimate, formal quote creation, order creation, and account quote/order history APIs.
+- Added a QuoteEngine customer isolation browser negative journey: Customer A creates quote/order history, Customer B signs in with a separate session, sees isolated quote/order history, and receives `404` when trying to create an order from Customer A's quote id.
 - Implemented the missing QuoteEngine client SignalR subscription to `/hubs/quote-notifications` so upload analysis events are visible in the browser and can be asserted by `QUOTE-015`.
-- Re-ran the complete Aspire `Tier=E2E` gate after the QuoteEngine change. The current executable gate is 36 passing tests: 34 browser journey tests plus 2 story-catalog traceability tests.
+- Re-ran the complete Aspire `Tier=E2E` gate after the QuoteEngine changes. The current executable gate is 37 passing tests: 35 browser journey tests plus 2 story-catalog traceability tests.
 - This remains partial QuoteEngine production coverage because the signed path still uses `QuoteEnginePrototypeStore`; the production gap is replacing it with ProjectService, UploadService, GeometryService, PricingService, QuotationService, PdfService, OrderService, PaymentService/Omise, DeliveryService, and customer ownership checks.
 
 ### Commands And Results
@@ -18,10 +19,11 @@
 | Command | Result |
 |---------|--------|
 | `dotnet build B:\maliev\Maliev.QuoteEngine\Maliev.QuoteEngine.slnx --configuration Release --no-restore -p:UseSharedCompilation=false -m:1 /nr:false --verbosity minimal` | Passed: 0 warnings, 0 errors |
-| `dotnet test B:\maliev\Maliev.QuoteEngine\Maliev.QuoteEngine.slnx --configuration Release --no-build -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 8 tests |
+| `dotnet test B:\maliev\Maliev.QuoteEngine\Maliev.QuoteEngine.slnx --configuration Release -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 9 tests |
 | `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_PrototypeSignedCustomer_UploadsEstimatesQuotesOrdersAndRecordsHistory" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 4 QuoteEngine browser E2E tests |
-| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 36 E2E tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_CustomerIsolation_BlocksCrossCustomerQuoteOrderHistoryAccess" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 5 QuoteEngine browser E2E tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 37 E2E tests |
 
 ### Automated Story Coverage Updated
 
@@ -31,13 +33,14 @@
 | `QUOTE-002`, `QUOTE-003`, `QUOTE-018`, `QUOTE-019`, `QUOTE-020` | Signed customer uploads a STEP file, sees prototype analysis complete, sees the DFM warning `Threaded features should be confirmed`, receives the live SignalR analysis message, selects CNC machining and Aluminum 6061, acknowledges DFM review, changes quantity, estimates, and sees a THB total. Remaining gaps are real UploadService storage, GeometryService analysis/viewer/thumbnail output, PricingService explainable breakdown, multi-file editing, lead-time matrix coverage beyond the existing demo assertions, and stale-result prevention after reupload. |
 | `QUOTE-006`, `QUOTE-007`, `QUOTE-009`, `QUOTE-011`, `QUOTE-012`, `QUOTE-022`, `QUOTE-025` | Signed customer requests a formal quote, sees an `MQ-yyyyMMdd-nnnn` quote number, creates an order, sees an `MO-yyyyMMdd-nnnn` order number with `Order received`, and verifies account quote/order APIs contain the new quote and order. Remaining gaps are service-backed QuotationVersion snapshots, real PDF artifact generation/download, quote terms/PO acceptance UI, OrderService/PaymentService/DeliveryService integration, multiple immutable versions on one project, and version comparison. |
 | `QUOTE-015` | QuoteEngine client now opens a SignalR connection, joins the uploaded file group before completion, receives `FileAnalysisCompleted`, and renders `Analysis complete for <file>` in a live status region verified by Playwright. Remaining gaps are order/payment/manufacturing notification events, reconnect recovery, notification preferences, and customer-visible notification history. |
+| `SEC-001`, `QUOTE-009`, `QUOTE-011`, `QUOTE-012` | Customer A and Customer B sign in through separate QuoteEngine browser contexts. Customer A creates a quote and order. Customer B's account quote/order APIs do not expose Customer A's records, and Customer B receives `404` when trying to create an order from Customer A's quote id. Remaining gaps are real ProjectService/QuotationService/OrderService ownership checks, NDA/document/PDF ownership checks, and employee permission-boundary checks. |
 
 ### Fixes Made During E2E Execution
 
 | Repo | Commit | Fix | Evidence |
 |------|--------|-----|----------|
-| `Maliev.QuoteEngine` | `231896b` | Added QuoteEngine client SignalR subscription for upload analysis completion and rendered a live status region for browser-visible notifications. | QuoteEngine Release build passed; QuoteEngine tests passed 8/8; focused signed QuoteEngine browser E2E passed. |
-| `Maliev.Aspire` | Current QuoteEngine E2E slice | Added the signed customer QuoteEngine browser journey and tightened selectors around repeated file/material/quote text. | Focused signed QuoteEngine E2E passed; QuoteEngine browser subset passed 4/4; full `Tier=E2E` passed 36/36. |
+| `Maliev.QuoteEngine` | `231896b`, `ba3e6d9` | Added QuoteEngine client SignalR subscription for upload analysis completion, rendered a live status region, and scoped prototype customer profiles, quotes, and orders by signed-in customer. | QuoteEngine Release tests passed 9/9; focused signed QuoteEngine browser E2E passed; focused QuoteEngine customer isolation browser E2E passed. |
+| `Maliev.Aspire` | Current QuoteEngine E2E slice | Added the signed customer QuoteEngine browser journey, customer isolation browser journey, and tightened selectors around repeated file/material/quote text. | Focused signed QuoteEngine E2E passed; focused isolation E2E passed; QuoteEngine browser subset passed 5/5; full `Tier=E2E` passed 37/37. |
 
 ## 2026-05-16 Project Quote Lifecycle E2E Run
 
@@ -459,7 +462,7 @@
 | `HR-004` | Blocked | Requires compliance/training module. | Need authenticated HR/compliance user and records. |
 | `HR-005` | Blocked | Requires compensation module. | Need authenticated HR/finance user and permission boundary checks. |
 | `HR-006` | Blocked | Requires performance module. | Need manager/employee identities and review records. |
-| `SEC-001` | Partial after automated run | Later automated Web E2E created two authenticated customers and verified Customer B cannot mutate Customer A's address. | Need extend the same ownership denial to QuoteEngine projects, quote versions, orders, NDAs, supporting documents, and PDFs. |
+| `SEC-001` | Partial after automated run | Later automated Web E2E created two authenticated customers and verified Customer B cannot mutate Customer A's address. Later QuoteEngine E2E created Customer A quote/order history, signed in Customer B, verified Customer B cannot see Customer A's quote/order history, and verified Customer B receives `404` when trying to order from Customer A's quote id. | Need extend ownership denial to real ProjectService/QuotationService/OrderService records, NDAs, supporting documents, PDFs, and employee permission-scoped access. |
 | `SEC-002` | Partial after automated run | Anonymous direct URLs to restricted Intranet pages redirected to login. Later automated browser E2E signs in as a limited employee, verifies self-profile access, and verifies IAM users, IAM roles, employees, and global search APIs return `403`. | Need expand the low-permission checks to every restricted Intranet module, hidden navigation item, and action-level command. |
 | `SEC-003` | Partial after automated run | Direct protected URLs preserved return URL on login redirect; later automated Web E2E also cleared a customer session and verified `/account/addresses` redirects with return URL preserved. | Need true expired-token/refresh-session behavior, not only anonymous or missing-cookie redirects. |
 | `SEC-004` | Partial | QuoteEngine demo hides formal/internal artifacts and disables PDF. | Need authenticated customer surfaces plus employee quote with internal pricing. |
