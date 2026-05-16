@@ -4,6 +4,44 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-05-16 Customer Notification E2E Run
+
+### Scope
+
+- Added executable browser coverage for the implemented `OPS-003` customer notification path from Intranet customer detail.
+- Verified customer-created notification preference provisioning, employee-triggered customer email dispatch, NotificationService delivery logging, provider/simulated provider message visibility, and opt-out skip behavior.
+- Fixed the NotificationService customer-binding boundary so customer-created email/SMS bindings are encrypted before the router decrypts them.
+- Fixed the Intranet notification BFF boundary so delivery logs preserve provider message ids and skip/error reasons.
+- Kept this as partial `OPS-003` coverage; the full production gate still needs a customer/employee notification center UI, read/unread state, broader event-trigger mappings, external provider sandbox delivery, and permission-negative notification checks.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test B:\maliev\Maliev.NotificationService\Maliev.NotificationService.Tests\Maliev.NotificationService.Tests.csproj --filter "FullyQualifiedName~CustomerEventConsumerTests\|FullyQualifiedName~NotificationEventsApiTests\|FullyQualifiedName~PreferencesApiTests.GetPreferences_OtherUserWithWildcardPermission_ReturnsPreferences\|FullyQualifiedName~PreferencesApiTests.UpdatePreferences_OtherUserWithWildcardPermission_ReturnsUpdatedPreferences" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 13 tests |
+| `dotnet build B:\maliev\Maliev.NotificationService\Maliev.NotificationService.slnx --configuration Release --no-restore -p:UseSharedCompilation=false -m:1 /nr:false --verbosity minimal` | Passed: 0 warnings, 0 errors |
+| `dotnet test B:\maliev\Maliev.Intranet\Maliev.Intranet.Tests\Maliev.Intranet.Tests.csproj --filter "FullyQualifiedName~NotificationServiceClientTests\|FullyQualifiedName~CustomersControllerTests.SendEmail_ShouldPublishNotification_WhenCustomerHasPrincipal\|FullyQualifiedName~CustomersControllerTests.SendEmail_ShouldReturnBadRequest_WhenCustomerHasNoPrincipal" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 6 tests |
+| `dotnet build B:\maliev\Maliev.Intranet\Maliev.Intranet.slnx --configuration Release --no-restore -p:UseSharedCompilation=false -m:1 /nr:false --verbosity minimal` | Passed: 0 warnings, 0 errors |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~Intranet_CustomerNotification_QueuesDeliveryAndRespectsOptOutPreference" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 2 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~BrowserJourneyGateTests" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 32 browser E2E tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~Intranet_EmployeeCreatedCustomer_CanBeOpenedAndSelectedInProjectWorkspace" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test after unique customer-name fix |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 34 E2E tests |
+
+### Automated Story Coverage Updated
+
+| Story ids | Automated browser coverage |
+|-----------|----------------------------|
+| `OPS-003` | Authenticated Intranet employee signs in through the real BFF/AuthService/IAM path, creates a corporate customer through CustomerService, waits for NotificationService to provision customer preferences and encrypted channel bindings from the customer-created event, opens customer detail, sends an email notification through the customer action modal, verifies NotificationService delivery logs show the customer principal, `email` channel, `delivered` status, and provider/simulated provider message id, updates notification preferences to opt out of a specific category, sends a second notification in that category, and verifies the log records a failed/skipped delivery with an opted-out reason. Remaining gaps are customer/employee notification center UI, read/unread persistence, push/live notification surfaces, external provider sandbox verification, broader automatic domain events, and low-permission negative checks. |
+
+### Fixes Made During E2E Execution
+
+| Repo | Commit | Fix | Evidence |
+|------|--------|-----|----------|
+| `Maliev.NotificationService` | Current notification E2E slice | Added an explicit `/notification/v1/events` dispatch endpoint that reuses the `NotificationEventConsumer` processing path, fixed wildcard permission checks for preference reads/updates, encrypted customer-created and customer-updated channel bindings, and added focused integration coverage. | Focused NotificationService tests passed 13/13; Release build passed with 0 warnings. |
+| `Maliev.Intranet` | Current notification E2E slice | Sent customer email actions through NotificationService dispatch, exposed provider message ids and skip/error reasons in notification delivery-log DTOs, and added client/controller contract tests. | Focused Intranet tests passed 6/6; Release build passed with 0 warnings. |
+| `Maliev.Aspire` | Current notification E2E slice | Added `Intranet_CustomerNotification_QueuesDeliveryAndRespectsOptOutPreference`, hardened browser sign-in readiness by waiting for AuthService-issued JWT permissions before form login, and made the Project workspace customer-picker E2E repeatable with unique customer names. | Focused notification E2E passed 1/1; full `Tier=E2E` passed 34/34. |
+
 ## 2026-05-16 Intranet AI Assistant E2E Run
 
 ### Scope
@@ -330,7 +368,7 @@
 | `COM-004` | Blocked | Requires product archive/unpublish flow. | Need authenticated catalog admin and published product. |
 | `OPS-001` | Blocked | Requires authenticated global search. | Need Aspire test admin and searchable seed data. |
 | `OPS-002` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, opens `/admin/system-health`, verifies AuthService, IAMService, and GeometryService are healthy through BFF `/api/v1/system-health`, verifies `/liveness` and `/readiness` paths, verifies history contains IAMService and GeometryService, and verifies the Refresh action keeps the probe grid available. | Need endurance-style validation that the page continues auto-refreshing correctly during a long-running session. |
-| `OPS-003` | Blocked | Requires authenticated notifications. | Need Aspire test admin and event trigger. |
+| `OPS-003` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, creates a customer, verifies NotificationService preference/channel provisioning, sends a customer email notification from Intranet customer detail, verifies delivered delivery-log state and provider/simulated provider id, opts out of a notification category, sends that category again, and verifies the skipped/opted-out log. | Need customer/employee notification center UI, read/unread state, live push surface, broader automatic event mappings, external provider sandbox delivery, and low-permission negative checks. |
 | `FIN-001` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, creates a corporate customer, creates a draft invoice with PO evidence, verifies persisted billing, line, tax, total, and attachment data, finalizes the invoice, and reloads invoice detail. | Need billing-note creation, credit-term selection beyond default payment terms, invoice PDF artifact checks, and accounting export effects. |
 | `FIN-002` | Partial after automated run | Later automated browser E2E records a full invoice payment after finalization, verifies InvoiceService/BFF paid amount and zero balance, creates a ReceiptService receipt, and verifies the receipt through UI and BFF data. | Need receipt PDF artifact verification, accounting journal/export effects, partial payment/void/refund UI, and Omise sandbox payment completion. |
 | `MFG-001` | Blocked | Requires authenticated manufacturing scheduling. | Need Aspire test admin and job/equipment seed. |

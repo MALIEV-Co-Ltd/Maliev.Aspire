@@ -4295,6 +4295,7 @@ This catalog now assumes the following production contract:
 4. Open notification center.
 5. Verify notification content and link.
 6. Mark notification read.
+7. For the currently automated customer-email path, open a customer detail record, send a customer notification, verify delivery logging, opt out of a specific notification category, send the same category again, and verify the skip reason is recorded.
 
 **Features covered:**
 - Notification preferences.
@@ -4316,16 +4317,20 @@ This catalog now assumes the following production contract:
 **Verification checklist:**
 - Notification is created for subscribed event.
 - Notification is not created for disabled preference.
+- Customer-created event provisions encrypted email/SMS channel bindings that the router can decrypt for delivery.
+- Intranet customer email action dispatches a `NotificationEvent` through NotificationService and returns a traceable message id.
+- Delivery log includes user id, channel, status, provider/simulated provider message id, and skip/error reason where applicable.
 - Notification link routes to the correct record.
 - Read state persists after refresh.
 
 **Observability checks:**
 - RabbitMQ event is consumed by NotificationService.
+- Explicit NotificationService dispatch endpoint records the same delivery-log state as the consumer path.
 - Delivery log shows success/failure state.
 
-**Current implementation status:** Ready to automate for implemented notification events.
+**Current implementation status:** Partial automated coverage. `Intranet_CustomerNotification_QueuesDeliveryAndRespectsOptOutPreference` verifies the implemented Intranet customer-email notification path, customer preference provisioning, delivered log, provider/simulated provider id, opt-out preference update, and skipped delivery log.
 
-**Known product gaps:** Event types without notification mappings should be cataloged.
+**Known product gaps:** Event types without notification mappings should be cataloged. Customer/employee notification center UI, read/unread state, live push surface, external provider sandbox delivery, and low-permission negative notification checks still need product and E2E coverage.
 
 ## FIN-001: Employee creates invoice with attachments, billing notes, and credit terms
 

@@ -1,5 +1,6 @@
 using Maliev.Aspire.Tests.Infrastructure;
 using Microsoft.Playwright;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -2395,8 +2396,9 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await page.GetByRole(AriaRole.Button, new() { NameString = "Select customer..." }).ClickAsync();
         var customerSearch = page.Locator(".customer-picker-search-input");
         await customerSearch.FillAsync(customer.Email);
-        await Expect(page.Locator(".customer-picker-option").Filter(new() { HasText = customer.FullName })).ToBeVisibleAsync(new() { Timeout = 30_000 });
-        await page.Locator(".customer-picker-option").Filter(new() { HasText = customer.FullName }).ClickAsync();
+        var customerOption = page.Locator(".customer-picker-option").Filter(new() { HasText = customer.FullName }).First;
+        await Expect(customerOption).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await customerOption.ClickAsync();
         await Expect(page.Locator(".ccc-root")).ToContainTextAsync(customer.FullName, new() { Timeout = 15_000 });
         await Expect(page.Locator("body")).ToContainTextAsync("Drop files here or click to upload", new() { Timeout = 15_000 });
         await Expect(page.Locator("body")).ToContainTextAsync("Quote Total", new() { Timeout = 15_000 });
@@ -2658,6 +2660,88 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies employee-triggered customer notifications flow through NotificationService delivery logs and
+    /// customer notification preferences affect later delivery decisions. Covers the executable portion of OPS-003.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "OPS-003")]
+    public async Task Intranet_CustomerNotification_QueuesDeliveryAndRespectsOptOutPreference()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(page, intranetBase, "/");
+        var customer = await CreateIntranetCorporateCustomerAsync(page);
+        var detailResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/customers/${id}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            customer.CustomerId);
+
+        Assert.StartsWith("200 ", detailResult, StringComparison.Ordinal);
+        using var detailDocument = JsonDocument.Parse(detailResult[4..]);
+        var customerDetail = detailDocument.RootElement;
+        var principalId = GetJsonString(customerDetail, "principalId", "PrincipalId");
+        Assert.False(string.IsNullOrWhiteSpace(principalId));
+
+        await WaitForIntranetApiTextContainsAsync(page, $"/api/v1/notifications/preferences/{principalId}", "email");
+
+        await page.GotoAsync(new Uri(intranetBase, $"/customers/{customer.CustomerId}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator(".customer-field").Filter(new() { HasText = "Email" }).Locator("input").First).ToHaveValueAsync(customer.Email, new() { Timeout = 30_000 });
+
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var subject = $"OPS003 shipment update {unique}";
+        var body = $"Your MALIEV order notification is being verified by Aspire E2E {unique}.";
+        var deliveredMessageId = await SendCustomerEmailFromDetailAsync(page, customer.CustomerId, subject, body);
+
+        await WaitForIntranetApiTextContainsAsync(page, "/api/v1/notifications/delivery-logs?page=1&pageSize=50", deliveredMessageId);
+        var deliveredLog = await GetNotificationDeliveryLogAsync(page, deliveredMessageId);
+        Assert.Equal(principalId, GetJsonString(deliveredLog, "userId", "UserId"));
+        Assert.Equal("email", GetJsonString(deliveredLog, "channelType", "ChannelType"));
+        Assert.Equal("delivered", GetJsonString(deliveredLog, "status", "Status"));
+        Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveredLog, "providerMessageId", "ProviderMessageId")));
+
+        var optOutSubject = $"OPS003 opt out {unique}";
+        var preferenceUpdate = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch(`/api/v1/notifications/preferences/${args.principalId}`, {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        primaryChannelType: 'email',
+                        fallbackChannelTypes: ['sms'],
+                        optOutCategories: [args.optOutSubject]
+                    })
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new { principalId, optOutSubject });
+
+        Assert.StartsWith("200 ", preferenceUpdate, StringComparison.Ordinal);
+        Assert.Contains(optOutSubject, preferenceUpdate, StringComparison.OrdinalIgnoreCase);
+
+        await page.Locator(".mlv-modal-actions").GetByRole(AriaRole.Button, new() { NameString = "Cancel" }).ClickAsync();
+
+        var skippedMessageId = await SendCustomerEmailFromDetailAsync(
+            page,
+            customer.CustomerId,
+            optOutSubject,
+            $"This notification category should be skipped by preference {unique}.");
+
+        await WaitForIntranetApiTextContainsAsync(page, "/api/v1/notifications/delivery-logs?page=1&pageSize=50", skippedMessageId);
+        var skippedLog = await GetNotificationDeliveryLogAsync(page, skippedMessageId);
+        Assert.Equal(principalId, GetJsonString(skippedLog, "userId", "UserId"));
+        Assert.Equal("failed", GetJsonString(skippedLog, "status", "Status"));
+        var skipReason = GetJsonString(skippedLog, "error", "Error", "subject", "Subject", "messageContent", "MessageContent");
+        Assert.Contains("Skipped", skipReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("opted out", skipReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Verifies global search returns newly created customer records and navigates to the customer workflow.
     /// Covers the indexed, permission-scoped search portion of OPS-001.
     /// </summary>
@@ -2746,13 +2830,21 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         string readinessDescription)
     {
         var loginUrl = new Uri(intranetBase, $"/login?returnUrl={Uri.EscapeDataString(returnUrl)}").ToString();
-        var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(4);
         string? lastError = null;
 
         while (DateTimeOffset.UtcNow < deadline)
         {
             try
             {
+                var tokenState = await GetAuthLoginPermissionStateAsync(email, password);
+                if (!isReady(tokenState))
+                {
+                    lastError = $"AuthService login for {email} succeeded, but {readinessDescription} are not ready. Auth token: {tokenState.Diagnostic}";
+                    await page.WaitForTimeoutAsync(2_000);
+                    continue;
+                }
+
                 await page.GotoAsync(loginUrl, new PageGotoOptions
                 {
                     Timeout = 15_000,
@@ -2835,6 +2927,42 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         }
 
         throw new TimeoutException($"Intranet employee {email} could not sign in before timeout. Last error: {lastError}");
+    }
+
+    private async Task<IntranetPermissionState> GetAuthLoginPermissionStateAsync(string email, string password)
+    {
+        try
+        {
+            using var authClient = _fixture.CreateClient("AuthService");
+            using var response = await authClient.PostAsJsonAsync(
+                "/auth/v1/login",
+                new
+                {
+                    username = email,
+                    password,
+                    user_type = "employee"
+                });
+
+            var responseText = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                return new IntranetPermissionState(false, false, new HashSet<string>(StringComparer.OrdinalIgnoreCase), $"{(int)response.StatusCode} {responseText}");
+            }
+
+            using var document = JsonDocument.Parse(responseText);
+            var root = document.RootElement;
+            var accessToken = GetJsonString(root, "access_token", "accessToken");
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                return new IntranetPermissionState(true, false, new HashSet<string>(StringComparer.OrdinalIgnoreCase), responseText);
+            }
+
+            return GetPermissionStateFromJwt(accessToken, responseText);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or TaskCanceledException)
+        {
+            return new IntranetPermissionState(false, false, new HashSet<string>(StringComparer.OrdinalIgnoreCase), ex.Message);
+        }
     }
 
     private static async Task<string> ReadBodyPreviewAsync(IPage page, int maxLength = 1_000)
@@ -3065,6 +3193,61 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         return new IntranetPermissionState(true, hasWildcard, permissionSet, authUser);
     }
 
+    private static IntranetPermissionState GetPermissionStateFromJwt(string accessToken, string diagnostic)
+    {
+        var segments = accessToken.Split('.');
+        if (segments.Length < 2)
+        {
+            return new IntranetPermissionState(true, false, new HashSet<string>(StringComparer.OrdinalIgnoreCase), diagnostic);
+        }
+
+        var payloadBytes = Base64UrlDecode(segments[1]);
+        using var document = JsonDocument.Parse(payloadBytes);
+        var permissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        AddJwtClaimValues(document.RootElement, permissions, "permissions", "permission");
+
+        return new IntranetPermissionState(true, permissions.Contains("*"), permissions, diagnostic);
+    }
+
+    private static void AddJwtClaimValues(JsonElement root, HashSet<string> values, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            if (!root.TryGetProperty(propertyName, out var property))
+            {
+                continue;
+            }
+
+            if (property.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in property.EnumerateArray())
+                {
+                    var value = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        values.Add(value);
+                    }
+                }
+            }
+            else if (property.ValueKind == JsonValueKind.String)
+            {
+                var value = property.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    values.Add(value);
+                }
+            }
+        }
+    }
+
+    private static byte[] Base64UrlDecode(string value)
+    {
+        var padded = value.Replace('-', '+').Replace('_', '/');
+        padded = padded.PadRight(padded.Length + ((4 - padded.Length % 4) % 4), '=');
+        return Convert.FromBase64String(padded);
+    }
+
     private sealed record IntranetPermissionState(
         bool IsAuthenticated,
         bool HasWildcard,
@@ -3117,8 +3300,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var unique = Guid.NewGuid().ToString("N")[..12];
         var email = $"e2e.intranet.customer.{unique}@maliev.local";
         const string firstName = "E2E";
-        const string lastName = "Project Customer";
-        const string fullName = $"{firstName} {lastName}";
+        var lastName = $"Project Customer {unique[..6]}";
+        var fullName = $"{firstName} {lastName}";
 
         var payload = new
         {
@@ -3365,6 +3548,53 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     private sealed record CreatedIntranetSupplier(Guid Id, string Name, string TaxId, string Email);
+
+    private static async Task<string> SendCustomerEmailFromDetailAsync(IPage page, Guid customerId, string subject, string body)
+    {
+        var sendResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/customers/{customerId}/email", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await page.Locator("button.customer-email-open").ClickAsync();
+        await page.Locator(".customer-email-subject").WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+        await page.Locator(".customer-email-subject").FillAsync(subject);
+        await page.Locator(".customer-email-body").FillAsync(body);
+        await page.Locator("button.customer-email-send").ClickAsync();
+
+        var sendResponse = await sendResponseTask;
+        var sendBody = await ReadResponseTextOrEmptyAsync(sendResponse);
+        Assert.True(sendResponse.Ok, $"Customer notification request failed with HTTP {sendResponse.Status}: {sendBody}");
+        using var document = JsonDocument.Parse(sendBody);
+        var messageId = GetJsonString(document.RootElement, "messageId", "MessageId");
+        Assert.False(string.IsNullOrWhiteSpace(messageId));
+        await page.Locator(".customer-email-state.success").WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 30_000 });
+        return messageId;
+    }
+
+    private static async Task<JsonElement> GetNotificationDeliveryLogAsync(IPage page, string eventId)
+    {
+        var logsResult = await page.EvaluateAsync<string>(
+            @"async () => {
+                const r = await fetch('/api/v1/notifications/delivery-logs?page=1&pageSize=50', { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }");
+
+        Assert.StartsWith("200 ", logsResult, StringComparison.Ordinal);
+        using var logsDocument = JsonDocument.Parse(logsResult[4..]);
+        Assert.True(TryGetJsonProperty(logsDocument.RootElement, out var logs, "data", "Data", "items", "Items"));
+
+        foreach (var log in logs.EnumerateArray())
+        {
+            if (string.Equals(eventId, GetJsonString(log, "eventId", "EventId"), StringComparison.OrdinalIgnoreCase))
+            {
+                return log.Clone();
+            }
+        }
+
+        Assert.Fail($"Notification delivery log for event {eventId} was not found. Last result: {logsResult[..Math.Min(logsResult.Length, 2_000)]}");
+        return default;
+    }
 
     private static async Task WaitForIntranetApiTextContainsAsync(IPage page, string path, string expectedText)
     {
