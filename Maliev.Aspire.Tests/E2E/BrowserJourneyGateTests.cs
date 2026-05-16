@@ -1660,6 +1660,127 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an employee can create and maintain a supplier profile through the Intranet supplier UI.
+    /// Covers the executable supplier profile create/edit/detail portions of PROC-002.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "PROC-002")]
+    public async Task Intranet_SupplierProfile_CreatesAndEditsSupplier()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..12];
+        var supplierName = $"E2E Supplier Profile {unique}";
+        var taxId = $"SUP{DateTimeOffset.UtcNow:HHmmssff}";
+        var email = $"supplier.profile.{unique}@maliev.local";
+        var phone = $"+662{Random.Shared.Next(1000000, 9999999)}";
+        var contact = $"Procurement Contact {unique}";
+        var address = $"88 Supplier Road {unique}";
+        var city = "Bangkok";
+        var postalCode = "10310";
+        var capabilities = "CNC, Sheet metal";
+
+        await SignInToIntranetAsync(page, intranetBase, "/purchasing/suppliers");
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "Supplier Profiles" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "New Supplier" }).ClickAsync();
+        var createPanel = page.Locator(".mlv-panel-card").Filter(new() { HasText = "Create supplier" }).First;
+        await Expect(createPanel).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await createPanel.GetByLabel("Supplier name").FillAsync(supplierName);
+        await createPanel.GetByLabel("Tax ID").FillAsync(taxId);
+        await createPanel.GetByLabel("Email").FillAsync(email);
+        await createPanel.GetByLabel("Phone").FillAsync(phone);
+        await createPanel.GetByLabel("Contact person").FillAsync(contact);
+        await createPanel.GetByLabel("Country").FillAsync("Thailand");
+        await createPanel.GetByLabel("City").FillAsync(city);
+        await createPanel.GetByLabel("Postal code").FillAsync(postalCode);
+        await createPanel.GetByLabel("Address").FillAsync(address);
+        await createPanel.GetByLabel("Capabilities").FillAsync(capabilities);
+
+        var createResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/suppliers", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await createPanel.GetByRole(AriaRole.Button, new() { NameString = "Create Supplier" }).ClickAsync();
+        var createResponse = await createResponseTask;
+        var createBody = await ReadResponseTextOrEmptyAsync(createResponse);
+        Assert.True(createResponse.Ok, $"Supplier create failed with HTTP {createResponse.Status}: {createBody}");
+
+        using var createDocument = JsonDocument.Parse(createBody);
+        var supplierId = createDocument.RootElement.GetProperty("id").GetGuid();
+        Assert.Equal(supplierName, GetJsonString(createDocument.RootElement, "companyName", "CompanyName", "name", "Name"));
+        Assert.Equal(taxId, GetJsonString(createDocument.RootElement, "taxId", "TaxId"));
+        Assert.False(string.IsNullOrWhiteSpace(GetJsonString(createDocument.RootElement, "rowVersion", "RowVersion")));
+
+        await page.WaitForURLAsync(
+            url => url.Contains($"/purchasing/suppliers/{supplierId}", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForURLOptions { Timeout = 30_000, WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(supplierName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(taxId, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(address, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(contact, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("CNC", new() { Timeout = 30_000 });
+
+        var updatedName = $"{supplierName} Revised";
+        var updatedAddress = $"99 Revised Supplier Road {unique}";
+        var updatedCity = "Samut Prakan";
+        var updatedPostalCode = "10270";
+        var updatedCapabilities = "CNC, Anodizing, Aluminum stock";
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Edit" }).ClickAsync();
+        await page.GetByLabel("Supplier name").FillAsync(updatedName);
+        await page.GetByLabel("Address").FillAsync(updatedAddress);
+        await page.GetByLabel("City").FillAsync(updatedCity);
+        await page.GetByLabel("Postal code").FillAsync(updatedPostalCode);
+        await page.GetByRole(AriaRole.Textbox, new() { NameString = "Capabilities" }).FillAsync(updatedCapabilities);
+
+        var updateResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/suppliers/{supplierId}", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "PUT", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Save" }).ClickAsync();
+        var updateResponse = await updateResponseTask;
+        var updateBody = await ReadResponseTextOrEmptyAsync(updateResponse);
+        Assert.True(updateResponse.Ok, $"Supplier update failed with HTTP {updateResponse.Status}: {updateBody}");
+
+        await Expect(page.Locator("body")).ToContainTextAsync(updatedName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(updatedAddress, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(updatedCity, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(updatedPostalCode, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Anodizing", new() { Timeout = 30_000 });
+
+        var persistedResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/suppliers/${id}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            supplierId);
+
+        Assert.StartsWith("200 ", persistedResult, StringComparison.Ordinal);
+        using (var persistedDocument = JsonDocument.Parse(persistedResult[4..]))
+        {
+            var supplier = persistedDocument.RootElement;
+            Assert.Equal(updatedName, GetJsonString(supplier, "name", "Name"));
+            Assert.Equal(taxId, GetJsonString(supplier, "taxId", "TaxId"));
+            Assert.Equal(updatedAddress, GetJsonString(supplier, "address", "Address"));
+            Assert.Equal(updatedCity, GetJsonString(supplier, "city", "City"));
+            Assert.Equal(updatedPostalCode, GetJsonString(supplier, "postalCode", "PostalCode"));
+            Assert.False(string.IsNullOrWhiteSpace(GetJsonString(supplier, "rowVersion", "RowVersion")));
+            Assert.True(TryGetJsonProperty(supplier, out var persistedCapabilities, "capabilities", "Capabilities"));
+            Assert.Contains(persistedCapabilities.EnumerateArray(), capability =>
+                string.Equals("Anodizing", capability.GetString(), StringComparison.Ordinal));
+        }
+
+        await page.GotoAsync(new Uri(intranetBase, "/purchasing/suppliers").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(updatedName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(taxId, new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies an employee can create a supplier-backed purchase order, attach evidence, cancel with a reason, and see persisted state.
     /// Covers the executable supplier profile, purchase order, attachment, and cancellation portions of PROC-002 and PROC-003.
     /// </summary>
