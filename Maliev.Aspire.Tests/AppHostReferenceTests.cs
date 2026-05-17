@@ -209,7 +209,23 @@ public sealed class AppHostReferenceTests
         }
 
         Assert.Contains(".WithEnvironment(\"QuoteEngine__BaseUrl\", quoteEngineBff.GetEndpoint(\"https\"))", webBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientId\", config.WebGoogleClientId)", webBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientSecret\", config.WebGoogleClientSecret)", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/web/aspire-liveness\")", webBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Customer Web BFF should use its own Google OAuth client instead of the employee Intranet client.
+    /// </summary>
+    [Fact]
+    public void AppHost_WebBff_LoadsDedicatedGoogleOAuthConfiguration()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+
+        Assert.Contains("Authentication:Google:Web:ClientId", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("Authentication:Google:Web:ClientSecret", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("WebGoogleClientId: webGoogleClientId", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("WebGoogleClientSecret: webGoogleClientSecret", appHostSource, StringComparison.Ordinal);
     }
 
     /// <summary>

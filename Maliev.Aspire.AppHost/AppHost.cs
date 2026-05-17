@@ -78,6 +78,16 @@ static partial class Program
 
         var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId", secret: true);
         var googleClientSecret = builder.AddParameterFromConfig("GoogleClientSecret", "Authentication:Google:ClientSecret", secret: true);
+        var webGoogleClientId = builder.AddParameterFromConfig(
+            "WebGoogleClientId",
+            "Authentication:Google:Web:ClientId",
+            secret: true,
+            defaultValue: builder.Configuration["Authentication:Google:ClientId"]);
+        var webGoogleClientSecret = builder.AddParameterFromConfig(
+            "WebGoogleClientSecret",
+            "Authentication:Google:Web:ClientSecret",
+            secret: true,
+            defaultValue: builder.Configuration["Authentication:Google:ClientSecret"]);
 
         var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
         builder.Configuration["Parameters:AspireTestAdminEnabled"] =
@@ -116,6 +126,8 @@ static partial class Program
             JwtAudience: jwtAudience,
             GoogleClientId: googleClientId,
             GoogleClientSecret: googleClientSecret,
+            WebGoogleClientId: webGoogleClientId,
+            WebGoogleClientSecret: webGoogleClientSecret,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
             AspireTestAdminPassword: aspireTestAdminPassword,
             CorsAllowedOrigins: corsAllowedOrigins,
@@ -981,7 +993,9 @@ static partial class Program
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .WithEnvironment("Authentication__Google__ClientId", config.WebGoogleClientId)
+            .WithEnvironment("Authentication__Google__ClientSecret", config.WebGoogleClientSecret);
 
         var inventoryService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_InventoryService_Api>("InventoryService")
@@ -1143,6 +1157,8 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtAudience,
     IResourceBuilder<ParameterResource> GoogleClientId,
     IResourceBuilder<ParameterResource> GoogleClientSecret,
+    IResourceBuilder<ParameterResource> WebGoogleClientId,
+    IResourceBuilder<ParameterResource> WebGoogleClientSecret,
     IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
     IResourceBuilder<ParameterResource> AspireTestAdminPassword,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,
