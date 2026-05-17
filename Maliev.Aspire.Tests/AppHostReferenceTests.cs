@@ -201,7 +201,8 @@ public sealed class AppHostReferenceTests
             "paymentService",
             "pricingService",
             "uploadService",
-            "commerceService"
+            "commerceService",
+            "chatbotService"
         })
         {
             Assert.Contains($".WithReference({dependency})", webBlock, StringComparison.Ordinal);
