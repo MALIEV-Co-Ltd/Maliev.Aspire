@@ -52,6 +52,43 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
+    /// OpenTelemetry collector config must not depend on Docker Desktop host-drive bind mounts.
+    /// </summary>
+    [Fact]
+    public void AppHost_OpenTelemetryCollector_UsesContainerFileConfig()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var appHostDirectory = Path.GetDirectoryName(FindAppHostSource())!;
+        var collectorExtensionSource = File.ReadAllText(Path.Combine(
+            appHostDirectory,
+            "OpenTelemetryCollector",
+            "OpenTelemetryCollectorResourceBuilderExtensions.cs"));
+
+        Assert.Contains("AddOpenTelemetryCollector(\"otelcollector\", \"../otelcollector/config.yaml\")", appHostSource, StringComparison.Ordinal);
+        Assert.Contains(".WithContainerFiles(\"/etc/otelcol-contrib\"", collectorExtensionSource, StringComparison.Ordinal);
+        Assert.Contains("Contents = File.ReadAllText(configFilePath)", collectorExtensionSource, StringComparison.Ordinal);
+        Assert.DoesNotContain(".WithBindMount(configFileLocation", collectorExtensionSource, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Monitoring containers should avoid host bind mounts so Docker Desktop drive sharing cannot block the app model.
+    /// </summary>
+    [Fact]
+    public void AppHost_MonitoringContainers_AvoidHostBindMounts()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+
+        Assert.Contains(".WithContainerFiles(\"/etc/prometheus\", ResolveRequiredDirectoryPath(\"../prometheus\"))", appHostSource, StringComparison.Ordinal);
+        Assert.Contains(".WithContainerFiles(\"/etc/grafana\", ResolveRequiredDirectoryPath(\"../grafana/config\"))", appHostSource, StringComparison.Ordinal);
+        Assert.Contains(".WithContainerFiles(\"/var/lib/grafana/dashboards\", ResolveRequiredDirectoryPath(\"../grafana/dashboards\"))", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("insight.WithVolume(\"redisinsight-data\", \"/data\")", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("Directory.Exists(candidate)", appHostSource, StringComparison.Ordinal);
+        Assert.DoesNotContain(".WithBindMount(\"../prometheus\"", appHostSource, StringComparison.Ordinal);
+        Assert.DoesNotContain(".WithBindMount(\"../grafana", appHostSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("insight.WithBindMount(\"redisinsight-data\"", appHostSource, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Aspire should expose explicit seed commands for the local test administrator login path.
     /// </summary>
     [Fact]

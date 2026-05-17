@@ -30,7 +30,7 @@ builder.Build().Run();
 static IResourceBuilder<ContainerResource> ConfigurePrometheus(IDistributedApplicationBuilder builder)
 {
     return builder.AddContainer("prometheus", "prom/prometheus", "v3.0.1")
-        .WithBindMount("../prometheus", "/etc/prometheus", isReadOnly: true)
+        .WithContainerFiles("/etc/prometheus", ResolveRequiredDirectoryPath("../prometheus"))
         .WithArgs("--web.enable-otlp-receiver", "--config.file=/etc/prometheus/prometheus.yml")
         .WithHttpEndpoint(targetPort: 9090)
         .WithUrlForEndpoint("http", u => u.DisplayText = "Prometheus Dashboard");
@@ -41,8 +41,8 @@ static IResourceBuilder<ContainerResource> ConfigureGrafana(
     IResourceBuilder<ContainerResource> prometheus)
 {
     return builder.AddContainer("grafana", "grafana/grafana")
-        .WithBindMount("../grafana/config", "/etc/grafana", isReadOnly: true)
-        .WithBindMount("../grafana/dashboards", "/var/lib/grafana/dashboards", isReadOnly: true)
+        .WithContainerFiles("/etc/grafana", ResolveRequiredDirectoryPath("../grafana/config"))
+        .WithContainerFiles("/var/lib/grafana/dashboards", ResolveRequiredDirectoryPath("../grafana/dashboards"))
         .WithEnvironment("PROMETHEUS_ENDPOINT", prometheus.GetEndpoint("http"))
         .WithHttpEndpoint(targetPort: 3000)
         .WithUrlForEndpoint("http", u => u.DisplayText = "Grafana Dashboard");
@@ -54,6 +54,27 @@ static IResourceBuilder<ContainerResource> ConfigureOpenTelemetry(
 {
     return builder.AddOpenTelemetryCollector("otelcollector", "../otelcollector/config.yaml")
         .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp");
+}
+
+static string ResolveRequiredDirectoryPath(string sourcePath)
+{
+    var candidates = new[]
+    {
+        Path.GetFullPath(sourcePath),
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", sourcePath)),
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", sourcePath)),
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", sourcePath))
+    };
+
+    foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+    {
+        if (Directory.Exists(candidate))
+        {
+            return candidate;
+        }
+    }
+
+    throw new DirectoryNotFoundException($"Unable to locate Docker container file source directory '{sourcePath}'.");
 }
 /// <summary>
 /// Main program class containing configuration methods for the Aspire AppHost.
@@ -173,7 +194,7 @@ static partial class Program
 
             redis.WithRedisInsight(insight =>
             {
-                insight.WithBindMount("redisinsight-data", "/data")
+                insight.WithVolume("redisinsight-data", "/data")
                     .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard");
             });
 

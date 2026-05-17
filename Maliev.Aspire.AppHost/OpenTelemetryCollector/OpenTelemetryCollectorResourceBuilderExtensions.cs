@@ -1,3 +1,4 @@
+using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -28,6 +29,7 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
         var isHttpsEnabled = url.StartsWith("https", StringComparison.OrdinalIgnoreCase);
 
         var dashboardOtlpEndpoint = new HostUrl(url);
+        var configFilePath = ResolveRequiredFilePath(configFileLocation);
 
         var collectorResource = new OpenTelemetryCollectorResource(name);
         var resourceBuilder = builder.AddResource(collectorResource)
@@ -36,7 +38,13 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
             .WithEndpoint(targetPort: 4318, name: OpenTelemetryCollectorResource.OtlpHttpEndpointName, scheme: "http")
             .WithUrlForEndpoint(OpenTelemetryCollectorResource.OtlpGrpcEndpointName, u => u.DisplayLocation = UrlDisplayLocation.DetailsOnly)
             .WithUrlForEndpoint(OpenTelemetryCollectorResource.OtlpHttpEndpointName, u => u.DisplayLocation = UrlDisplayLocation.DetailsOnly)
-            .WithBindMount(configFileLocation, "/etc/otelcol-contrib/config.yaml")
+            .WithContainerFiles("/etc/otelcol-contrib", [
+                new ContainerFile
+                {
+                    Name = "config.yaml",
+                    Contents = File.ReadAllText(configFilePath)
+                }
+            ])
             .WithEnvironment("ASPIRE_ENDPOINT", $"{dashboardOtlpEndpoint}")
             .WithEnvironment("ASPIRE_API_KEY", builder.Configuration[DashboardOtlpApiKeyVariableName])
             .WithEnvironment("ASPIRE_INSECURE", isHttpsEnabled ? "false" : "true");
@@ -67,5 +75,26 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
         resourceBuilder.WithArgs(@"--config=/etc/otelcol-contrib/config.yaml");
 
         return resourceBuilder;
+    }
+
+    private static string ResolveRequiredFilePath(string sourcePath)
+    {
+        var candidates = new[]
+        {
+            Path.GetFullPath(sourcePath),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", sourcePath)),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", sourcePath)),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", sourcePath))
+        };
+
+        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new FileNotFoundException($"Unable to locate OpenTelemetry collector configuration file '{sourcePath}'.", sourcePath);
     }
 }
