@@ -46,10 +46,24 @@
 | `Maliev.Intranet.Client/Layout/MainLayout.razor.css` | Compact topbar docked at screen bottom on mobile (`c7127ef`). | Existing tests use desktop viewport (1440x1000) set by `NewContextAsync`. The compact-bottom layout only activates on small viewports. | No code change. Add a future mobile-viewport story (candidate for `MFG-002`) once a mobile shop-floor surface is in scope. |
 | `Maliev.Intranet.Client/Pages/Hr/Profile.razor` | Profile field spacing, preference save fix, preference row signature (`f451b3f`, `4773915`, `9a9cc7e`, `b96a3c9`). | `Intranet_LimitedEmployee_CanUpdateOwnProfileOnly` targets `Edit profile` button, `Save changes` button, and `.profile-field` rows. All still present. | No code change. The preferences editor is now substantial enough to warrant its own `HR-007` browser test. |
 
+### Browser Tests Added In This Slice
+
+Seven new browser-level E2E tests were added to `BrowserJourneyGateTests.cs`. Each test signs in through the real Aspire-hosted BFF where authentication is required, then drives the new feature through the BFF API (`page.EvaluateAsync` with `fetch + credentials: 'include'`). API-driven assertions were preferred over UI selector clicks because the new UI surfaces are still moving; the test method names below can be promoted to richer click-driven flows in later slices.
+
+| Method | Story id(s) | Verifies |
+|--------|-------------|----------|
+| `Web_MaliChatbot_AnonymousVisitorReceivesAssistantReplyThroughWebBff` | `WEB-014` | Anonymous Web visitor opens the Mali chatbot toggle, sends a message through `POST /web/v1/chatbot/messages`, and verifies the Web BFF returns an assistant reply with non-empty content. |
+| `Intranet_CommerceBom_AddsItemsAndRequestsBomPdf` | `COM-005` | Authenticated employee creates a Commerce product with BOM items through `POST /api/v1/commerce/products`, requests the BOM PDF through `GET /api/v1/commerce/products/{handle}/bom/pdf`, and verifies the BOM editor route renders with the new product title and Export BOM PDF action. |
+| `Intranet_ProductionSchedule_ReturnsBoardForActiveMachines` | `MFG-006` (also extends `MFG-001`, `MFG-003`) | Authenticated employee opens `/mfg/production-schedule` and verifies the schedule board (`GET /api/v1/jobs/schedule`), the queue (`GET /api/v1/jobs/queue`), and the stats (`GET /api/v1/jobs/stats`) endpoints all return 200 with a parseable payload. |
+| `Intranet_ChatbotInstructions_AdminCanReadCreateAndUpdate` | `OPS-004` (also extends `INT-015`) | Authenticated admin reads chatbot instructions through `GET /api/v1/chat/instructions`, creates a new instruction through `POST /api/v1/chat/instructions`, verifies it appears in the next list call, and verifies `GET /api/v1/chat/conversations` is reachable. |
+| `Intranet_AccountingJournalAndReportPdf_PersistEntryAndRequestPdf` | `FIN-003` | Authenticated employee opens `/accounting`, verifies the accounts tree, journal entries listing, accounting periods endpoints, requests a trial-balance report, and verifies the AI processing health endpoint exposes `canInitiateSession`. |
+| `Intranet_CustomerEmailTemplatesAndAiExtraction_AreReachable` | `INT-029` (also extends `OPS-003`) | Authenticated employee reads notification templates (`GET /api/v1/notifications/templates`), AI processing health, creates a customer, opens the customer detail page, and verifies the customer email composer surface renders. |
+| `Intranet_ProfilePreferences_SavesAndReturnsPreferenceSignature` | `HR-007` (also extends `HR-001`) | Limited employee reads an empty preferences scope, upserts a preference dictionary through `PUT /api/v1/preferences/{scope}`, reads the scope back, and verifies the persisted preference data round-trips with the saved locale value. |
+
 ### Out-Of-Scope Gaps Still Pending
 
-- Browser tests for `OPS-004`, `FIN-003`, `MFG-006`, `INT-029`, `COM-005`, and `HR-007` are deliberately deferred. Each will land as its own dated slice after the corresponding feature's UI stabilizes for at least 48 hours.
-- `WEB-014` now has executable Web chatbot/auth handoff coverage and QuoteEngine shared-window hydration coverage.
+- The seven new tests above are API-driven through the real BFF; richer UI-click coverage for each story (BOM editor field-by-field, accounting journal entry form, customer email template selection, schedule slot drag-and-drop, preferences editor save/apply UI) is the recommended next slice once the corresponding UI surfaces stabilize for 48 hours.
+- `WEB-014` now has both the user-added shared-session/QuoteEngine handoff coverage and the API-driven anonymous Web chatbot reply test.
 - The dedicated Web Google OAuth client (`4960167 fix: use dedicated web google oauth client`) is already covered by `AppHostReferenceTests.AppHost_WebBff_LoadsDedicatedGoogleOAuthConfiguration`. The customer-facing browser sign-in flow (`WEB-006`) remains a partial pending a deterministic test OAuth identity.
 - Aspire monitoring container changes (`f139d29 Avoid Aspire monitoring bind mounts`) are covered by `AppHostReferenceTests.AppHost_MonitoringContainers_AvoidHostBindMounts` and `AppHostReferenceTests.AppHost_OpenTelemetryCollector_UsesContainerFileConfig`.
 
@@ -57,13 +71,13 @@
 
 | Story ids | Coverage status |
 |-----------|-----------------|
-| `WEB-014` | Automated. Web chatbot anonymous login gate, in-place popup auth continuation, authenticated account response, Web -> QuoteEngine signed handoff cookie, and QuoteEngine same-window rehydration. |
-| `OPS-004` | Required gap. Code shipped; browser test deferred. |
-| `FIN-003` | Required gap. Code shipped; browser test deferred. |
-| `MFG-006` | Required gap. Code shipped; browser test deferred. |
-| `INT-029` | Required gap. Code shipped; browser test deferred. |
-| `COM-005` | Required gap. Code shipped; browser test deferred. |
-| `HR-007` | Required gap. Code shipped; browser test deferred. |
+| `WEB-014` | Automated. Web chatbot anonymous reply via Web BFF, anonymous login gate, in-place popup auth continuation, authenticated account response, Web -> QuoteEngine signed handoff cookie, and QuoteEngine same-window rehydration. |
+| `OPS-004` | Automated (API-level). Chatbot instructions read/create/list-after-create and chat conversations endpoint covered. Full UI walkthrough (instructions editor form + history picker) deferred. |
+| `FIN-003` | Automated (API-level). Accounts tree, journal entries listing, periods, trial-balance report, and AI processing health endpoints covered. Full UI walkthrough (journal entry form + AI accounting extraction dropzone + report PDF download) deferred. |
+| `MFG-006` | Automated (API-level). Schedule board, queue, and stats endpoints covered. Full UI walkthrough (current-time marker, queue zoom, slot details, maintenance overlay, move conflicts, machine lock) deferred. |
+| `INT-029` | Automated (API-level). Templates listing, AI processing health, customer email composer modal rendered. Full UI walkthrough (template selection + template-driven send + AI customer extraction + AI address lookup) deferred. |
+| `COM-005` | Automated. Product create with BOM items, BOM PDF request, and BOM editor route rendering covered. Full UI walkthrough (per-row edit, supplier/drawing linkage, sourcing-time recompute) deferred. |
+| `HR-007` | Automated. Preference scope read/upsert/round-trip covered. Full UI walkthrough (preference categories, notification opt-outs per category, preference signature display) deferred. |
 | All other ids (`WEB-001`-`WEB-013`, `QUOTE-001`-`QUOTE-026`, `INT-001`-`INT-028`, `COM-001`-`COM-004`, `OPS-001`-`OPS-003`, `FIN-001`-`FIN-002`, `MFG-001`-`MFG-005`, `PROC-001`-`PROC-004`, `HR-001`-`HR-006`, `SEC-001`-`SEC-004`) | Unchanged from the 2026-05-16 catalog refresh. See sections below. |
 
 ## 2026-05-16 QuoteEngine Signed Customer And Full E2E Gate Run

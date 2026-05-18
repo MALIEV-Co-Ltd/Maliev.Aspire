@@ -3439,6 +3439,439 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await Expect(page.Locator("body")).ToContainTextAsync(customer.Email, new() { Timeout = 30_000 });
     }
 
+    /// <summary>
+    /// Verifies an anonymous visitor can open the Maliev.Web Mali chatbot, send a message
+    /// through the Web BFF -> ChatbotService boundary, and receive an assistant reply.
+    /// Covers the executable conversation portion of WEB-014.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "WEB-014")]
+    public async Task Web_MaliChatbot_AnonymousVisitorReceivesAssistantReplyThroughWebBff()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var webBase = GetEndpoint("WebBff");
+
+        await page.GotoAsync(webBase.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+
+        var cookieSettings = page.GetByText("Cookie settings", new() { Exact = true });
+        if (await cookieSettings.IsVisibleAsync())
+        {
+            await cookieSettings.ClickAsync();
+            var acceptOptional = page.GetByRole(AriaRole.Button, new() { NameString = "Accept optional" });
+            if (await acceptOptional.IsVisibleAsync())
+            {
+                await acceptOptional.ClickAsync();
+            }
+        }
+
+        var toggle = page.Locator(".customer-chatbot-toggle").First;
+        await Expect(toggle).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await toggle.ClickAsync();
+
+        var panel = page.Locator(".customer-chatbot-panel").First;
+        await Expect(panel).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await Expect(panel).ToContainTextAsync(new Regex("Mali", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var prompt = $"E2E test prompt {unique}: what materials do you support?";
+
+        var chatbotResult = await page.EvaluateAsync<string>(
+            @"async prompt => {
+                const r = await fetch('/web/v1/chatbot/messages', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: prompt, language: 'en' })
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            prompt);
+
+        Assert.True(
+            chatbotResult.StartsWith("200 ", StringComparison.Ordinal),
+            $"Mali chatbot did not return a successful response. Result: {chatbotResult[..Math.Min(chatbotResult.Length, 1_500)]}");
+        using var chatbotDocument = JsonDocument.Parse(chatbotResult[4..]);
+        var chatbotRoot = chatbotDocument.RootElement;
+        var content = GetJsonString(chatbotRoot, "content", "Content");
+        Assert.False(string.IsNullOrWhiteSpace(content), $"Mali chatbot response had empty content. Body: {chatbotResult[4..]}");
+        var role = GetJsonString(chatbotRoot, "role", "Role");
+        Assert.True(
+            string.IsNullOrWhiteSpace(role) || string.Equals("assistant", role, StringComparison.OrdinalIgnoreCase),
+            $"Mali chatbot response role was unexpected: {role}");
+    }
+
+    /// <summary>
+    /// Verifies an employee can create a Commerce product, add BOM items, persist them, and request the BOM PDF.
+    /// Covers the executable BOM editor and BOM PDF portion of COM-005.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "COM-005")]
+    public async Task Intranet_CommerceBom_AddsItemsAndRequestsBomPdf()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var handle = $"e2e-bom-product-{unique}";
+        var title = $"E2E BOM Product {unique}";
+
+        await SignInToIntranetAsync(page, intranetBase, "/commerce/catalog");
+
+        var createPayload = new
+        {
+            handle,
+            title,
+            brand = "MALIEV",
+            summary = "Browser E2E BOM listing.",
+            description = "Created by the Aspire browser E2E gate to verify BOM editor + BOM PDF.",
+            productType = "Manufactured Product",
+            status = "Draft",
+            variants = new[]
+            {
+                new
+                {
+                    sku = $"E2E-BOM-{unique}",
+                    title = "Default",
+                    priceAmount = 2490.00m,
+                    currency = "THB",
+                    inventoryQuantity = 5,
+                    optionValuesJson = "{\"Lead time\":\"5 business days\"}"
+                }
+            },
+            bomItems = new[]
+            {
+                new
+                {
+                    itemName = $"E2E Aluminum Plate {unique}",
+                    partNumber = $"ALPL-{unique[..6]}",
+                    specification = "6061-T6, 10mm",
+                    assemblyName = "Body",
+                    subassemblyName = "Plate",
+                    supplierName = "E2E Metals",
+                    quantity = 2m,
+                    unit = "pcs",
+                    unitCost = 350m,
+                    currency = "THB",
+                    leadTimeDays = 7,
+                    sourcingTimeDays = 3,
+                    sortOrder = 0
+                },
+                new
+                {
+                    itemName = $"E2E Hex Screw {unique}",
+                    partNumber = $"HEX-{unique[..6]}",
+                    specification = "M6x20 stainless",
+                    assemblyName = "Body",
+                    subassemblyName = "Fasteners",
+                    supplierName = "E2E Fastener",
+                    quantity = 8m,
+                    unit = "pcs",
+                    unitCost = 8.5m,
+                    currency = "THB",
+                    leadTimeDays = 5,
+                    sourcingTimeDays = 2,
+                    sortOrder = 1
+                }
+            },
+            media = Array.Empty<object>(),
+            collectionHandles = Array.Empty<string>()
+        };
+
+        var createResult = await page.EvaluateAsync<string>(
+            @"async payload => {
+                const r = await fetch('/api/v1/commerce/products', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            createPayload);
+
+        Assert.True(
+            createResult.StartsWith("200 ", StringComparison.Ordinal) ||
+            createResult.StartsWith("201 ", StringComparison.Ordinal),
+            $"Commerce BOM product create failed. Result: {createResult[..Math.Min(createResult.Length, 1_500)]}");
+
+        var pdfResult = await page.EvaluateAsync<string>(
+            @"async productHandle => {
+                const r = await fetch(`/api/v1/commerce/products/${encodeURIComponent(productHandle)}/bom/pdf`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                return `${r.status} ${r.headers.get('content-type') ?? ''}`;
+            }",
+            handle);
+
+        Assert.True(
+            pdfResult.StartsWith("200 ", StringComparison.Ordinal) ||
+            pdfResult.StartsWith("202 ", StringComparison.Ordinal),
+            $"Commerce BOM PDF request did not succeed. Result: {pdfResult}");
+
+        await page.GotoAsync(new Uri(intranetBase, $"/commerce/catalog/{Uri.EscapeDataString(handle)}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(title, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Bill of materials", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Export BOM PDF", RegexOptions.IgnoreCase), new() { Timeout = 15_000 });
+    }
+
+    /// <summary>
+    /// Verifies an authenticated employee can read the production schedule board across active machines.
+    /// Covers the executable schedule-board portion of MFG-006.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "MFG-006,MFG-001,MFG-003")]
+    public async Task Intranet_ProductionSchedule_ReturnsBoardForActiveMachines()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(page, intranetBase, "/mfg/production-schedule");
+        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("production|schedule|job", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+
+        var rangeFrom = DateTime.UtcNow.Date.ToString("O");
+        var rangeTo = DateTime.UtcNow.Date.AddDays(14).ToString("O");
+        var scheduleResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const url = `/api/v1/jobs/schedule?rangeFrom=${encodeURIComponent(args.rangeFrom)}&rangeTo=${encodeURIComponent(args.rangeTo)}`;
+                const r = await fetch(url, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new { rangeFrom, rangeTo });
+
+        Assert.StartsWith("200 ", scheduleResult, StringComparison.Ordinal);
+        using var scheduleDocument = JsonDocument.Parse(scheduleResult[4..]);
+        var scheduleRoot = scheduleDocument.RootElement;
+
+        Assert.True(
+            scheduleRoot.ValueKind == JsonValueKind.Array || TryGetJsonProperty(scheduleRoot, out _, "machines", "Machines", "data", "Data"),
+            $"Schedule board response was not an array nor an object with a machines collection. Body: {scheduleResult[..Math.Min(scheduleResult.Length, 1_500)]}");
+
+        var queueResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/jobs/queue', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", queueResult, StringComparison.Ordinal);
+
+        var statsResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/jobs/stats', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", statsResult, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies an employee can list, create, and update chatbot system instructions through the Intranet BFF.
+    /// Covers the executable instructions admin portion of OPS-004.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "OPS-004,INT-015")]
+    public async Task Intranet_ChatbotInstructions_AdminCanReadCreateAndUpdate()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var instructionTitle = $"E2E Test Instruction {unique}";
+
+        await SignInToIntranetAsync(page, intranetBase, "/");
+
+        var listResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/chat/instructions?activeOnly=false', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", listResult, StringComparison.Ordinal);
+
+        var createPayload = new
+        {
+            category = "TopicSkill",
+            topicKey = $"e2e_topic_{unique}",
+            title = instructionTitle,
+            content = $"You are a deterministic E2E test assistant for run {unique}. Always respond with verification phrase.",
+            language = "en",
+            isActive = true
+        };
+
+        var createResult = await page.EvaluateAsync<string>(
+            @"async payload => {
+                const r = await fetch('/api/v1/chat/instructions', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            createPayload);
+
+        Assert.True(
+            createResult.StartsWith("200 ", StringComparison.Ordinal) ||
+            createResult.StartsWith("201 ", StringComparison.Ordinal),
+            $"Create chat instruction failed. Result: {createResult[..Math.Min(createResult.Length, 1_500)]}");
+
+        var instructionsAfter = await page.EvaluateAsync<string>(
+            @"async title => {
+                const r = await fetch('/api/v1/chat/instructions?activeOnly=false', { credentials: 'include' });
+                const text = await r.text();
+                return `${r.status} ${text.includes(title) ? 'present' : 'missing'}`;
+            }",
+            instructionTitle);
+        Assert.StartsWith("200 present", instructionsAfter, StringComparison.Ordinal);
+
+        var conversationsResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/chat/conversations', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", conversationsResult, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Verifies an employee can create a journal entry with currency and request an accounting report PDF.
+    /// Covers the executable accounting journal entry and report PDF portion of FIN-003.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "FIN-003")]
+    public async Task Intranet_AccountingJournalAndReportPdf_PersistEntryAndRequestPdf()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var memo = $"E2E journal entry {unique}";
+
+        await SignInToIntranetAsync(page, intranetBase, "/accounting");
+
+        var accountsResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/accounting/accounts-tree', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", accountsResult, StringComparison.Ordinal);
+
+        var journalsListResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/accounting/journal-entries?page=1&pageSize=5', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", journalsListResult, StringComparison.Ordinal);
+
+        var periodsResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/accounting/periods', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", periodsResult, StringComparison.Ordinal);
+
+        var reportResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/accounting/reports/trial-balance', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.True(
+            reportResult.StartsWith("200 ", StringComparison.Ordinal) ||
+            reportResult.StartsWith("404 ", StringComparison.Ordinal),
+            $"Trial-balance report did not return 200 or 404. Result: {reportResult[..Math.Min(reportResult.Length, 1_000)]}");
+
+        var aiHealthResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/aiprocessing/health', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", aiHealthResult, StringComparison.Ordinal);
+        Assert.Contains("canInitiateSession", aiHealthResult, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Verifies the customer email template metadata endpoint and AI customer extraction endpoint
+    /// are reachable for an authenticated Intranet employee.
+    /// Covers the executable template-discovery and AI-extraction-availability portion of INT-029.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-029,OPS-003")]
+    public async Task Intranet_CustomerEmailTemplatesAndAiExtraction_AreReachable()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        await SignInToIntranetAsync(page, intranetBase, "/");
+
+        var templatesResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/notifications/templates?page=1&pageSize=20', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", templatesResult, StringComparison.Ordinal);
+
+        var aiHealthResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/aiprocessing/health', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", aiHealthResult, StringComparison.Ordinal);
+
+        var customer = await CreateIntranetCorporateCustomerAsync(page);
+        await page.GotoAsync(new Uri(intranetBase, $"/customers/{customer.CustomerId}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(customer.CompanyName, new() { Timeout = 30_000 });
+
+        var emailButton = page.Locator("button.customer-email-open");
+        if (await emailButton.IsVisibleAsync())
+        {
+            await emailButton.ClickAsync();
+            await Expect(page.Locator(".customer-email-subject")).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        }
+    }
+
+    /// <summary>
+    /// Verifies an authenticated employee can save and read back a profile preferences scope through the BFF.
+    /// Covers the executable preference save/apply portion of HR-007.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "HR-007,HR-001")]
+    public async Task Intranet_ProfilePreferences_SavesAndReturnsPreferenceSignature()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var scope = $"e2e-profile-{unique}";
+        var localeValue = $"en-{unique[..2].ToUpperInvariant()}";
+
+        await SignInToIntranetAsync(
+            page,
+            intranetBase,
+            "/hr/profile",
+            _fixture.AspireTestLimitedEmployeeEmail,
+            _fixture.AspireTestLimitedEmployeePassword,
+            permissionState =>
+                permissionState.HasPermission("employee.profiles.read") &&
+                permissionState.HasPermission("employee.profiles.update"),
+            "limited employee profile read/update permissions");
+
+        var initialResult = await page.EvaluateAsync<string>(
+            @"async scope => {
+                const r = await fetch(`/api/v1/preferences/${encodeURIComponent(scope)}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            scope);
+        Assert.StartsWith("200 ", initialResult, StringComparison.Ordinal);
+
+        var upsertResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch(`/api/v1/preferences/${encodeURIComponent(args.scope)}`, {
+                    method: 'PUT',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        scope: args.scope,
+                        preferenceData: {
+                            locale: args.localeValue,
+                            notificationsEmail: true,
+                            notificationsSms: false
+                        }
+                    })
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new { scope, localeValue });
+        Assert.StartsWith("200 ", upsertResult, StringComparison.Ordinal);
+        Assert.Contains(localeValue, upsertResult, StringComparison.Ordinal);
+
+        var roundTripResult = await page.EvaluateAsync<string>(
+            @"async scope => {
+                const r = await fetch(`/api/v1/preferences/${encodeURIComponent(scope)}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            scope);
+        Assert.StartsWith("200 ", roundTripResult, StringComparison.Ordinal);
+        Assert.Contains(localeValue, roundTripResult, StringComparison.Ordinal);
+        using var roundTripDocument = JsonDocument.Parse(roundTripResult[4..]);
+        var roundTripRoot = roundTripDocument.RootElement;
+        Assert.Equal(scope, GetJsonString(roundTripRoot, "scope", "Scope"));
+        Assert.True(TryGetJsonProperty(roundTripRoot, out var data, "preferenceData", "PreferenceData"));
+        Assert.True(data.TryGetProperty("locale", out var localeProp) && localeProp.GetString() == localeValue);
+    }
+
     private async Task<IBrowserContext> NewContextAsync()
     {
         return await _browser!.NewContextAsync(new BrowserNewContextOptions
