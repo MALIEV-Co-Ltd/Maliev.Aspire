@@ -1384,6 +1384,133 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an Intranet admin can browse paginated reference data and manage RegistryService Thai address records.
+    /// Covers the executable reference-data maintenance portion of OPS-001 and INT-014.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "OPS-001,INT-014")]
+    public async Task Intranet_ReferenceDataWorkbench_ManagesRegistryLocationsAndLoadsReferencePages()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var postalCode = $"{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() % 90_000 + 10_000:D5}";
+        var subdistrictTh = $"ตำบลทดสอบ {unique}";
+        var districtTh = $"อำเภอทดสอบ {unique}";
+        var provinceTh = $"จังหวัดทดสอบ {unique}";
+        var subdistrictEn = $"E2E Subdistrict {unique}";
+        var districtEn = $"E2E District {unique}";
+        var provinceEn = $"E2E Province {unique}";
+        var updatedDistrictEn = $"E2E Updated District {unique}";
+
+        await SignInToIntranetAsync(page, intranetBase, "/admin/reference-data?section=registry");
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "Reference Data" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.GetByRole(AriaRole.Tab, new() { NameString = "Countries" })).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await Expect(page.GetByRole(AriaRole.Tab, new() { NameString = "Currencies" })).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await Expect(page.GetByRole(AriaRole.Tab, new() { NameString = "Registry locations" })).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("RegistryService Thai Locations", new() { Timeout = 30_000 });
+
+        var countryPageResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/ReferenceData/countries/page?pageNumber=1&pageSize=10&includeInactive=true', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", countryPageResult, StringComparison.Ordinal);
+        using (var countryDocument = JsonDocument.Parse(countryPageResult[4..]))
+        {
+            Assert.True(GetJsonInt(countryDocument.RootElement, "totalCount", "TotalCount") > 0, "CountryService should return paginated country reference data.");
+            Assert.True(TryGetJsonProperty(countryDocument.RootElement, out var countries, "items", "Items"));
+            Assert.True(countries.GetArrayLength() > 0, "CountryService page should include country items.");
+        }
+
+        var currencyPageResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/ReferenceData/currencies/page?pageNumber=1&pageSize=10', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", currencyPageResult, StringComparison.Ordinal);
+        using (var currencyDocument = JsonDocument.Parse(currencyPageResult[4..]))
+        {
+            Assert.True(GetJsonInt(currencyDocument.RootElement, "totalCount", "TotalCount") > 0, "CurrencyService should return paginated currency reference data.");
+            Assert.True(TryGetJsonProperty(currencyDocument.RootElement, out var currencies, "items", "Items"));
+            Assert.True(currencies.GetArrayLength() > 0, "CurrencyService page should include currency items.");
+        }
+
+        var locationPageResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/ReferenceData/locations?pageNumber=1&pageSize=10', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", locationPageResult, StringComparison.Ordinal);
+        using (var locationDocument = JsonDocument.Parse(locationPageResult[4..]))
+        {
+            Assert.True(GetJsonInt(locationDocument.RootElement, "totalCount", "TotalCount") > 0, "RegistryService should return paginated Thai address reference data.");
+            Assert.True(TryGetJsonProperty(locationDocument.RootElement, out var locations, "items", "Items"));
+            Assert.True(locations.GetArrayLength() > 0, "RegistryService page should include location items.");
+        }
+
+        await page.GetByRole(AriaRole.Button, new() { NameString = "New location" }).ClickAsync();
+        var editor = page.Locator("[aria-label='Registry location editor']").First;
+        await Expect(editor).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await editor.GetByLabel("Postal code").FillAsync(postalCode);
+        await editor.GetByLabel("Province TH").FillAsync(provinceTh);
+        await editor.GetByLabel("District TH").FillAsync(districtTh);
+        await editor.GetByLabel("Subdistrict TH").FillAsync(subdistrictTh);
+        await editor.GetByLabel("Province EN").FillAsync(provinceEn);
+        await editor.GetByLabel("District EN").FillAsync(districtEn);
+        await editor.GetByLabel("Subdistrict EN").FillAsync(subdistrictEn);
+
+        var createResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/ReferenceData/locations", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await editor.GetByRole(AriaRole.Button, new() { NameString = "Save location" }).ClickAsync();
+        var createResponse = await createResponseTask;
+        var createBody = await ReadResponseTextOrEmptyAsync(createResponse);
+        Assert.True(createResponse.Ok, $"Registry location create failed with HTTP {createResponse.Status}: {createBody}");
+
+        using var createDocument = JsonDocument.Parse(createBody);
+        var createdLocationId = createDocument.RootElement.GetProperty("id").GetGuid();
+        Assert.NotEqual(Guid.Empty, createdLocationId);
+        Assert.Equal(postalCode, GetJsonString(createDocument.RootElement, "postalCode", "PostalCode"));
+        await Expect(page.Locator("body")).ToContainTextAsync("Registry location created.", new() { Timeout = 30_000 });
+
+        var searchInput = page.GetByLabel("Search locations");
+        await searchInput.FillAsync(unique);
+        await page.GetByRole(AriaRole.Button, new() { NameString = "Search" }).ClickAsync();
+        var createdRow = page.Locator("tbody tr").Filter(new() { HasText = unique }).First;
+        await Expect(createdRow).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(createdRow).ToContainTextAsync(postalCode);
+
+        await createdRow.GetByRole(AriaRole.Button, new() { NameString = "Edit" }).ClickAsync();
+        await Expect(editor).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await editor.GetByLabel("District EN").FillAsync(updatedDistrictEn);
+
+        var updateResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/ReferenceData/locations/{createdLocationId}", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "PUT", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await editor.GetByRole(AriaRole.Button, new() { NameString = "Save location" }).ClickAsync();
+        var updateResponse = await updateResponseTask;
+        var updateBody = await ReadResponseTextOrEmptyAsync(updateResponse);
+        Assert.True(updateResponse.Ok, $"Registry location update failed with HTTP {updateResponse.Status}: {updateBody}");
+        using (var updateDocument = JsonDocument.Parse(updateBody))
+        {
+            Assert.Equal(updatedDistrictEn, GetJsonString(updateDocument.RootElement, "districtEn", "DistrictEn"));
+        }
+
+        await Expect(page.Locator("body")).ToContainTextAsync("Registry location updated.", new() { Timeout = 30_000 });
+        var updatedRow = page.Locator("tbody tr").Filter(new() { HasText = unique }).First;
+        await Expect(updatedRow).ToContainTextAsync(updatedDistrictEn, new() { Timeout = 30_000 });
+
+        var deleteResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/ReferenceData/locations/{createdLocationId}", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "DELETE", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await updatedRow.GetByRole(AriaRole.Button, new() { NameString = "Delete" }).ClickAsync();
+        var deleteResponse = await deleteResponseTask;
+        var deleteBody = await ReadResponseTextOrEmptyAsync(deleteResponse);
+        Assert.True(deleteResponse.Ok, $"Registry location delete failed with HTTP {deleteResponse.Status}: {deleteBody}");
+        await Expect(page.Locator("body")).ToContainTextAsync("Registry location deleted.", new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies an Intranet admin can create an IAM user, assign an initial role, and inspect role permissions.
     /// Covers the executable IAM administration portions of INT-010 and INT-011.
     /// </summary>
