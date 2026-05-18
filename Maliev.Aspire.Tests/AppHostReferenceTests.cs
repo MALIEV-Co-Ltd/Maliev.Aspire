@@ -288,6 +288,28 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
+    /// ContactService must stay available for message capture when optional attachment storage is unavailable.
+    /// </summary>
+    [Fact]
+    public void AppHost_ContactService_DoesNotWaitForOptionalUploadService()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var contactBlockStart = appHostSource.IndexOf(
+            "var contactService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+        var currencyBlockStart = appHostSource.IndexOf(
+            "var currencyService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+
+        Assert.True(contactBlockStart >= 0, "ContactService resource declaration was not found.");
+        Assert.True(currencyBlockStart > contactBlockStart, "CurrencyService resource declaration was not found after ContactService.");
+
+        var contactBlock = appHostSource[contactBlockStart..currencyBlockStart];
+        Assert.Contains(".WithReference(uploadService)", contactBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain(".WaitFor(uploadService)", contactBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// PaymentService must receive Omise credentials from Aspire secrets instead of tracked source.
     /// </summary>
     [Fact]

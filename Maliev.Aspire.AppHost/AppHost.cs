@@ -583,7 +583,6 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(uploadService)
-                .WaitFor(uploadService)
                 .WithReference(countryService)
                 .WithReference(iamService)
                 .WaitFor(iamService)
