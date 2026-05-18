@@ -2,7 +2,7 @@
 
 > Production-gate user journey catalog for browser-driven E2E tests against the Aspire integrated environment.
 >
-> Last updated: 2026-05-14
+> Last updated: 2026-05-18
 
 ## Purpose
 
@@ -59,7 +59,21 @@ This catalog now assumes the following production contract:
 - Customer password reset token creation exists, but the full "receive reset email, click link, return to site" browser journey must be verified or implemented with the notification/email provider.
 - `Maliev.QuoteEngine` still contains prototype-backed session and quote behavior for parts of the signed-in production path. E2E stories must mark those flows partial until the BFF uses real Upload, Geometry, Pricing, Project, Quotation, PDF, Order, Payment, and Delivery services end to end.
 - The current service implementation is moving toward project-based quote revisions. E2E automation must prove one quotation per project, multiple immutable versions, source project linkage, and exact version PDF attachment rather than accepting "latest PDF by quote number" shortcuts.
-- Browser E2E automation is not yet implemented in this repo. This document is the production-gate story catalog for that future suite.
+- A core browser E2E suite now exists (`Maliev.Aspire.Tests/E2E/BrowserJourneyGateTests.cs`). The remaining gaps are documented in `E2E_USER_JOURNEY_RUN_RESULTS.md`, not by absence of automation.
+
+## Recently Added Production-Gate Surfaces
+
+The following customer- and employee-facing surfaces were added or substantially expanded after the initial catalog was published. Each has its own dated story (WEB-014, COM-005, MFG-006, INT-029, HR-007, FIN-003, OPS-004) and must be covered by an automated browser journey or an explicitly accepted product-gap failure before production sign-off:
+
+- Web customer chatbot persona ("Mali") wired through `Maliev.Web.Bff` to `Maliev.ChatbotService` for anonymous and signed-in visitors.
+- Customer Web `Authentication:Google:Web:*` OAuth client is now distinct from the employee Intranet OAuth client; the WEB-006 Google sign-in story must run against the dedicated Web client.
+- Commerce product Bill of Materials (BOM) editor in the Intranet catalog, BOM persistence in `CommerceService`, and dedicated commerce BOM PDF generation in `PdfService`.
+- Production schedule operational view in `Maliev.Intranet`: current-time marker, queue zoom, maintenance overlay, move-conflict handling, scheduled-slot detail panel, and machine-locked move flow.
+- Intranet chatbot/sidekick administration: assistant instructions editor, sidekick conversation history picker, per-employee persisted intranet chat history.
+- Profile and notification preference editor inside the Intranet `/hr/profile` page (preference save/apply path, preference row signatures).
+- Accounting AI extraction, accounting report PDF export, accounting quick journal entry with currency fields, and reconciliation source selection inside `Maliev.Intranet`.
+- Customer detail surface additions: customer email template composer, customer AI extraction, customer NDA lifecycle (draft default), customer document workspace, AI address lookup, customer project CTA, customer audit trail search and pagination.
+- Supplier smart intake workflow inside `Maliev.Intranet`.
 
 ---
 
@@ -785,6 +799,84 @@ This catalog now assumes the following production contract:
 **Known product gaps:** Replace any remaining Web-owned manufacturing quote form with this demo/start-project split when the old path is no longer needed.
 
 **Product direction implied by story:** Web should convert manufacturing customers into QuoteEngine, while Web remains marketing, storefront, account, and contact.
+
+## WEB-014: Visitor and customer use Mali website chatbot
+
+**Persona:** Prospective and signed-in customer using the public website chatbot as a professional personal assistant for manufacturing, quote, order, receipt, profile, and address questions.
+
+**Entry point:** `Maliev.Web` chatbot toggle on the public shell (home, services, materials, contact, account) and the chatbot panel; then `Maliev.QuoteEngine` for customer project/order continuation.
+
+**Business value:** Reduces friction before quoting and gives customers a self-service assistant for account-aware support without forcing them to abandon the page they are using.
+
+**Prerequisites:**
+- Aspire is running with `WebBff`, `ChatbotService`, `Redis`, and the Web chatbot persona/registration available.
+- `WebBff` has a configured ChatbotService reference; `AppHostReferenceTests.AppHost_WebBff_LoadsRequiredServiceReferences` requires `chatbotService` to be wired.
+- A registered customer exists for email/password sign-in.
+- Anonymous browser context is available to verify visitor-mode behavior before identity verification.
+
+**User path:**
+1. Open the Web home page in an anonymous browser context.
+2. Open the chatbot toggle (circular button on the Web shell).
+3. Verify the chatbot header shows the MALIEV customer-assistant persona and Gemini icon.
+4. Send a manufacturing-discovery question such as "What materials do you support?".
+5. Verify a chatbot response renders (rich/markdown content is preserved) inside the conversation surface.
+6. Ask an account-specific question such as "Can you check my order status and receipt?" while still anonymous.
+7. Verify the assistant instructs the visitor to sign in before account-specific actions and offers a login button inside the same chat window.
+8. Click the email sign-in action and complete sign-in in the secure popup/secondary window.
+9. Verify the active browser page remains on the original Web page while the chat updates in the background from anonymous to authenticated.
+10. Ask the account-specific question again and verify the assistant can respond using the signed-in customer session.
+11. Navigate to QuoteEngine in the same browser context and verify the shared customer-assistant session transport is still present.
+12. When QuoteEngine hosts the shared assistant, verify the same chat window rehydrates the Web conversation there.
+
+**Features covered:**
+- Anonymous chatbot entry from public Web pages.
+- Web BFF -> ChatbotService session/message routing.
+- Chatbot persona (Mali, customer-facing tone).
+- Account-specific intent gating for orders, quotes, receipts, profile, and address questions.
+- In-chat sign-in actions and secure popup auth continuation.
+- Background auth-session polling from anonymous to authenticated without navigating the active page.
+- Customer chatbot personalization persistence when signed in.
+- Shared Web/QuoteEngine assistant-session transport.
+- Composer sizing/scrolling and rich message rendering.
+
+**Services involved:**
+- `Maliev.Web.Bff`
+- `Maliev.QuoteEngine.Bff`
+- `Maliev.ChatbotService`
+- Redis (chatbot session lock)
+- `AuthService` and `CustomerService` for signed-in personalization.
+
+**Data created or mutated:**
+- Anonymous chatbot session for visitors.
+- Customer-scoped chatbot session/history for signed-in customers.
+- Browser-local personalization record.
+- Shared assistant-session cookie used for Web to QuoteEngine continuation.
+
+**Verification checklist:**
+- Chatbot toggle is visible on the public Web shell.
+- Opening the chatbot reveals the Mali persona name/header.
+- A user message produces an assistant response.
+- Anonymous account-specific questions show a sign-in requirement instead of exposing account data.
+- The sign-in action opens a secondary auth surface and keeps the original browser page on its current route.
+- After sign-in, the chat window reports the authenticated customer state without a page refresh or browser disconnection.
+- Signed-in account-specific questions can return order/quote/profile/address assistance and route to the relevant account/QuoteEngine pages.
+- Conversation surface scrolls correctly with long replies.
+- Signed-in customer session preserves personalization across page navigations.
+- Shared assistant session data survives the Web -> QuoteEngine browser transition.
+- QuoteEngine renders the same customer-assistant window and restores the Web conversation once the QuoteEngine widget is implemented.
+- Public chatbot uses the Web BFF -> ChatbotService path (not direct browser-to-ChatbotService).
+- Customer-sensitive data is not echoed back in anonymous chatbot replies.
+
+**Observability checks:**
+- WebBff logs ChatbotService session/message calls with correlation id.
+- ChatbotService trace shows a Web-origin session, distinct from Intranet sessions.
+- Redis is reachable for the chatbot lock during the conversation.
+
+**Current implementation status:** Partial after automated run. `BrowserJourneyGateTests.Web_CustomerChatbot_LoginPromptContinuesAuthenticatedConversationInPlace` verifies the Web chatbot opens, routes a manufacturing message through WebBff -> ChatbotService, requires login for anonymous account-specific questions, completes sign-in in a popup, keeps the active page in place, continues the authenticated account conversation, and carries the shared assistant-session cookie to QuoteEngine. `QuoteEngine_CustomerChatbotWindow_RetainsWebConversation` is an explicit skipped E2E gap until QuoteEngine renders the same assistant window and rehydrates the Web conversation.
+
+**Known product gaps:** Implement the shared customer chatbot window inside QuoteEngine, define anonymous vs. signed conversation retention, define tool-callable account/quote/order/profile/address surfaces that Mali should and should not invoke, and finalize product-side abuse limits.
+
+**Product direction implied by story:** The customer assistant must be continuous across Web and QuoteEngine, but account-specific and mutating actions require verified customer identity and confirmation on the relevant account or QuoteEngine surface.
 
 ---
 
@@ -3973,6 +4065,72 @@ This catalog now assumes the following production contract:
 
 **Known product gaps:** Define the depth of side-by-side comparison and who can accept or send non-current versions.
 
+## INT-029: Employee uses customer email template composer and AI-assisted customer extraction
+
+**Persona:** Sales/customer-service employee composing customer-facing messages and onboarding new customers from supporting evidence.
+
+**Entry point:** Intranet customer detail page (customer email composer modal) and customer onboarding flow (AI extraction dropzone, AI address lookup).
+
+**Business value:** Lets employees send consistent, branded customer emails without leaving the customer record and accelerates customer onboarding by extracting structured customer data from supporting evidence.
+
+**Prerequisites:**
+- Employee has customer notification and customer create/update permissions.
+- `NotificationService` is healthy with customer email template metadata.
+- AI extraction provider is configured for Aspire Testing (deterministic test client).
+- `CustomerService`, `CountryService`, and address lookup integration are healthy.
+- Existing customer record exists for email template composer testing.
+
+**User path:**
+1. Open an existing customer detail page in Intranet.
+2. Open the customer email composer modal.
+3. Select a customer email template (e.g., onboarding follow-up) and verify template metadata (subject, body, variables) is loaded.
+4. Customize the email body, verify variable substitution, and send.
+5. Verify the delivery log records the template-driven email.
+6. Open the customer create flow and use the AI extraction dropzone with a supporting evidence file.
+7. Verify extracted customer fields appear in the AI extraction summary.
+8. Use AI address lookup to populate addresses, verify suggestions appear, accept one, and save the customer.
+9. Verify the customer detail page shows fields populated by AI extraction (with audit/source metadata where supported).
+
+**Features covered:**
+- Customer email template composer with template metadata.
+- Customer AI extraction (dropzone, summary, structured fields).
+- AI address lookup with suggestions.
+- Customer document workspace polish (preview links, success snackbar behavior).
+- Default customer addresses and customer branch panel.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `CustomerService`
+- `NotificationService`
+- `CountryService`
+- AI extraction/AI address provider (deterministic in Aspire Testing).
+- `ChatbotService` if AI extraction reuses chatbot infrastructure.
+
+**Data created or mutated:**
+- Customer email delivery log row tied to the selected template.
+- Customer profile fields populated by AI extraction.
+- Customer addresses populated by AI address lookup.
+- Optional audit metadata recording AI vs. human source.
+
+**Verification checklist:**
+- Email composer lists templates and applies template metadata to subject/body.
+- Sending a template email records a delivery log entry tied to the template id.
+- AI extraction summary lists confidence/source for extracted fields and lets the employee accept or reject each one.
+- AI address suggestions are scoped to the requested locality and do not silently overwrite manually entered fields.
+- Saved customer reflects only the accepted AI-extracted fields, not the rejected ones.
+- Unauthorized employees cannot send customer emails or run AI extraction.
+
+**Observability checks:**
+- `NotificationService` logs template-driven customer email with template id and customer/principal id.
+- AI extraction logs source evidence reference and parsed fields without exposing the raw evidence in unsafe logs.
+- `CustomerService` logs the saved customer create/update with employee id.
+
+**Current implementation status:** Required gap. Customer email template composer, customer AI extraction, AI address lookup, default customer addresses, customer branch panel, and customer document workspace polish landed in 2026-05-17/2026-05-18 commits. The existing `Intranet_CustomerNotification_QueuesDeliveryAndRespectsOptOutPreference` test covers freeform customer emails but not template metadata. No browser journey verifies the visible AI extraction/AI address flow end to end.
+
+**Known product gaps:** Define the customer email template catalog, AI extraction confidence thresholds, AI address rate limits, retention policy for AI source evidence, and audit display for AI-populated customer fields.
+
+**Product direction implied by story:** Customer-facing communication and onboarding must combine consistent templates and AI assistance with explicit human review.
+
 # Commerce, Catalog, And Storefront Stories
 
 ## COM-001: Employee creates or edits catalog product
@@ -4172,6 +4330,66 @@ This catalog now assumes the following production contract:
 
 **Known product gaps:** Define exact customer-facing behavior for old product URLs.
 
+## COM-005: Employee edits product Bill of Materials and exports BOM PDF
+
+**Persona:** Commerce/operations employee preparing a manufacturable product with structured component data.
+
+**Entry point:** Intranet `/commerce/catalog/{handle}` BOM editor and BOM PDF action.
+
+**Business value:** Captures the materials, sub-assemblies, quantities, and notes required for production and procurement directly on the catalog product, then produces a traceable BOM PDF for sales/manufacturing handoff.
+
+**Prerequisites:**
+- Employee has commerce catalog and BOM edit permissions.
+- `CommerceService` BOM persistence (item rows with code, description, unit, quantity, notes) is healthy.
+- `PdfService` is healthy and accepts the commerce BOM document type.
+- `UploadService` is healthy for generated BOM PDF artifact storage.
+
+**User path:**
+1. Open the Intranet commerce catalog and locate an existing product.
+2. Open the product detail and switch to the BOM editor view.
+3. Add several BOM items with code, description, quantity, unit, supplier hint, and notes.
+4. Save the BOM and reload the product to verify persistence.
+5. Generate a BOM PDF from the product detail.
+6. Wait for `PdfService` to complete and verify the BOM PDF artifact is available for download.
+7. Open the generated PDF and verify it lists the BOM items, totals, product identity, and generated-by employee.
+
+**Features covered:**
+- Commerce product BOM editor.
+- BOM item CRUD (code, description, unit, quantity, notes).
+- BOM persistence inside `CommerceService` (BOM is owned by the product, not by an order).
+- Commerce BOM PDF document type in `PdfService`.
+- BOM PDF artifact storage through `UploadService`.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `CommerceService`
+- `PdfService`
+- `UploadService`
+- `EmployeeService` for generated-by identity.
+
+**Data created or mutated:**
+- Product BOM rows linked to the commerce product.
+- Generated BOM PDF artifact attached to the product/BOM.
+
+**Verification checklist:**
+- BOM editor shows existing rows on reload.
+- Adding/removing/updating a BOM row is reflected after refresh.
+- BOM PDF document type is `CommerceBom` (or equivalent), not Quotation or Receipt.
+- BOM PDF includes product handle/title, BOM rows, totals, generated date, and generated-by employee.
+- Customer-facing surfaces (Web/QuoteEngine) do not expose internal BOM data unless product policy says otherwise.
+- Unauthorized employees cannot view or edit the BOM.
+
+**Observability checks:**
+- `CommerceService` logs BOM mutation with product and employee id.
+- `PdfService` trace identifies the commerce BOM document type.
+- `UploadService` stores the BOM PDF artifact with commerce scope.
+
+**Current implementation status:** Required gap. BOM editor, BOM persistence, and BOM PDF generation are implemented in code (PdfService commerce BOM document, Intranet BOM editor details). No browser journey verifies the visible BOM edit + PDF generation flow end to end.
+
+**Known product gaps:** Define versioned BOM history (mutable vs. immutable), procurement linkage from a BOM row to a PO line, and whether BOM updates invalidate previously generated BOM PDFs.
+
+**Product direction implied by story:** Catalog products should own their manufacturing recipe; BOM is the bridge between catalog, production, and procurement.
+
 ---
 
 # Operations, Manufacturing, Procurement, And HR Stories
@@ -4332,6 +4550,65 @@ This catalog now assumes the following production contract:
 
 **Known product gaps:** Event types without notification mappings should be cataloged. Customer/employee notification center UI, read/unread state, live push surface, external provider sandbox delivery, and low-permission negative notification checks still need product and E2E coverage.
 
+## OPS-004: Admin manages Intranet sidekick assistant instructions and persisted history
+
+**Persona:** Platform admin or sales-operations admin curating the Intranet AI assistant ("sidekick").
+
+**Entry point:** Intranet chatbot/sidekick administration page and the chat drawer history picker.
+
+**Business value:** Lets admins steer assistant behavior without code changes and preserves per-employee conversation continuity so that employees can resume prior assistant work.
+
+**Prerequisites:**
+- Admin/automation employee has chatbot administration permissions.
+- `ChatbotService` is healthy in Aspire and uses the deterministic test client.
+- At least one prior assistant session exists for the signed-in employee.
+
+**User path:**
+1. Sign in as an admin/automation employee.
+2. Open the chatbot/sidekick administration page (Intranet `/admin` or `/admin/chatbot` depending on current UI).
+3. Edit the sidekick instructions/persona and save.
+4. Verify the new instructions are persisted (BFF + ChatbotService reflect the edit).
+5. Open the Intranet topbar chat drawer.
+6. Open the conversation history picker and select a prior session.
+7. Verify the restored conversation renders the prior messages.
+8. Send a new prompt under the updated instructions and verify the assistant response reflects the change (deterministic/test-mode response is acceptable).
+
+**Features covered:**
+- Intranet assistant instructions admin surface.
+- Per-employee persisted intranet chat history.
+- Sidekick conversation history picker.
+- Deterministic ChatbotService response in Aspire Testing.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `Maliev.ChatbotService`
+- `IAMService` for admin authorization.
+- Redis for chatbot session lock.
+
+**Data created or mutated:**
+- Chatbot instructions/persona record.
+- Persisted intranet chat history rows per employee.
+- New assistant message rows after the prompt under updated instructions.
+
+**Verification checklist:**
+- Non-admin employees cannot edit assistant instructions.
+- Instructions edits persist after refresh and across browser sessions.
+- History picker shows only the signed-in employee's prior sessions.
+- Selecting a prior session restores the message thread without bleeding into another employee's history.
+- New prompt under updated instructions returns a deterministic response in Aspire Testing.
+- Audit metadata records who changed the assistant instructions.
+
+**Observability checks:**
+- `ChatbotService` logs persona/instructions updates with admin id and correlation id.
+- Intranet BFF logs history-load and new-message calls per employee.
+- Aspire dashboard keeps ChatbotService healthy throughout the flow.
+
+**Current implementation status:** Required gap. Chatbot instructions admin, history picker, and per-employee persisted history are implemented in code. Existing browser coverage (`Intranet_AiAssistant_ExecutesQuotationOperationAndSuggestedAction`) covers the quotation-operation prompt but not instructions admin or history selection.
+
+**Known product gaps:** Define admin role/permission scope for chatbot config, retention policy for assistant history, redaction rules for sensitive customer/quote/PO data inside prompts, and admin audit/review surface.
+
+**Product direction implied by story:** Assistant configuration must be an admin-managed product, not a hidden code change; employee chat history must be employee-scoped and recoverable.
+
 ## FIN-001: Employee creates invoice with attachments, billing notes, and credit terms
 
 **Persona:** Finance or sales operations employee.
@@ -4460,6 +4737,66 @@ This catalog now assumes the following production contract:
 **Product direction implied by story:** Payment updates should be one auditable flow, not disconnected invoice, receipt, and accounting actions.
 
 **Known product gaps:** Define correction/refund rules and the source of truth between InvoiceService and PaymentService.
+
+## FIN-003: Employee uses AI accounting extraction, journal entry, and accounting report PDF
+
+**Persona:** Finance or accounting employee using the Intranet accounting module.
+
+**Entry point:** Intranet accounting module: quick journal entry, AI accounting extraction, reconciliation source selection, and accounting report PDF export.
+
+**Business value:** Reduces manual data entry by extracting accounting lines from supporting evidence (receipts, statements, invoices), captures multi-currency journal entries, and produces shareable accounting report artifacts.
+
+**Prerequisites:**
+- Employee has accounting permissions.
+- `AccountingService`, `CurrencyService`, `UploadService`, and `PdfService` are healthy.
+- AI extraction is wired through `ChatbotService` (or the configured extraction provider) in Aspire Testing using the deterministic test client.
+- Reconciliation source data (e.g., supported source types) is seeded.
+
+**User path:**
+1. Open the Intranet accounting module.
+2. Open the AI accounting entry extraction surface (drop area, upload, or paste).
+3. Submit a supporting document/evidence and verify extracted line preview.
+4. Accept or correct extracted lines and post them as a journal entry.
+5. Verify the journal entry persists with currency fields populated.
+6. Open reconciliation, select a source type, and verify the reconciliation worklist filters correctly.
+7. Generate an accounting report PDF (period summary or trial balance) and verify the PDF artifact is available.
+
+**Features covered:**
+- AI accounting entry extraction.
+- Quick journal entry with multi-currency fields.
+- Accounting reconciliation source selection.
+- Accounting report PDF export.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `AccountingService`
+- `CurrencyService`
+- `UploadService`
+- `PdfService`
+- `ChatbotService` or the AI extraction provider configured in Aspire Testing.
+
+**Data created or mutated:**
+- Journal entry record(s) with currency, amount, and source reference.
+- Reconciliation worklist read-only filters.
+- Generated accounting report PDF artifact.
+
+**Verification checklist:**
+- AI extraction returns deterministic preview data in Aspire Testing.
+- Saved journal entry contains currency, amount, debit/credit, and posting date.
+- Reconciliation source selection filters the worklist without leaking restricted data.
+- Accounting report PDF document type is the accounting report type, not invoice/receipt.
+- Unauthorized employees cannot post journal entries or open the report.
+
+**Observability checks:**
+- AccountingService logs journal posting with employee id.
+- PdfService logs accounting report document generation.
+- AI extraction logs source and parsed lines without exposing raw secrets.
+
+**Current implementation status:** Required gap. AI accounting extraction, quick journal currency fields, accounting report PDF export, and reconciliation source selection are implemented in code (2026-05-17/2026-05-18 commits). No browser journey verifies the visible accounting AI/PDF/journal flow end to end.
+
+**Known product gaps:** Define AI extraction confidence thresholds, manual override rules, and AccountingService journal approval/posting permissions.
+
+**Product direction implied by story:** Accounting must combine assisted entry with rigorous human review and produce audit-friendly artifacts.
 
 ## MFG-001: Employee schedules manufacturing work
 
@@ -4752,6 +5089,69 @@ This catalog now assumes the following production contract:
 **Product direction implied by story:** Production status surfaces should be trustworthy during active operations, not stale snapshots.
 
 **Known product gaps:** Define which production pages require SignalR versus timed refresh and the acceptable update latency.
+
+## MFG-006: Employee uses production schedule operational view with move conflicts and maintenance overlay
+
+**Persona:** Production planner or supervisor operating the daily production schedule.
+
+**Entry point:** Intranet production schedule page (`/mfg/production-schedule` and related schedule editor).
+
+**Business value:** Confirms the production schedule is usable during real shop-floor planning: the planner can see the current time, zoom queues, inspect slot details, see maintenance overlap, and safely handle conflicting moves.
+
+**Prerequisites:**
+- Employee has manufacturing schedule permissions.
+- At least one scheduled job and one maintenance entry exist for the same equipment/work center on the visible day.
+- `FacilityService`, `JobService`, and Intranet BFF are healthy.
+
+**User path:**
+1. Open the production schedule page.
+2. Verify the schedule auto-pans to the current time and shows the now marker.
+3. Zoom a queue and verify scheduled slots remain visible and readable.
+4. Open a scheduled slot detail panel.
+5. Confirm the maintenance entry is rendered on the same work center.
+6. Drag/move a scheduled slot toward a maintenance/overlap window and verify the move conflict resolution appears inline.
+7. Use the move panel with the machine lock and verify the schedule cannot leave the locked machine.
+8. Save the resolved schedule move and verify persistence after refresh.
+
+**Features covered:**
+- Production schedule current-time marker and auto-pan.
+- Queue zoom and slot detail panel.
+- Maintenance overlay on the same work center.
+- Inline schedule move conflict handling.
+- Machine-locked schedule move panel.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `JobService`
+- `FacilityService`
+- `IAMService`
+- `NotificationService` where assignment events are emitted.
+
+**Data created or mutated:**
+- Updated job scheduled start/end and queue assignment.
+- Conflict resolution metadata.
+- Optional maintenance link/note remains unchanged unless explicitly edited.
+
+**Verification checklist:**
+- Schedule page renders the now marker for the current time.
+- Queue zoom changes visible density without losing slot data.
+- Slot detail panel shows job id, product, customer-safe label, machine, start/end, and status.
+- Maintenance entry is visible in the same work center row and labeled as maintenance.
+- Attempting to move a slot into a conflicting window shows an inline conflict, not a silent failure.
+- Machine-locked move panel does not allow assigning to a different machine.
+- Saved move is reflected after page reload.
+- Customer-facing surfaces still hide internal machine, maintenance, and conflict detail.
+
+**Observability checks:**
+- `JobService` logs schedule move with old/new start, queue, and machine references.
+- `FacilityService` traces show maintenance lookup for the visible day.
+- Aspire dashboard keeps `JobService` and `FacilityService` healthy during the flow.
+
+**Current implementation status:** Required gap. Schedule current-time marker, queue zoom, slot details, maintenance overlay, move conflicts, and machine-locked move panel are implemented in code (2026-05-17/2026-05-18 commits). No browser journey verifies the operational schedule view end to end.
+
+**Known product gaps:** Define hard-block vs. advisory conflicts, capacity-vs.-time scheduling rules, and operator overrides.
+
+**Product direction implied by story:** The production schedule must be an operational control surface, not a static plan board.
 
 ## PROC-001: Employee creates purchase order
 
@@ -5343,6 +5743,63 @@ This catalog now assumes the following production contract:
 **Product direction implied by story:** Performance records should be managed separately from compensation and compliance because visibility rules differ.
 
 **Known product gaps:** Define review cycles, employee acknowledgement, manager calibration, and retention policy.
+
+## HR-007: Employee maintains profile notification and work preferences
+
+**Persona:** Signed-in employee maintaining their own work preferences inside the Intranet profile.
+
+**Entry point:** Intranet `/hr/profile` profile preferences editor.
+
+**Business value:** Lets employees control their own notification routing, locale, time zone, and preferred working surfaces without HR/IT intervention.
+
+**Prerequisites:**
+- Employee has `employee.profiles.read` and `employee.profiles.update` permissions.
+- `EmployeeService` profile preference persistence is healthy.
+- `NotificationService` is healthy if employee notification preferences affect employee-targeted notification routing.
+
+**User path:**
+1. Sign in as a limited (or automation) employee.
+2. Open `/hr/profile` and switch to the preferences tab.
+3. Update notification preferences (email/SMS opt-in/out per category).
+4. Update locale, time zone, and preferred working module.
+5. Save preferences and verify the form shows a saved/last-applied state with a stable preference signature.
+6. Reload the page and verify the preferences persist.
+7. Sign out and sign back in; verify the preferences remain.
+
+**Features covered:**
+- Profile preferences editor.
+- Notification routing preferences per category.
+- Locale/time zone/work-surface defaults.
+- Preference save/apply state with a preference signature.
+
+**Services involved:**
+- `Maliev.Intranet.Bff`
+- `EmployeeService`
+- `NotificationService` for employee-targeted notification routing.
+- `IAMService` for self-service permission scoping.
+
+**Data created or mutated:**
+- Employee preference record.
+- Preference signature/last-saved timestamp.
+- Optional notification routing record where employee preferences affect outbound notifications.
+
+**Verification checklist:**
+- Anonymous/unauthorized employees cannot read or update another employee's preferences.
+- Saved preferences persist after refresh and across sign-out/sign-in.
+- Preference signature/last-saved indicator updates after a meaningful change.
+- Notification category opt-outs are honored by `NotificationService` for employee-targeted notifications.
+- UI surface uses the preferences editor (not the broader employee profile editor) for these fields.
+
+**Observability checks:**
+- `EmployeeService` logs preference mutations with employee id.
+- `NotificationService` logs employee-targeted notification routing changes if implemented.
+- Aspire dashboard remains healthy through preference editing.
+
+**Current implementation status:** Required gap. Profile preferences editor with save/apply, preference row signatures, and improved layout landed in 2026-05-18 commits. Browser coverage for the preference save path beyond the existing self-profile name/email/phone test is required.
+
+**Known product gaps:** Define preference categories, default preference policy for new hires, and how employee preferences interact with role-driven routing rules.
+
+**Product direction implied by story:** Employee preferences must be self-service and respected by the rest of the system, not a UI-only display.
 
 ---
 

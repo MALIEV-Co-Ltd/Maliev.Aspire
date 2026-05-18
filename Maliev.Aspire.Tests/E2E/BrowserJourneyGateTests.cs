@@ -13,6 +13,7 @@ namespace Maliev.Aspire.Tests.E2E;
 [Collection("AspireDomainTests")]
 public sealed class BrowserJourneyGateTests : IAsyncLifetime
 {
+    private const string WebCustomerPassword = "E2e-Checkout-12345!";
     private readonly AspireTestFixture _fixture;
     private IPlaywright? _playwright;
     private IBrowser? _browser;
@@ -321,6 +322,140 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 Timeout = 30_000,
                 WaitUntil = WaitUntilState.Commit
             });
+    }
+
+    /// <summary>
+    /// Verifies Mali prompts anonymous visitors to sign in for account-specific questions, completes sign-in in a popup,
+    /// and continues the authenticated account conversation without navigating the active page away.
+    /// Covers the executable Web customer-assistant portion of WEB-014 plus the customer-session handoff portions of WEB-005 and SEC-003.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "WEB-014,WEB-005,SEC-003")]
+    public async Task Web_CustomerChatbot_LoginPromptContinuesAuthenticatedConversationInPlace()
+    {
+        var webBase = GetEndpoint("WebBff");
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        string email;
+
+        await using (var setupContext = await NewContextAsync())
+        {
+            var setupPage = await setupContext.NewPageAsync();
+            email = await RegisterWebCustomerAsync(setupPage, webBase, "/account");
+        }
+
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var diagnostics = new List<string>();
+
+        page.Console += (_, message) =>
+        {
+            if (message.Type is "error" or "warning")
+            {
+                diagnostics.Add($"{message.Type}: {message.Text}");
+            }
+        };
+        page.PageError += (_, exception) => diagnostics.Add($"pageerror: {exception}");
+        page.RequestFailed += (_, request) =>
+            diagnostics.Add($"request-failed: {request.Method} {request.Url} {request.Failure}");
+        page.Response += (_, response) =>
+        {
+            if (response.Status >= 400 &&
+                (response.Url.Contains("/web/v1/chatbot", StringComparison.OrdinalIgnoreCase) ||
+                 response.Url.Contains("/web/v1/account", StringComparison.OrdinalIgnoreCase) ||
+                 response.Url.Contains("/auth/", StringComparison.OrdinalIgnoreCase)))
+            {
+                diagnostics.Add($"response: {response.Status} {response.Url}");
+            }
+        };
+
+        var homeResponse = await page.GotoAsync(webBase.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        Assert.True(homeResponse?.Ok, $"Web home did not return success. Status: {homeResponse?.Status}");
+
+        await page.Locator(".customer-chatbot-toggle").ClickAsync();
+        var assistant = page.GetByLabel("Customer manufacturing assistant");
+        var messages = page.Locator(".customer-chatbot-messages");
+        var composer = page.Locator(".customer-chatbot-composer");
+        await Expect(assistant).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator(".customer-chatbot-title")).ToContainTextAsync("MALIEV manufacturing assistant");
+
+        var manufacturingResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/web/v1/chatbot/messages", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await composer.Locator("textarea").FillAsync("Can you help with CNC aluminum fixtures?");
+        await composer.Locator("button").ClickAsync();
+
+        var manufacturingResponse = await manufacturingResponseTask;
+        var manufacturingBody = await ReadResponseTextOrEmptyAsync(manufacturingResponse);
+        Assert.True(
+            manufacturingResponse.Ok,
+            $"Mali manufacturing question failed with HTTP {manufacturingResponse.Status}: {manufacturingBody}. Diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, diagnostics)}");
+        using var manufacturingDocument = JsonDocument.Parse(manufacturingBody);
+        var sessionId = GetJsonString(manufacturingDocument.RootElement, "sessionId", "SessionId");
+        Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        await Expect(messages).ToContainTextAsync("Can you help with CNC aluminum fixtures?", new() { Timeout = 30_000 });
+        await Expect(messages).ToContainTextAsync(new Regex("MALIEV|manufacturing|assistant|CNC|Testing", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+
+        var sharedSessionId = await ReadSharedChatbotSessionIdAsync(page);
+        Assert.Equal(sessionId, sharedSessionId);
+
+        await composer.Locator("textarea").FillAsync("Can you check my order status and receipt?");
+        await composer.Locator("button").ClickAsync();
+        await Expect(messages).ToContainTextAsync(new Regex("identity verification|after sign-in|Choose a sign-in method", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+        await Expect(page.Locator(".customer-chatbot-auth-email")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var activeUrlBeforeSignIn = page.Url;
+        var popupTask = page.WaitForPopupAsync();
+        await page.Locator(".customer-chatbot-auth-email").ClickAsync();
+        var popup = await popupTask;
+        await popup.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        Assert.Equal(new Uri(activeUrlBeforeSignIn).AbsolutePath, new Uri(page.Url).AbsolutePath);
+        await Expect(messages).ToContainTextAsync(new Regex("Keep this page open|same conversation", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+
+        var signInForm = popup.Locator("form.auth-form[action='/auth/sign-in/email']");
+        if (!await signInForm.IsVisibleAsync())
+        {
+            await popup.Locator("details.auth-email-panel summary").ClickAsync();
+        }
+
+        await Expect(signInForm).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await signInForm.Locator("input[name='Email']").FillAsync(email);
+        await signInForm.Locator("input[name='Password']").FillAsync(WebCustomerPassword);
+        await signInForm.EvaluateAsync("form => form.requestSubmit()");
+
+        await Expect(messages).ToContainTextAsync(new Regex("Signed in as|continue here without leaving this page", RegexOptions.IgnoreCase), new() { Timeout = 90_000 });
+        Assert.Equal(new Uri(activeUrlBeforeSignIn).AbsolutePath, new Uri(page.Url).AbsolutePath);
+
+        var browserSession = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/web/v1/account/session', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", browserSession, StringComparison.Ordinal);
+        Assert.Contains("\"isAuthenticated\":true", browserSession, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(email, browserSession, StringComparison.OrdinalIgnoreCase);
+
+        await composer.Locator("textarea").FillAsync("Can you check my order status and receipt?");
+        await composer.Locator("button").ClickAsync();
+        await Expect(messages).ToContainTextAsync(new Regex("signed-in customer account|Quote Engine|Open orders", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+
+        Assert.Equal(sharedSessionId, await ReadSharedChatbotSessionIdAsync(page));
+
+        await page.GotoAsync(new Uri(quoteBase, "/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        var quoteEngineChatSessionCookie = await ReadSharedChatbotSessionCookieAsync(page);
+        Assert.Equal(sharedSessionId, quoteEngineChatSessionCookie);
+        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Quote Engine|Sign in to quote|Sign in to upload", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
+    /// Tracks the remaining WEB-014 product gap: QuoteEngine must render the same customer chatbot window and rehydrate the Web conversation.
+    /// </summary>
+    [Fact(Skip = "QuoteEngine does not host the shared customer chatbot window yet; WEB-014 remains partial until QuoteEngine renders the same widget and consumes the shared session cookie.")]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "WEB-014")]
+    public Task QuoteEngine_CustomerChatbotWindow_RetainsWebConversation()
+    {
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -3744,7 +3879,6 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     {
         var unique = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var email = $"e2e-checkout-{unique}@example.com";
-        const string password = "E2e-Checkout-12345!";
 
         await page.GotoAsync(
             new Uri(webBase, $"/auth/sign-up?returnUrl={Uri.EscapeDataString(returnUrl)}").ToString(),
@@ -3760,7 +3894,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await signUpForm.Locator("input[name='FirstName']").FillAsync("E2E");
         await signUpForm.Locator("input[name='LastName']").FillAsync("Checkout");
         await signUpForm.Locator("input[name='Email']").FillAsync(email);
-        await signUpForm.Locator("input[name='Password']").FillAsync(password);
+        await signUpForm.Locator("input[name='Password']").FillAsync(WebCustomerPassword);
         await signUpForm.EvaluateAsync("form => form.requestSubmit()");
 
         await page.WaitForURLAsync(
@@ -3776,6 +3910,49 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             });
 
         return email;
+    }
+
+    private static async Task<string?> ReadSharedChatbotSessionIdAsync(IPage page)
+    {
+        return await page.EvaluateAsync<string?>(
+            """
+            () => {
+                const stored = window.localStorage.getItem('maliev.customerAssistant.session.v1');
+                if (!stored) {
+                    return null;
+                }
+
+                try {
+                    const parsed = JSON.parse(stored);
+                    return parsed && parsed.sessionId ? parsed.sessionId : null;
+                } catch {
+                    return null;
+                }
+            }
+            """);
+    }
+
+    private static async Task<string?> ReadSharedChatbotSessionCookieAsync(IPage page)
+    {
+        return await page.EvaluateAsync<string?>(
+            """
+            () => {
+                const cookie = document.cookie
+                    .split('; ')
+                    .find(row => row.startsWith('maliev_customer_assistant_session='));
+                if (!cookie) {
+                    return null;
+                }
+
+                try {
+                    const value = cookie.split('=').slice(1).join('=');
+                    const parsed = JSON.parse(decodeURIComponent(value));
+                    return parsed && parsed.sessionId ? parsed.sessionId : null;
+                } catch {
+                    return null;
+                }
+            }
+            """);
     }
 
     private static async Task<CreatedIntranetCustomer> CreateIntranetCustomerAsync(IPage page)

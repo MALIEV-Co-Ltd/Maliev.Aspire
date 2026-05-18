@@ -32,7 +32,7 @@ public sealed partial class E2EStoryCatalogTraceabilityTests
         Assert.True(
             extra.Length == 0,
             $"Run-result file contains ids that are not in the story catalog: {string.Join(", ", extra)}");
-        Assert.Equal(95, storyIds.Count);
+        Assert.Equal(102, storyIds.Count);
     }
 
     /// <summary>
@@ -58,6 +58,7 @@ public sealed partial class E2EStoryCatalogTraceabilityTests
             .ToArray();
 
         Assert.Contains("WEB-001", automatedStoryIds);
+        Assert.Contains("WEB-014", automatedStoryIds);
         Assert.Contains("QUOTE-024", automatedStoryIds);
         Assert.Contains("INT-001", automatedStoryIds);
     }

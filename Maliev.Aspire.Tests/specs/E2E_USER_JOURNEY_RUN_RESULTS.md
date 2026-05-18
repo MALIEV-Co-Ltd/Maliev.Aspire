@@ -4,6 +4,68 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-05-18 Catalog Refresh After Recent Feature Waves
+
+### Scope
+
+- Reviewed the existing 95-story production-gate catalog against the customer-website, QuoteEngine, Intranet, ChatbotService, CommerceService, PdfService, FacilityService, JobService, AccountingService, NotificationService, EmployeeService, and AppHost wiring changes shipped between 2026-05-16 and 2026-05-18.
+- Added seven new production-gate stories to capture genuinely new customer- and employee-facing surfaces that the prior catalog did not describe. The traceability assertion in `E2EStoryCatalogTraceabilityTests.E2EStoryRunResults_CoverEveryCatalogStoryId` was updated from 95 to 102 to match the refreshed catalog.
+- Added browser coverage for the Web customer-assistant portion of `WEB-014`: anonymous manufacturing chat, account-specific login requirement, secure popup email sign-in, active-page continuation after authentication, authenticated account response, and shared assistant-session transport into QuoteEngine.
+- Kept the remaining QuoteEngine shared-chat-window requirement as an explicit skipped E2E gap because the current QuoteEngine app does not render the customer chatbot window yet.
+- Verified existing tests still target selectors that survive the recent Intranet topbar collapse, QuoteEngine topbar restructure, and Intranet profile preferences refresh. Where a selector is no longer guaranteed, the run-results entry below flags it as a follow-up.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 /nr:false --verbosity minimal` | Passed: 0 warnings, 0 errors |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 2 tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~Web_CustomerChatbot_LoginPromptContinuesAuthenticatedConversationInPlace" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Timed out after 15 minutes before a browser E2E verdict; AppHost/test process tree was stopped after timeout. |
+
+### New Production-Gate Stories Added
+
+| Story id | Title | Driver commits | Current status |
+|----------|-------|----------------|----------------|
+| `WEB-014` | Visitor and customer use Mali website chatbot | `Maliev.Web` `093414f feat: add customer chatbot`, `8cf3e1b feat: persist customer chatbot personalization`, `4f2495e feat: name customer chatbot Mali`, `Maliev.Aspire` `0b68a1c fix: wire web bff to chatbot service` | Partial with browser coverage. `Web_CustomerChatbot_LoginPromptContinuesAuthenticatedConversationInPlace` verifies the Web chatbot/auth handoff. `QuoteEngine_CustomerChatbotWindow_RetainsWebConversation` remains skipped until QuoteEngine renders the shared assistant window. |
+| `QUOTE-001`-`QUOTE-026` | (existing QuoteEngine stories) | `Maliev.QuoteEngine` `950d6f3 fix: replace quote engine left rail with topbar`, `67ebfcd fix: use logo progress loader for quote engine startup`, `231896b feat: show quote upload live notifications`, `ba3e6d9 fix: scope quote engine prototype customers` | No catalog change required. Existing automated tests still target `.qe-qsb-total`, `Estimate`, `PDF`, `Quote`, `Create order`, `Demo only`, `Prototype viewer`, `DFM checks`, `No customer data is created`, `Signed-in customer project boundary`, and `Sign in to upload your own files`. These selectors are still present in `QuoteWorkspace.razor`. The new topbar layout does not move them. Confirmed by grep on `Maliev.QuoteEngine.Client/Pages/QuoteWorkspace.razor`. |
+| `OPS-004` | Admin manages Intranet sidekick assistant instructions and persisted history | `Maliev.Intranet` `50047ff feat: manage chatbot instructions in intranet`, `54336ba Add sidekick conversation history picker`, `038762a Persist intranet chat history per employee` | Required gap. Existing `Intranet_AiAssistant_ExecutesQuotationOperationAndSuggestedAction` covers quotation operation prompt and suggested action. It does not cover the instructions editor or history picker. |
+| `FIN-003` | Employee uses AI accounting extraction, journal entry, and accounting report PDF | `Maliev.Intranet` `0d01b45 Add AI accounting entry extraction`, `b4fa528 Add accounting report PDF export`, `90237d4 Add currency entry fields to accounting journals`, `0e22088 Clarify accounting reconciliation source selection` | Required gap. `FIN-001` and `FIN-002` cover invoice/receipt/payment. They do not cover AI extraction, multi-currency journal entry, reconciliation source selection, or accounting report PDF export. |
+| `MFG-006` | Employee uses production schedule operational view with move conflicts and maintenance overlay | `Maliev.Intranet` `9a4e97f Pan schedule to current time on load`, `965c340 Show current time on production schedule`, `6bc9cf4 Handle schedule move conflicts inline`, `d364648 Lock machine in schedule move panel`, `8345289 Show production schedule slot details`, `6f68d65 Show maintenance on production schedule`, `e182d8a Add production schedule queue zoom` | Required gap. `MFG-001` covers basic scheduling. The new operational schedule view is a substantial product surface and needs its own story and browser coverage. |
+| `INT-029` | Employee uses customer email template composer and AI-assisted customer extraction | `Maliev.Intranet` `7107220 Add customer email template composer`, `27dc37c Add customer email template metadata` (NotificationService), `5fc5103 Show customer AI extraction progress`, `48e1091 Improve AI address lookup`, `e98e2af Style customer AI extraction dropzone`, `aa82333 Polish customer AI extraction input`, `745b0fd Refine customer AI extraction summary`, `25537f2 Default address recipient from customer` | Required gap. `OPS-003` (`Intranet_CustomerNotification_QueuesDeliveryAndRespectsOptOutPreference`) covers freeform customer email. It does not cover template metadata, AI extraction, AI address lookup, or customer document workspace polish. |
+| `COM-005` | Employee edits product Bill of Materials and exports BOM PDF | `Maliev.Intranet` `34bd564 Improve commerce BOM editor details`, `Maliev.CommerceService` `868cb09 Add commerce product BOM items`, `65a18cc Extend commerce BOM details`, `Maliev.PdfService` `c733a58 Add commerce BOM PDF document`, `b48cf26 Expand commerce BOM PDF details` | Required gap. `COM-001`/`COM-002` cover catalog CRUD and publishing. They do not cover BOM persistence or commerce BOM PDF generation. |
+| `HR-007` | Employee maintains profile notification and work preferences | `Maliev.Intranet` `4773915 Fix profile preference save and application`, `9a9cc7e Improve profile preference signatures`, `0668312 Fix profile preferences editor`, `b96a3c9 Adjust profile preference row spacing`, `f451b3f Fix profile edit field spacing`, `cf3c274 Increase profile form table spacing` | Required gap. `Intranet_LimitedEmployee_CanUpdateOwnProfileOnly` covers preferred name, personal email, and mobile phone on the profile tab. It does not cover the preferences editor save/apply path or the preference signature. |
+
+### Automated Coverage Added Or Re-Validated
+
+| Surface | Recent change | Existing test impact | Action |
+|---------|---------------|----------------------|--------|
+| `Maliev.Web.Client/Components/CustomerChatbot.razor` | Customer chatbot now handles anonymous and authenticated account-specific questions. | Added `Web_CustomerChatbot_LoginPromptContinuesAuthenticatedConversationInPlace` for the visible assistant flow, sign-in popup, in-place auth refresh, and Web -> QuoteEngine shared session cookie. | Build and traceability passed; focused browser E2E timed out before verdict and needs a later full-gate rerun. |
+| `Maliev.QuoteEngine.Client/Layout/MainLayout.razor` | QuoteEngine does not yet host the customer chatbot window. | Added skipped E2E `QuoteEngine_CustomerChatbotWindow_RetainsWebConversation` so the missing cross-app shared window is visible in the gate instead of being only a document note. | Implement shared QuoteEngine chatbot widget and unskip the test. |
+| `Maliev.QuoteEngine.Client/Layout/MainLayout.razor` | Left rail replaced with topbar (`950d6f3`); workspace surface still wraps `QuoteWorkspace.razor`. | `QuoteEngine_AnonymousDemo_EstimatesWithoutFormalArtifacts` and `QuoteEngine_PrototypeSignedCustomer_UploadsEstimatesQuotesOrdersAndRecordsHistory` use selectors that live in the workspace, not the nav rail. | No code change. Re-run on next full E2E gate to confirm. |
+| `Maliev.Intranet.Client/Layout/TopBar.razor` | Secondary navigation collapses into a `More` MudMenu on small viewports (`0573d3e`). | Tests navigate by URL through `page.GotoAsync`, not by clicking topbar nav. `Intranet_GlobalSearch_ReturnsEmployeeCreatedCustomerAndNavigatesToRecord` targets `.topbar-global-search .global-search-input` and `.global-search-backdrop`, both still present in `GlobalSearchBox.razor` and `TopBar.razor`. | No code change. Re-run on next full E2E gate to confirm. |
+| `Maliev.Intranet.Client/Layout/MainLayout.razor.css` | Compact topbar docked at screen bottom on mobile (`c7127ef`). | Existing tests use desktop viewport (1440x1000) set by `NewContextAsync`. The compact-bottom layout only activates on small viewports. | No code change. Add a future mobile-viewport story (candidate for `MFG-002`) once a mobile shop-floor surface is in scope. |
+| `Maliev.Intranet.Client/Pages/Hr/Profile.razor` | Profile field spacing, preference save fix, preference row signature (`f451b3f`, `4773915`, `9a9cc7e`, `b96a3c9`). | `Intranet_LimitedEmployee_CanUpdateOwnProfileOnly` targets `Edit profile` button, `Save changes` button, and `.profile-field` rows. All still present. | No code change. The preferences editor is now substantial enough to warrant its own `HR-007` browser test. |
+
+### Out-Of-Scope Gaps Still Pending
+
+- Browser tests for `OPS-004`, `FIN-003`, `MFG-006`, `INT-029`, `COM-005`, and `HR-007` are deliberately deferred. Each will land as its own dated slice after the corresponding feature's UI stabilizes for at least 48 hours.
+- `WEB-014` now has executable Web chatbot/auth handoff coverage. The remaining QuoteEngine shared-chat-window requirement is tracked by an explicit skipped E2E.
+- The dedicated Web Google OAuth client (`4960167 fix: use dedicated web google oauth client`) is already covered by `AppHostReferenceTests.AppHost_WebBff_LoadsDedicatedGoogleOAuthConfiguration`. The customer-facing browser sign-in flow (`WEB-006`) remains a partial pending a deterministic test OAuth identity.
+- Aspire monitoring container changes (`f139d29 Avoid Aspire monitoring bind mounts`) are covered by `AppHostReferenceTests.AppHost_MonitoringContainers_AvoidHostBindMounts` and `AppHostReferenceTests.AppHost_OpenTelemetryCollector_UsesContainerFileConfig`.
+
+### Story Coverage Status After This Slice
+
+| Story ids | Coverage status |
+|-----------|-----------------|
+| `WEB-014` | Partial with automated Web coverage. Web chatbot, anonymous login gate, in-place popup auth continuation, authenticated account response, and Web -> QuoteEngine shared session cookie are covered. QuoteEngine same-window rehydration remains a skipped E2E gap. |
+| `OPS-004` | Required gap. Code shipped; browser test deferred. |
+| `FIN-003` | Required gap. Code shipped; browser test deferred. |
+| `MFG-006` | Required gap. Code shipped; browser test deferred. |
+| `INT-029` | Required gap. Code shipped; browser test deferred. |
+| `COM-005` | Required gap. Code shipped; browser test deferred. |
+| `HR-007` | Required gap. Code shipped; browser test deferred. |
+| All other ids (`WEB-001`-`WEB-013`, `QUOTE-001`-`QUOTE-026`, `INT-001`-`INT-028`, `COM-001`-`COM-004`, `OPS-001`-`OPS-003`, `FIN-001`-`FIN-002`, `MFG-001`-`MFG-005`, `PROC-001`-`PROC-004`, `HR-001`-`HR-006`, `SEC-001`-`SEC-004`) | Unchanged from the 2026-05-16 catalog refresh. See sections below. |
+
 ## 2026-05-16 QuoteEngine Signed Customer And Full E2E Gate Run
 
 ### Scope

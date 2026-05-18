@@ -2,7 +2,7 @@
 
 > Living document defining the test strategy, coverage matrix, and governance for the Maliev microservices ecosystem.
 >
-> **Last updated**: 2026-05-15
+> **Last updated**: 2026-05-18
 
 ---
 
@@ -340,13 +340,14 @@ dotnet test Maliev.OrderService.Tests/ -v n
 
 | Gap | Impact | Action |
 |-----|--------|--------|
-| Partial E2E browser automation | Currently executable coverage includes Web trust/conversion, contact/support/account/auth entry points, shop/cart route surfaces, QuoteEngine demo/upload gate/prototype portal routes, and anonymous Intranet auth-boundary journeys | Expand `Maliev.Aspire.Tests/E2E` until all 95 catalog stories have passing browser coverage or explicit accepted product-gap failures |
-| Missing deterministic E2E identities and data | Authenticated customer, employee, cross-customer, admin, commerce, finance, HR, procurement, and manufacturing journeys remain blocked | Enable Aspire-local test admin/customer seeding, local mail sink, OAuth test mode, published commerce seed products, and seeded project/order/payment/manufacturing fixtures |
+| Partial E2E browser automation | Currently executable coverage includes Web trust/conversion, contact/support/account/auth entry points, shop/cart route surfaces, Web Mali chatbot auth handoff, QuoteEngine demo/upload gate/prototype portal routes, signed customer QuoteEngine prototype path, project quote lifecycle (versions, PDF, acceptance, duplicate), procurement/PO receiving, finance invoice/payment/receipt, delivery notes, dashboard action items, supplier profile, customer detail edit, material/equipment master data, IAM admin, system health, customer notification, AI assistant, leave request/approval, customer onboarding UI, global search, and limited employee permission boundaries. Coverage of newly added stories OPS-004, FIN-003, MFG-006, INT-029, COM-005, and HR-007 is deferred. WEB-014 is partial until QuoteEngine hosts the same shared chatbot window. | Expand `Maliev.Aspire.Tests/E2E` until all 102 catalog stories have passing browser coverage or explicit accepted product-gap failures |
+| Missing deterministic E2E identities and data | Local mail sink, OAuth test identities, payment-provider sandbox, full multi-file project/order/job/maintenance fixtures, and QuoteEngine shared-chatbot fixture remain blocked | Enable Aspire-local test admin/customer seeding, local mail sink, OAuth test mode, published commerce seed products, seeded project/order/payment/manufacturing fixtures, deterministic chatbot persona session, shared QuoteEngine chatbot host, and seeded BOM/maintenance schedule data |
 | QuoteEngine production integration | Dedicated customer quoting remains partial | QuoteEngine is wired into Aspire; keep anonymous demo mode non-mutating, then replace prototype-backed signed project flows with real Upload/Geometry/Pricing/Project/QuotationVersion/PDF/Order/Payment/Delivery journeys |
 | Customer email verification | Self-service account trust cannot be proven | Implement token issuance, email delivery, link redirect, token validation, and verified account status |
 | No load/performance tests | Performance regressions undetected | Consider k6 or NBomber |
 | GeometryService (Python) infrastructure | Python Docker build exceeds test timeout | Use pre-built images or optimize build; tests written at `GeometryServiceTests.cs` |
 | PricingService has low per-service coverage | Pricing logic gaps | Expand per-service tests |
+| New product surfaces lacking browser coverage | Commerce BOM editor/PDF (COM-005), production schedule operational view (MFG-006), Intranet sidekick admin (OPS-004), customer email template composer/AI extraction (INT-029), profile preferences editor (HR-007), and AI accounting/journal/report PDF (FIN-003) shipped recently but have no automated browser journey. WEB-014 has Web coverage but still lacks the QuoteEngine shared-window implementation. | Add one dedicated browser test per story as each feature's selectors stabilize. Implement QuoteEngine shared chatbot hosting, then unskip `QuoteEngine_CustomerChatbotWindow_RetainsWebConversation`. Follow the existing one-feature-per-test commit cadence in `BrowserJourneyGateTests.cs` |
 
 ---
 
