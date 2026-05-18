@@ -1,6 +1,7 @@
 using Maliev.Aspire.Tests.Infrastructure;
 using Microsoft.Playwright;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -442,20 +443,68 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Equal(sharedSessionId, await ReadSharedChatbotSessionIdAsync(page));
 
         await page.GotoAsync(new Uri(quoteBase, "/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-        var quoteEngineChatSessionCookie = await ReadSharedChatbotSessionCookieAsync(page);
-        Assert.Equal(sharedSessionId, quoteEngineChatSessionCookie);
+        var quoteEngineHandoffSessionId = await ReadSignedChatbotHandoffCookieSessionIdAsync(context, quoteBase);
+        Assert.Equal(sharedSessionId, quoteEngineHandoffSessionId);
         await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Quote Engine|Sign in to quote|Sign in to upload", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+
+        await page.Locator(".topbar-chat-toggle").ClickAsync();
+        await Expect(page.Locator(".customer-chatbot-panel")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator(".customer-chatbot-messages")).ToContainTextAsync(
+            "Can you help with CNC aluminum fixtures?",
+            new() { Timeout = 60_000 });
+        await Expect(page.Locator(".customer-chatbot-hydrated").First).ToBeVisibleAsync(new() { Timeout = 30_000 });
     }
 
     /// <summary>
-    /// Tracks the remaining WEB-014 product gap: QuoteEngine must render the same customer chatbot window and rehydrate the Web conversation.
+    /// Verifies QuoteEngine renders the customer assistant and rehydrates a Web-originated conversation.
     /// </summary>
-    [Fact(Skip = "QuoteEngine does not host the shared customer chatbot window yet; WEB-014 remains partial until QuoteEngine renders the same widget and consumes the shared session cookie.")]
+    [Fact]
     [Trait("Tier", "E2E")]
     [Trait("Stories", "WEB-014")]
-    public Task QuoteEngine_CustomerChatbotWindow_RetainsWebConversation()
+    public async Task QuoteEngine_CustomerChatbotWindow_RetainsWebConversation()
     {
-        return Task.CompletedTask;
+        var webBase = GetEndpoint("WebBff");
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        var homeResponse = await page.GotoAsync(webBase.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        Assert.True(homeResponse?.Ok, $"Web home did not return success. Status: {homeResponse?.Status}");
+
+        await page.Locator(".customer-chatbot-toggle").ClickAsync();
+        var composer = page.Locator(".customer-chatbot-composer");
+        await Expect(page.Locator(".customer-chatbot-panel")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var manufacturingResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/web/v1/chatbot/messages", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+
+        await composer.Locator("textarea").FillAsync("Can you help with CNC aluminum fixtures?");
+        await composer.Locator("button").ClickAsync();
+
+        var manufacturingResponse = await manufacturingResponseTask;
+        var manufacturingBody = await ReadResponseTextOrEmptyAsync(manufacturingResponse);
+        Assert.True(
+            manufacturingResponse.Ok,
+            $"Mali manufacturing question failed with HTTP {manufacturingResponse.Status}: {manufacturingBody}");
+
+        using var manufacturingDocument = JsonDocument.Parse(manufacturingBody);
+        var sessionId = GetJsonString(manufacturingDocument.RootElement, "sessionId", "SessionId");
+        Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        Assert.Equal(sessionId, await ReadSharedChatbotSessionIdAsync(page));
+        Assert.Equal(sessionId, await ReadSignedChatbotHandoffCookieSessionIdAsync(context, webBase));
+
+        await page.GotoAsync(new Uri(quoteBase, "/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        Assert.Equal(sessionId, await ReadSignedChatbotHandoffCookieSessionIdAsync(context, quoteBase));
+
+        await page.Locator(".topbar-chat-toggle").ClickAsync();
+        await Expect(page.Locator(".customer-chatbot-panel")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator(".customer-chatbot-messages")).ToContainTextAsync(
+            "Can you help with CNC aluminum fixtures?",
+            new() { Timeout = 60_000 });
+        await Expect(page.Locator(".customer-chatbot-hydrated").First).ToBeVisibleAsync(new() { Timeout = 30_000 });
     }
 
     /// <summary>
@@ -3953,6 +4002,50 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 }
             }
             """);
+    }
+
+    private static async Task<string?> ReadSignedChatbotHandoffCookieSessionIdAsync(IBrowserContext context, Uri targetBase)
+    {
+        var cookies = await context.CookiesAsync([targetBase.ToString()]);
+        var cookie = cookies.FirstOrDefault(item => item.Name == "maliev_customer_assistant_handoff");
+        if (cookie is null || string.IsNullOrWhiteSpace(cookie.Value))
+        {
+            return null;
+        }
+
+        var separator = cookie.Value.IndexOf('.');
+        if (separator <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            var payloadJson = Encoding.UTF8.GetString(DecodeBase64Url(cookie.Value[..separator]));
+            using var document = JsonDocument.Parse(payloadJson);
+            return GetJsonString(document.RootElement, "sessionId", "SessionId");
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static byte[] DecodeBase64Url(string value)
+    {
+        var padded = value.Replace('-', '+').Replace('_', '/');
+        padded += (padded.Length % 4) switch
+        {
+            2 => "==",
+            3 => "=",
+            _ => string.Empty
+        };
+
+        return Convert.FromBase64String(padded);
     }
 
     private static async Task<CreatedIntranetCustomer> CreateIntranetCustomerAsync(IPage page)

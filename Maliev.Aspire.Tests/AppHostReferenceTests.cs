@@ -184,7 +184,8 @@ public sealed class AppHostReferenceTests
             "pdfService",
             "orderService",
             "paymentService",
-            "deliveryService"
+            "deliveryService",
+            "chatbotService"
         })
         {
             Assert.Contains($".WithReference({dependency})", quoteEngineBlock, StringComparison.Ordinal);

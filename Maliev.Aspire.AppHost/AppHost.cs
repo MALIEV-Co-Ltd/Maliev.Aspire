@@ -983,6 +983,7 @@ static partial class Program
                 .WithReference(orderService)
                 .WithReference(paymentService)
                 .WithReference(deliveryService)
+                .WithReference(chatbotService)
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Quote Engine (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Quote Engine (HTTPS)")
                 .WithTestingSafeHttpHealthCheck("/quote/aspire-liveness"),
