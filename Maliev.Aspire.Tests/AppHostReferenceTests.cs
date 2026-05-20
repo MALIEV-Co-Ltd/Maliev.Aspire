@@ -157,6 +157,30 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
+    /// AuthService must wait for customer account dependencies before accepting customer Google exchanges.
+    /// </summary>
+    [Fact]
+    public void AppHost_AuthService_WaitsForCustomerAccountDependencies()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var authBlockStart = appHostSource.IndexOf(
+            "var authService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+        var accountingBlockStart = appHostSource.IndexOf(
+            "var accountingService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+
+        Assert.True(authBlockStart >= 0, "AuthService resource declaration was not found.");
+        Assert.True(accountingBlockStart > authBlockStart, "AccountingService resource declaration was not found after AuthService.");
+
+        var authBlock = appHostSource[authBlockStart..accountingBlockStart];
+        Assert.Contains(".WithReference(customerService)", authBlock, StringComparison.Ordinal);
+        Assert.Contains(".WaitFor(customerService)", authBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithReference(employeeService)", authBlock, StringComparison.Ordinal);
+        Assert.Contains(".WaitFor(employeeService)", authBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// QuoteEngine BFF must be part of the Aspire AppHost project graph.
     /// </summary>
     [Fact]
@@ -263,6 +287,8 @@ public sealed class AppHostReferenceTests
         }
 
         Assert.Contains(".WithEnvironment(\"QuoteEngine__BaseUrl\", quoteEngineBff.GetEndpoint(\"https\"))", webBlock, StringComparison.Ordinal);
+        Assert.Contains(".WaitFor(authService)", webBlock, StringComparison.Ordinal);
+        Assert.Contains(".WaitFor(customerService)", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientId\", config.WebGoogleClientId)", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientSecret\", config.WebGoogleClientSecret)", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/web/aspire-liveness\")", webBlock, StringComparison.Ordinal);

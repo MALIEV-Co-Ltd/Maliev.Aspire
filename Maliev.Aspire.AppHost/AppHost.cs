@@ -426,7 +426,9 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(customerService)
+                .WaitFor(customerService)
                 .WithReference(employeeService)
+                .WaitFor(employeeService)
                 .WithReference(iamService)
                 .WaitFor(iamService)
                 .WithTestingSafeHttpHealthCheck("/auth/aspire-liveness"),
@@ -992,9 +994,11 @@ static partial class Program
         _ = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_Web_Bff>("WebBff")
                 .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
                 .WaitFor(iamService)
                 .WithReference(customerService)
+                .WaitFor(customerService)
                 .WithReference(countryService)
                 .WithReference(contactService)
                 .WithReference(deliveryService)
