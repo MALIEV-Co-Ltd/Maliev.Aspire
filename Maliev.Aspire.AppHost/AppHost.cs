@@ -896,8 +896,6 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
                 .WaitFor(iamService)
-                .WithUrlForEndpoint("http", u => { u.Url = "/search/scalar"; u.DisplayText = "Scalar Documentation"; })
-                .WithUrlForEndpoint("https", u => { u.Url = "/search/scalar"; u.DisplayText = "Scalar Documentation"; })
                 .WithTestingSafeHttpHealthCheck("/search/aspire-liveness"),
             config,
             grafana,
@@ -1123,7 +1121,7 @@ static partial class Program
             .WithEnvironment("GEOMETRY_RABBITMQ_PREFETCH", "2")
             .WithExternalHttpEndpoints()
             .WithHttpEndpoint(targetPort: 8081, env: "PORT")
-            .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Scalar Documentation"; })
+            .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Geometry Scalar"; })
             .WithTestingSafeHttpHealthCheck("/geometry/aspire-liveness");
 
         // Wire GeometryService into BFFs for service discovery.
@@ -1145,6 +1143,7 @@ static partial class Program
         string environmentName)
     {
         return project
+            .WithServiceScalarUrl()
             .WithEnvironment("ASPNETCORE_ENVIRONMENT", environmentName)
             .WithEnvironment("DOTNET_ENVIRONMENT", environmentName)
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
@@ -1165,7 +1164,71 @@ static partial class Program
             .WithEnvironment("NPGSQL_GSSAPI_AUTHENTICATION", "false")
             .WithEnvironment("PGGSSENCMODE", "disable");
     }
+
+    private static IResourceBuilder<ProjectResource> WithServiceScalarUrl(
+        this IResourceBuilder<ProjectResource> project)
+    {
+        if (!ServiceScalarRoutes.TryGetValue(project.Resource.Name, out var route))
+        {
+            return project;
+        }
+
+        return project
+            .WithUrlForEndpoint("http", url =>
+            {
+                url.Url = route.Path;
+                url.DisplayText = route.DisplayText;
+            })
+            .WithUrlForEndpoint("https", url =>
+            {
+                url.Url = route.Path;
+                url.DisplayText = route.DisplayText;
+            });
+    }
+
+    private static readonly IReadOnlyDictionary<string, ScalarRoute> ServiceScalarRoutes =
+        new Dictionary<string, ScalarRoute>(StringComparer.Ordinal)
+        {
+            ["AccountingService"] = new("/accounting/scalar", "Accounting Scalar"),
+            ["AuthService"] = new("/auth/scalar", "Auth Scalar"),
+            ["CareerService"] = new("/career/scalar", "Career Scalar"),
+            ["ChatbotService"] = new("/chatbot/scalar", "Chatbot Scalar"),
+            ["CommerceService"] = new("/commerce/scalar", "Commerce Scalar"),
+            ["CompensationService"] = new("/compensation/scalar", "Compensation Scalar"),
+            ["ComplianceService"] = new("/compliance/scalar", "Compliance Scalar"),
+            ["ContactService"] = new("/contact/scalar", "Contact Scalar"),
+            ["CountryService"] = new("/country/scalar", "Country Scalar"),
+            ["CurrencyService"] = new("/currency/scalar", "Currency Scalar"),
+            ["CustomerService"] = new("/customer/scalar", "Customer Scalar"),
+            ["DeliveryService"] = new("/delivery/scalar", "Delivery Scalar"),
+            ["EmployeeService"] = new("/employee/scalar", "Employee Scalar"),
+            ["FacilityService"] = new("/facility/scalar", "Facility Scalar"),
+            ["IAMService"] = new("/iam/scalar", "IAM Scalar"),
+            ["InventoryService"] = new("/inventory/scalar", "Inventory Scalar"),
+            ["InvoiceService"] = new("/invoice/scalar", "Invoice Scalar"),
+            ["JobService"] = new("/job/scalar", "Job Scalar"),
+            ["LeaveService"] = new("/leave/scalar", "Leave Scalar"),
+            ["LifecycleService"] = new("/lifecycle/scalar", "Lifecycle Scalar"),
+            ["MaterialService"] = new("/material/scalar", "Material Scalar"),
+            ["NotificationService"] = new("/notification/scalar", "Notification Scalar"),
+            ["OrderService"] = new("/order/scalar", "Order Scalar"),
+            ["PaymentService"] = new("/payment/scalar", "Payment Scalar"),
+            ["PdfService"] = new("/pdf/scalar", "PDF Scalar"),
+            ["PerformanceService"] = new("/performance/scalar", "Performance Scalar"),
+            ["PredictionService"] = new("/predictionservice/scalar", "Prediction Scalar"),
+            ["PricingService"] = new("/pricing/scalar", "Pricing Scalar"),
+            ["ProjectService"] = new("/project/scalar", "Project Scalar"),
+            ["PurchaseOrderService"] = new("/purchase-order/scalar", "Purchase Order Scalar"),
+            ["QuotationService"] = new("/quotation/scalar", "Quotation Scalar"),
+            ["ReceiptService"] = new("/receipt/scalar", "Receipt Scalar"),
+            ["RegistryService"] = new("/registry/scalar", "Registry Scalar"),
+            ["SearchService"] = new("/search/scalar", "Search Scalar"),
+            ["SupplierService"] = new("/supplier/scalar", "Supplier Scalar"),
+            ["UploadService"] = new("/upload/scalar", "Upload Scalar")
+        };
 }
+
+internal sealed record ScalarRoute(string Path, string DisplayText);
 
 /// <summary>
 /// Shared configuration values loaded from configuration sources.

@@ -89,6 +89,22 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
+    /// API service links should have meaningful Scalar labels in the Aspire dashboard.
+    /// </summary>
+    [Fact]
+    public void AppHost_ApiServices_ExposeNamedScalarLinks()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+
+        Assert.Contains(".WithServiceScalarUrl()", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("[\"AccountingService\"] = new(\"/accounting/scalar\", \"Accounting Scalar\")", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("[\"PurchaseOrderService\"] = new(\"/purchase-order/scalar\", \"Purchase Order Scalar\")", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("[\"SearchService\"] = new(\"/search/scalar\", \"Search Scalar\")", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("u.DisplayText = \"Geometry Scalar\"", appHostSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("DisplayText = \"Scalar Documentation\"", appHostSource, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Aspire should expose explicit seed commands for the local test administrator login path.
     /// </summary>
     [Fact]
