@@ -1,6 +1,7 @@
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.CountryService;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.EmployeeService;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.IAMService;
+using Maliev.Aspire.AppHost;
 using Maliev.Aspire.AppHost.Extensions;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
 using Microsoft.Extensions.Configuration;
@@ -30,7 +31,7 @@ builder.Build().Run();
 static IResourceBuilder<ContainerResource> ConfigurePrometheus(IDistributedApplicationBuilder builder)
 {
     return builder.AddContainer("prometheus", "prom/prometheus", "v3.0.1")
-        .WithContainerFiles("/etc/prometheus", ResolveRequiredDirectoryPath("../prometheus"))
+        .WithContainerFiles("/etc/prometheus", AppHostPathResolver.ResolveRequiredDirectoryPath("../prometheus"))
         .WithArgs("--web.enable-otlp-receiver", "--config.file=/etc/prometheus/prometheus.yml")
         .WithHttpEndpoint(targetPort: 9090)
         .WithUrlForEndpoint("http", u => u.DisplayText = "Prometheus Dashboard");
@@ -41,8 +42,8 @@ static IResourceBuilder<ContainerResource> ConfigureGrafana(
     IResourceBuilder<ContainerResource> prometheus)
 {
     return builder.AddContainer("grafana", "grafana/grafana")
-        .WithContainerFiles("/etc/grafana", ResolveRequiredDirectoryPath("../grafana/config"))
-        .WithContainerFiles("/var/lib/grafana/dashboards", ResolveRequiredDirectoryPath("../grafana/dashboards"))
+        .WithContainerFiles("/etc/grafana", AppHostPathResolver.ResolveRequiredDirectoryPath("../grafana/config"))
+        .WithContainerFiles("/var/lib/grafana/dashboards", AppHostPathResolver.ResolveRequiredDirectoryPath("../grafana/dashboards"))
         .WithEnvironment("PROMETHEUS_ENDPOINT", prometheus.GetEndpoint("http"))
         .WithHttpEndpoint(targetPort: 3000)
         .WithUrlForEndpoint("http", u => u.DisplayText = "Grafana Dashboard");
@@ -54,27 +55,6 @@ static IResourceBuilder<ContainerResource> ConfigureOpenTelemetry(
 {
     return builder.AddOpenTelemetryCollector("otelcollector", "../otelcollector/config.yaml")
         .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp");
-}
-
-static string ResolveRequiredDirectoryPath(string sourcePath)
-{
-    var candidates = new[]
-    {
-        Path.GetFullPath(sourcePath),
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", sourcePath)),
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", sourcePath)),
-        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", sourcePath))
-    };
-
-    foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
-    {
-        if (Directory.Exists(candidate))
-        {
-            return candidate;
-        }
-    }
-
-    throw new DirectoryNotFoundException($"Unable to locate Docker container file source directory '{sourcePath}'.");
 }
 /// <summary>
 /// Main program class containing configuration methods for the Aspire AppHost.
@@ -296,7 +276,7 @@ static partial class Program
     {
         var environmentName = builder.Environment.EnvironmentName;
 
-        void ConfigureAspireTestAdminSeeder(IResourceBuilder<ProjectResource> seeder)
+        void ConfigureAspireTestAdminSeeder(IResourceBuilder<ExecutableResource> seeder)
         {
             seeder
                 .WithEnvironment("AspireTestAdmin__Enabled", config.AspireTestAdminEnabled)

@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 using Aspire.Hosting.ApplicationModel;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -64,16 +66,20 @@ public static class MalievResourceExtensions
         this IResourceBuilder<ProjectResource> targetService,
         IResourceBuilder<PostgresDatabaseResource> database,
         string? seederName = null,
-        Action<IResourceBuilder<ProjectResource>>? configureSeeder = null)
+        Action<IResourceBuilder<ExecutableResource>>? configureSeeder = null)
         where TSeeder : class
     {
         var seederClassName = typeof(TSeeder).Name;
         var seederProjectName = seederName ??
             $"{targetService.Resource.Name}-seeder-{seederClassName.ToLowerInvariant()}";
+        var seederAssemblyPath = ResolveSeederAssemblyPath();
 
         var seeder = targetService.ApplicationBuilder
-            .AddProject(seederProjectName,
-                "../Maliev.Aspire.DatabaseSeeder/Maliev.Aspire.DatabaseSeeder.csproj")
+            .AddExecutable(
+                seederProjectName,
+                ResolveDotnetExecutablePath(),
+                AppContext.BaseDirectory,
+                seederAssemblyPath)
             .WithEnvironment("SEED_TARGET", seederClassName)
             .WithReference(database)
             .WaitFor(database)
@@ -117,7 +123,7 @@ public static class MalievResourceExtensions
     /// Copies environment variables from parent resource to seeder, excluding problematic variables.
     /// </summary>
     private static void CopyParentEnvironment(
-        IResourceBuilder<ProjectResource> seeder,
+        IResourceBuilder<ExecutableResource> seeder,
         IResourceBuilder<ProjectResource> parent)
     {
         seeder.WithEnvironment(context =>
@@ -133,5 +139,42 @@ public static class MalievResourceExtensions
             context.EnvironmentVariables.Remove("ASPNETCORE_URLS");
             context.EnvironmentVariables.Remove("ASPNETCORE_HTTPS_PORT");
         });
+    }
+
+    private static string ResolveSeederAssemblyPath()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Maliev.Aspire.DatabaseSeeder.dll");
+
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException(
+                "Unable to locate the database seeder assembly in the AppHost output directory.",
+                path);
+        }
+
+        return path;
+    }
+
+    private static string ResolveDotnetExecutablePath()
+    {
+        var processPath = Environment.ProcessPath;
+
+        if (!string.IsNullOrWhiteSpace(processPath) &&
+            Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            return processPath;
+        }
+
+        var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+        if (!string.IsNullOrWhiteSpace(dotnetRoot))
+        {
+            var candidate = Path.Combine(dotnetRoot, RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "dotnet.exe" : "dotnet");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "dotnet.exe" : "dotnet";
     }
 }

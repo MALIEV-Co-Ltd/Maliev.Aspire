@@ -77,12 +77,21 @@ public sealed class AppHostReferenceTests
     public void AppHost_MonitoringContainers_AvoidHostBindMounts()
     {
         var appHostSource = File.ReadAllText(FindAppHostSource());
+        var appHostDirectory = Path.GetDirectoryName(FindAppHostSource())!;
+        var collectorExtensionSource = File.ReadAllText(Path.Combine(
+            appHostDirectory,
+            "OpenTelemetryCollector",
+            "OpenTelemetryCollectorResourceBuilderExtensions.cs"));
+        var pathResolverSource = File.ReadAllText(Path.Combine(
+            appHostDirectory,
+            "AppHostPathResolver.cs"));
 
-        Assert.Contains(".WithContainerFiles(\"/etc/prometheus\", ResolveRequiredDirectoryPath(\"../prometheus\"))", appHostSource, StringComparison.Ordinal);
-        Assert.Contains(".WithContainerFiles(\"/etc/grafana\", ResolveRequiredDirectoryPath(\"../grafana/config\"))", appHostSource, StringComparison.Ordinal);
-        Assert.Contains(".WithContainerFiles(\"/var/lib/grafana/dashboards\", ResolveRequiredDirectoryPath(\"../grafana/dashboards\"))", appHostSource, StringComparison.Ordinal);
+        Assert.Contains(".WithContainerFiles(\"/etc/prometheus\", AppHostPathResolver.ResolveRequiredDirectoryPath(\"../prometheus\"))", appHostSource, StringComparison.Ordinal);
+        Assert.Contains(".WithContainerFiles(\"/etc/grafana\", AppHostPathResolver.ResolveRequiredDirectoryPath(\"../grafana/config\"))", appHostSource, StringComparison.Ordinal);
+        Assert.Contains(".WithContainerFiles(\"/var/lib/grafana/dashboards\", AppHostPathResolver.ResolveRequiredDirectoryPath(\"../grafana/dashboards\"))", appHostSource, StringComparison.Ordinal);
         Assert.Contains("insight.WithVolume(\"redisinsight-data\", \"/data\")", appHostSource, StringComparison.Ordinal);
-        Assert.Contains("Directory.Exists(candidate)", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("AppHostPathResolver.ResolveRequiredFilePath(configFileLocation)", collectorExtensionSource, StringComparison.Ordinal);
+        Assert.Contains("\"Maliev.Aspire.AppHost\", sourcePath", pathResolverSource, StringComparison.Ordinal);
         Assert.DoesNotContain(".WithBindMount(\"../prometheus\"", appHostSource, StringComparison.Ordinal);
         Assert.DoesNotContain(".WithBindMount(\"../grafana", appHostSource, StringComparison.Ordinal);
         Assert.DoesNotContain("insight.WithBindMount(\"redisinsight-data\"", appHostSource, StringComparison.Ordinal);
@@ -120,7 +129,10 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".SeedDatabase<CountryDatabaseSeeder>(databases.Country", appHostSource, StringComparison.Ordinal);
         Assert.Contains(".SeedDatabase<EmployeeDatabaseSeeder>(databases.Employee", appHostSource, StringComparison.Ordinal);
         Assert.Contains(".SeedDatabase<IAMDatabaseSeeder>(databases.IAM", appHostSource, StringComparison.Ordinal);
+        Assert.Contains(".AddExecutable(", resourceExtensionSource, StringComparison.Ordinal);
+        Assert.Contains("ResolveSeederAssemblyPath()", resourceExtensionSource, StringComparison.Ordinal);
         Assert.Contains("targetService.WaitForCompletion(seeder);", resourceExtensionSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("../Maliev.Aspire.DatabaseSeeder/Maliev.Aspire.DatabaseSeeder.csproj", resourceExtensionSource, StringComparison.Ordinal);
     }
 
     /// <summary>

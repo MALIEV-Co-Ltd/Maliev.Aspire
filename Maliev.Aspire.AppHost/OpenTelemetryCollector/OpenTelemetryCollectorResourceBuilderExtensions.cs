@@ -1,4 +1,5 @@
 using Aspire.Hosting.ApplicationModel;
+using Maliev.Aspire.AppHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -29,7 +30,7 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
         var isHttpsEnabled = url.StartsWith("https", StringComparison.OrdinalIgnoreCase);
 
         var dashboardOtlpEndpoint = new HostUrl(url);
-        var configFilePath = ResolveRequiredFilePath(configFileLocation);
+        var configFilePath = AppHostPathResolver.ResolveRequiredFilePath(configFileLocation);
 
         var collectorResource = new OpenTelemetryCollectorResource(name);
         var resourceBuilder = builder.AddResource(collectorResource)
@@ -77,24 +78,4 @@ public static class OpenTelemetryCollectorResourceBuilderExtensions
         return resourceBuilder;
     }
 
-    private static string ResolveRequiredFilePath(string sourcePath)
-    {
-        var candidates = new[]
-        {
-            Path.GetFullPath(sourcePath),
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", sourcePath)),
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", sourcePath)),
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", sourcePath))
-        };
-
-        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-
-        throw new FileNotFoundException($"Unable to locate OpenTelemetry collector configuration file '{sourcePath}'.", sourcePath);
-    }
 }

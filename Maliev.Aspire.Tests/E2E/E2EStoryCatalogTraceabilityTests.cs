@@ -74,15 +74,27 @@ public sealed partial class E2EStoryCatalogTraceabilityTests
 
     private static string FindRepositoryRoot()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
+        foreach (var startDirectory in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
         {
-            if (File.Exists(Path.Combine(directory.FullName, "Maliev.Aspire.slnx")))
+            var directory = new DirectoryInfo(startDirectory);
+            while (directory is not null)
             {
-                return directory.FullName;
-            }
+                var candidates = new[]
+                {
+                    directory.FullName,
+                    Path.Combine(directory.FullName, "Maliev.Aspire")
+                };
 
-            directory = directory.Parent;
+                foreach (var candidate in candidates)
+                {
+                    if (File.Exists(Path.Combine(candidate, "Maliev.Aspire.slnx")))
+                    {
+                        return candidate;
+                    }
+                }
+
+                directory = directory.Parent;
+            }
         }
 
         throw new DirectoryNotFoundException("Could not locate Maliev.Aspire repository root.");
