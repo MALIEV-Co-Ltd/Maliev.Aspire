@@ -989,6 +989,7 @@ static partial class Program
                 .WithReference(uploadService)
                 .WithReference(commerceService)
                 .WithReference(chatbotService)
+                .WithReference(pdfService)
                 .WithEnvironment("QuoteEngine__BaseUrl", quoteEngineBff.GetEndpoint("https"))
                 .WithUrlForEndpoint("http", u => u.DisplayText = "Customer Web (HTTP)")
                 .WithUrlForEndpoint("https", u => u.DisplayText = "Customer Web (HTTPS)")
