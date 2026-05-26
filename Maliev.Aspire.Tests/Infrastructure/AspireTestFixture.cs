@@ -78,7 +78,7 @@ public class AspireTestFixture : IAsyncLifetime
     /// <summary>
     /// Gets the Aspire-local automation employee email used by browser E2E tests.
     /// </summary>
-    public string AspireTestAdminEmail { get; } = "aspire-automation@debug.com";
+    public string AspireTestAdminEmail { get; } = "aspire-automation@maliev.com";
 
     /// <summary>
     /// Gets the generated Aspire-local automation employee password for this test process.
@@ -88,7 +88,7 @@ public class AspireTestFixture : IAsyncLifetime
     /// <summary>
     /// Gets the Aspire-local limited employee email used by permission-boundary browser E2E tests.
     /// </summary>
-    public string AspireTestLimitedEmployeeEmail { get; } = "aspire-limited@debug.com";
+    public string AspireTestLimitedEmployeeEmail { get; } = "aspire-limited@maliev.com";
 
     /// <summary>
     /// Gets the generated Aspire-local limited employee password for this test process.

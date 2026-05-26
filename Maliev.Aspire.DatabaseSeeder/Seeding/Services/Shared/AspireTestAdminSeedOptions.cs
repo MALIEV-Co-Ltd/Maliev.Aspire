@@ -7,7 +7,7 @@ namespace Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
 /// </summary>
 public sealed class AspireTestAdminSeedOptions
 {
-    private const string DefaultEmail = "aspire-automation@debug.com";
+    private const string DefaultEmail = "aspire-automation@maliev.com";
     private const string ReservedSystemPrincipalEmail = "system@maliev.com";
 
     /// <summary>
@@ -88,7 +88,7 @@ public sealed class AspireTestAdminSeedOptions
     /// <summary>
     /// Gets the synthetic limited employee email used for permission-boundary browser E2E tests.
     /// </summary>
-    public string LimitedEmail { get; init; } = "aspire-limited@debug.com";
+    public string LimitedEmail { get; init; } = "aspire-limited@maliev.com";
 
     /// <summary>
     /// Gets the stable IAM principal identifier used by the limited employee.
@@ -160,7 +160,7 @@ public sealed class AspireTestAdminSeedOptions
             PreferredName = ReadString(configuration, "AspireTestAdmin:PreferredName", "Codex Admin"),
             LinkedService = LinkedServiceName,
             RoleId = AutomationRoleId,
-            LimitedEmail = ReadString(configuration, "AspireTestAdmin:LimitedEmail", "aspire-limited@debug.com"),
+            LimitedEmail = ReadString(configuration, "AspireTestAdmin:LimitedEmail", "aspire-limited@maliev.com"),
             LimitedPrincipalId = ReadGuid(configuration, "AspireTestAdmin:LimitedPrincipalId", DefaultLimitedPrincipalId),
             LimitedEmployeeId = ReadGuid(configuration, "AspireTestAdmin:LimitedEmployeeId", DefaultLimitedEmployeeId),
             LimitedEmployeeNumber = ReadString(configuration, "AspireTestAdmin:LimitedEmployeeNumber", "EMP-CODEX-002"),

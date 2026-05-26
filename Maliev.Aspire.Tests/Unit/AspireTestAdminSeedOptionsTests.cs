@@ -57,10 +57,10 @@ public class AspireTestAdminSeedOptionsTests
         var options = AspireTestAdminSeedOptions.FromConfiguration(configuration);
 
         Assert.True(options.Enabled);
-        Assert.Equal("aspire-automation@debug.com", options.Email);
+        Assert.Equal("aspire-automation@maliev.com", options.Email);
         Assert.Equal("AspireTestAdminSeeder", options.LinkedService);
         Assert.Equal("roles.aspire.automation", options.RoleId);
-        Assert.Equal("aspire-limited@debug.com", options.LimitedEmail);
+        Assert.Equal("aspire-limited@maliev.com", options.LimitedEmail);
         Assert.Equal("roles.aspire.limited", options.LimitedRoleIdValue);
         Assert.Contains("auth.sessions.read", options.LimitedRolePermissions);
         Assert.Contains("employee.profiles.read", options.LimitedRolePermissions);
@@ -104,8 +104,8 @@ public class AspireTestAdminSeedOptionsTests
         {
             ["AspireTestAdmin:Enabled"] = "true",
             ["AspireTestAdmin:Password"] = "local-only-secret",
-            ["AspireTestAdmin:Email"] = "same@debug.com",
-            ["AspireTestAdmin:LimitedEmail"] = "same@debug.com"
+            ["AspireTestAdmin:Email"] = "same@maliev.com",
+            ["AspireTestAdmin:LimitedEmail"] = "same@maliev.com"
         });
 
         var exception = Assert.Throws<InvalidOperationException>(

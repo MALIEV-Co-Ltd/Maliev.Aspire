@@ -2030,6 +2030,207 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies a received physical material item gets its own QR label and that production consumption deducts
+    /// from that exact item through the Intranet schedule workflow.
+    /// Covers the executable QR material traceability portions of INT-012, MFG-004, and MFG-006.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-012,MFG-004,MFG-006")]
+    public async Task Intranet_MaterialTraceability_ReceivesQrItemAndConsumesExactStockItemOnJob()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var materialName = $"000 E2E POM Block {unique}";
+        var materialCode = $"E2E-POM-{unique}";
+        var lotNumber = $"LOT-{unique}";
+        var storageLocation = $"Rack E2E A3-{unique[..4]}";
+
+        await SignInToIntranetAsync(page, intranetBase, "/mfg/materials");
+        var material = await CreateIntranetMaterialAsync(
+            page,
+            materialName,
+            materialCode,
+            $"Traceable CNC stock block for E2E material movement {unique}.");
+
+        await page.GotoAsync(
+            new Uri(intranetBase, $"/mfg/materials/{material.Id}").ToString(),
+            new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await Expect(page.Locator("body")).ToContainTextAsync(materialName, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Receive material item", new() { Timeout = 30_000 });
+
+        var receiveForm = page.Locator(".material-receive-form").First;
+        await Expect(receiveForm).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await SelectScopedNativeFieldAsync(receiveForm, "Block", "Form factor");
+        await FillScopedTextboxAsync(receiveForm, "2", "Quantity");
+        await SelectScopedNativeFieldAsync(receiveForm, "block", "Unit");
+        await FillScopedTextboxAsync(receiveForm, storageLocation, "Storage location");
+        await FillScopedTextboxAsync(receiveForm, lotNumber, "Lot");
+        await FillScopedTextboxAsync(receiveForm, $"SKU-{unique}", "SKU");
+        await FillScopedTextboxAsync(receiveForm, "POM-C", "Grade");
+        await SelectReceiveColorOptionAsync(receiveForm, "Black");
+        await FillScopedTextboxAsync(receiveForm, "100", "L mm");
+        await FillScopedTextboxAsync(receiveForm, "100", "W mm");
+        await FillScopedTextboxAsync(receiveForm, "50", "H mm");
+        await FillScopedTextboxAsync(receiveForm, "0.25", "Low-stock threshold");
+
+        var receiveResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/inventory/items", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+        await receiveForm.GetByRole(AriaRole.Button, new() { NameString = "Receive item" }).ClickAsync();
+        var receiveResponse = await receiveResponseTask;
+        var receiveBody = await ReadResponseTextOrEmptyAsync(receiveResponse);
+        Assert.True(receiveResponse.Ok, $"Material item receive failed with HTTP {receiveResponse.Status}: {receiveBody}");
+
+        using var receivedDocument = JsonDocument.Parse(receiveBody);
+        var receivedItem = receivedDocument.RootElement.Clone();
+        var trackingCode = GetJsonString(receivedItem, "trackingCode", "TrackingCode");
+        var qrPayload = GetJsonString(receivedItem, "qrPayload", "QrPayload");
+        Assert.False(string.IsNullOrWhiteSpace(trackingCode));
+        Assert.Contains(trackingCode, qrPayload, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(material.Id, GetJsonGuid(receivedItem, "materialId", "MaterialId"));
+        Assert.Equal(2, GetJsonDouble(receivedItem, "remainingQuantity", "RemainingQuantity"), precision: 2);
+        Assert.Equal("block", GetJsonString(receivedItem, "quantityUnit", "QuantityUnit"));
+        Assert.Equal(storageLocation, GetJsonString(receivedItem, "location", "Location"));
+        Assert.Equal(lotNumber, GetJsonString(receivedItem, "lotNumber", "LotNumber"));
+        Assert.Equal("#000000", GetJsonString(receivedItem, "color", "Color"));
+
+        await Expect(page.Locator("body")).ToContainTextAsync("Latest item label", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(trackingCode, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(storageLocation, new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("100 x 100 x 50 mm", new() { Timeout = 30_000 });
+
+        var targetJob = await FindScheduledProductionJobAsync(page);
+        var patchResult = await page.EvaluateAsync<string>(
+            @"async args => {
+                const r = await fetch(`/api/v1/jobs/${args.jobId}/details`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        materialId: args.materialId,
+                        assignedOperator: args.assignedOperator,
+                        priority: 2
+                    })
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new
+            {
+                jobId = targetJob.Id,
+                materialId = material.Id,
+                assignedOperator = "Aspire E2E Operator"
+            });
+
+        Assert.True(
+            patchResult.StartsWith("204", StringComparison.Ordinal) ||
+            patchResult.StartsWith("200", StringComparison.Ordinal),
+            $"Job material setup failed for {targetJob.Id}. Result: {patchResult[..Math.Min(patchResult.Length, 1_500)]}");
+
+        await page.GotoAsync(
+            new Uri(intranetBase, "/mfg/production-schedule").ToString(),
+            new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        var scheduleBoard = page.Locator(".production-schedule-board").First;
+        await Expect(scheduleBoard).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var jobSlot = scheduleBoard.Locator("button.psb-slot:not([disabled]):not([aria-disabled='true'])")
+            .Filter(new() { HasText = targetJob.JobNumber })
+            .First;
+        await Expect(jobSlot).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await jobSlot.ClickAsync();
+
+        var jobPanel = page.Locator(".production-slot-panel").First;
+        await Expect(jobPanel).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(jobPanel).ToContainTextAsync("Exact stock item", new() { Timeout = 30_000 });
+        await Expect(jobPanel).ToContainTextAsync(materialName, new() { Timeout = 30_000 });
+        await Expect(jobPanel).ToContainTextAsync(trackingCode, new() { Timeout = 30_000 });
+
+        await page.EvaluateAsync(
+            """
+            () => {
+                window.__malievMaterialConsumeBodies = [];
+                const originalFetch = window.fetch.bind(window);
+                window.fetch = async (input, init = {}) => {
+                    const url = typeof input === 'string' ? input : input?.url ?? '';
+                    if (url.includes('/api/v1/inventory/items/') && url.endsWith('/consume')) {
+                        window.__malievMaterialConsumeBodies.push(init.body ?? '');
+                    }
+
+                    return originalFetch(input, init);
+                };
+            }
+            """);
+
+        var scanInput = jobPanel.GetByPlaceholder("Scan item QR or paste tracking code");
+        await scanInput.FillAsync(qrPayload);
+        var lookupResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/api/v1/inventory/items/lookup?code=", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "GET", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+        await jobPanel.GetByRole(AriaRole.Button, new() { NameString = "Scan item" }).ClickAsync();
+        var lookupResponse = await lookupResponseTask;
+        Assert.True(lookupResponse.Ok, $"Material QR lookup failed with HTTP {lookupResponse.Status}: {await ReadResponseTextOrEmptyAsync(lookupResponse)}");
+
+        await Expect(jobPanel).ToContainTextAsync("Tracking code", new() { Timeout = 30_000 });
+        await Expect(jobPanel).ToContainTextAsync(trackingCode, new() { Timeout = 30_000 });
+        await Expect(jobPanel).ToContainTextAsync(storageLocation, new() { Timeout = 30_000 });
+        await Expect(jobPanel).ToContainTextAsync(lotNumber, new() { Timeout = 30_000 });
+
+        var operatorSelect = jobPanel.Locator("xpath=.//label[span[normalize-space(.) = 'Operator']]//select").First;
+        var operatorValues = await operatorSelect.Locator("option").EvaluateAllAsync<string[]>(
+            "options => options.map(option => option.value).filter(value => value)");
+        if (operatorValues.Length > 0)
+        {
+            await operatorSelect.SelectOptionAsync(operatorValues[0]);
+        }
+
+        var quantityUsed = jobPanel
+            .Locator("xpath=.//label[span[starts-with(normalize-space(.), 'Quantity used')]]//input")
+            .First;
+        await quantityUsed.FillAsync("0.5");
+
+        var consumeResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/inventory/items/{Uri.EscapeDataString(trackingCode)}/consume", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 90_000 });
+        await jobPanel.GetByRole(AriaRole.Button, new() { NameString = "Record material use" }).ClickAsync();
+        var consumeResponse = await consumeResponseTask;
+        var consumeBody = await ReadResponseTextOrEmptyAsync(consumeResponse);
+        Assert.True(consumeResponse.Ok, $"Material consume failed with HTTP {consumeResponse.Status}: {consumeBody}");
+
+        using var consumeDocument = JsonDocument.Parse(consumeBody);
+        var consumedItem = consumeDocument.RootElement.Clone();
+        Assert.Equal(trackingCode, GetJsonString(consumedItem, "trackingCode", "TrackingCode"));
+        Assert.Equal(1.5, GetJsonDouble(consumedItem, "remainingQuantity", "RemainingQuantity"), precision: 2);
+        Assert.Equal("Active", GetJsonString(consumedItem, "status", "Status"));
+
+        var consumeRequestBody = await page.EvaluateAsync<string>(
+            "() => window.__malievMaterialConsumeBodies?.at(-1) ?? ''");
+        using var consumeRequestDocument = JsonDocument.Parse(consumeRequestBody);
+        var consumeRequest = consumeRequestDocument.RootElement;
+        Assert.Equal(targetJob.Id, GetJsonGuid(consumeRequest, "jobId", "JobId"));
+        Assert.Equal(0.5, GetJsonDouble(consumeRequest, "quantityConsumed", "QuantityConsumed"), precision: 2);
+        Assert.False(string.IsNullOrWhiteSpace(GetJsonString(consumeRequest, "machineId", "MachineId")));
+        if (operatorValues.Length > 0)
+        {
+            Assert.Equal(operatorValues[0], GetJsonString(consumeRequest, "operatorId", "OperatorId"));
+        }
+
+        var persistedResult = await page.EvaluateAsync<string>(
+            @"async code => {
+                const r = await fetch(`/api/v1/inventory/items/lookup?code=${encodeURIComponent(code)}`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            qrPayload);
+        Assert.StartsWith("200 ", persistedResult, StringComparison.Ordinal);
+        using var persistedDocument = JsonDocument.Parse(persistedResult[4..]);
+        Assert.Equal(1.5, GetJsonDouble(persistedDocument.RootElement, "remainingQuantity", "RemainingQuantity"), precision: 2);
+    }
+
+    /// <summary>
     /// Verifies an employee can register equipment, inspect the generated asset record, append an operating note,
     /// and append a maintenance log through the FacilityService boundary.
     /// Covers the executable equipment/facility master-data portion of INT-013.
@@ -5708,6 +5909,86 @@ END-ISO-10303-21;`;
 
     private sealed record CreatedProjectPart(Guid PartId, string FileName);
 
+    private static async Task<CreatedIntranetMaterial> CreateIntranetMaterialAsync(
+        IPage page,
+        string name,
+        string code,
+        string description)
+    {
+        var createResult = await page.EvaluateAsync<string>(
+            @"async payload => {
+                const r = await fetch('/api/v1/materials', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                return `${r.status} ${await r.text()}`;
+            }",
+            new
+            {
+                sku = code,
+                name,
+                description,
+                unitPrice = 125m,
+                quantityOnHand = 0,
+                unit = "block"
+            });
+
+        Assert.True(
+            createResult.StartsWith("201", StringComparison.Ordinal) ||
+            createResult.StartsWith("200", StringComparison.Ordinal),
+            $"Material create failed. Result: {createResult}");
+        using var document = JsonDocument.Parse(createResult[4..]);
+        var root = document.RootElement;
+        var materialId = GetJsonGuid(root, "id", "Id", "materialId", "MaterialId");
+        Assert.NotEqual(Guid.Empty, materialId);
+        Assert.Equal(name, FirstNonEmpty(GetJsonString(root, "name", "Name"), name));
+        return new CreatedIntranetMaterial(materialId, name, code);
+    }
+
+    private static async Task<ScheduledProductionJob> FindScheduledProductionJobAsync(IPage page)
+    {
+        var queueResult = await page.EvaluateAsync<string>(
+            "async () => { const r = await fetch('/api/v1/jobs/queue', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
+        Assert.StartsWith("200 ", queueResult, StringComparison.Ordinal);
+        using var queueDocument = JsonDocument.Parse(queueResult[4..]);
+        Assert.True(
+            TryGetJsonProperty(queueDocument.RootElement, out var jobs, "jobs", "Jobs"),
+            $"Queue response did not contain a jobs array. Body: {queueResult[..Math.Min(queueResult.Length, 1_500)]}");
+
+        foreach (var job in jobs.EnumerateArray())
+        {
+            var jobId = GetJsonGuid(job, "id", "Id", "jobId", "JobId");
+            var jobNumber = FirstNonEmpty(
+                GetJsonString(job, "jobNumber", "JobNumber"),
+                GetJsonString(job, "number", "Number"),
+                jobId == Guid.Empty ? null : jobId.ToString("N")[..8].ToUpperInvariant());
+            var status = GetJsonString(job, "status", "Status");
+            if (jobId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(jobNumber) ||
+                IsTerminalProductionStatus(status))
+            {
+                continue;
+            }
+
+            return new ScheduledProductionJob(jobId, jobNumber, status);
+        }
+
+        Assert.Fail($"No schedulable production job was found. Queue body: {queueResult[..Math.Min(queueResult.Length, 2_000)]}");
+        return default;
+    }
+
+    private static bool IsTerminalProductionStatus(string status)
+        => status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ||
+           status.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) ||
+           status.Equals("Canceled", StringComparison.OrdinalIgnoreCase) ||
+           status.Equals("Failed", StringComparison.OrdinalIgnoreCase);
+
+    private sealed record CreatedIntranetMaterial(Guid Id, string Name, string Code);
+
+    private sealed record ScheduledProductionJob(Guid Id, string JobNumber, string Status);
+
     private static async Task<CreatedIntranetSupplier> CreateIntranetSupplierAsync(IPage page)
     {
         var unique = Guid.NewGuid().ToString("N")[..12];
@@ -5883,6 +6164,40 @@ END-ISO-10303-21;`;
             .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
         throw new PlaywrightException(
             $"Could not find an input for labels [{string.Join(", ", labelCandidates)}]. Scope text: {scopeText[..Math.Min(scopeText.Length, 1_000)]}");
+    }
+
+    private static async Task SelectScopedNativeFieldAsync(ILocator scope, string value, params string[] labelCandidates)
+    {
+        foreach (var label in labelCandidates)
+        {
+            var labelLiteral = ToXPathLiteral(label);
+            var select = scope
+                .Locator($"xpath=.//label[span[normalize-space(.) = {labelLiteral}]]//select")
+                .First;
+
+            if (await select.CountAsync() > 0)
+            {
+                await select.SelectOptionAsync(value);
+                return;
+            }
+        }
+
+        var scopeText = await scope.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 })
+            .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+        throw new PlaywrightException(
+            $"Could not find a select for labels [{string.Join(", ", labelCandidates)}]. Scope text: {scopeText[..Math.Min(scopeText.Length, 1_000)]}");
+    }
+
+    private static async Task SelectReceiveColorOptionAsync(ILocator receiveForm, string colorName)
+    {
+        var option = receiveForm
+            .Locator(".material-receive-color-option")
+            .Filter(new() { HasText = colorName })
+            .First;
+
+        await Expect(option).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await option.ClickAsync();
+        await Expect(option.Locator("input[type='radio']")).ToBeCheckedAsync(new() { Timeout = 10_000 });
     }
 
     private static string ToXPathLiteral(string value)
