@@ -4,6 +4,34 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-05-20 MFG-005 Manufacturing Lifecycle Browser E2E
+
+### Scope
+
+- Added `Intranet_ManufacturingLifecycle_OrderToJobStatusUpdateWithSignalRBroadcast` to `BrowserJourneyGateTests` to close the MFG-005 gap ("Production status updates stay fresh through SignalR or refresh").
+- Unblocked `MFG-005` which had been blocked since 2026-05-16 pending an authenticated job status event trigger.
+- Added `OrderPaidEventConsumerTests` to `Maliev.JobService.Tests` (4 unit tests) to prove the `OrderPaidEvent → OrderPaidEventConsumer → CreateJobsForPaidOrderAsync` leg of the complete manufacturing event chain. This completed consumer-level coverage for the end-to-end flow: QuoteEngine BFF → OrderService → MassTransit → JobService.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet build B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj -p:UseSharedCompilation=false -m:1 /nr:false --verbosity minimal --output B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\bin\E2EBuildCheck` | Passed: 0 warnings, 0 errors |
+| `dotnet test B:\maliev\Maliev.JobService\Maliev.JobService.Tests\Maliev.JobService.Tests.csproj -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 119 tests (including 4 new `OrderPaidEventConsumerTests`) |
+
+### Browser Tests Added In This Slice
+
+| Method | Story id(s) | Verifies |
+|--------|-------------|----------|
+| `Intranet_ManufacturingLifecycle_OrderToJobStatusUpdateWithSignalRBroadcast` | `MFG-005` | Authenticated employee creates a customer and order. OrderService advances the order to Paid, publishing `OrderPaidEvent`. JobService creates a production job via `OrderPaidEventConsumer`. The employee updates the job to InProgress via `PATCH /api/v1/jobs/{id}/status`; the 204 response proves `ProductionHub.SendAsync("JobStatusChanged")` fired. A queue re-read and page reload confirm the status persists and is visible to watching employees. |
+
+### Story Coverage Status After This Slice
+
+| Story id | Coverage status |
+|----------|-----------------|
+| `MFG-005` | Automated. Order-to-job event chain and SignalR-triggered status update covered. Kanban drag-and-drop UI click coverage and live push to a connected browser client (without reload) deferred. |
+| All other ids | Unchanged from the 2026-05-18 catalog refresh. |
+
 ## 2026-05-18 Catalog Refresh After Recent Feature Waves
 
 ### Scope
@@ -527,7 +555,7 @@ Seven new browser-level E2E tests were added to `BrowserJourneyGateTests.cs`. Ea
 | `MFG-002` | Blocked | Requires shop-floor mobile authenticated job. | Need test employee role and assigned job. |
 | `MFG-003` | Blocked | Requires equipment/work-center assignment UI. | Need facility/equipment/job seed. |
 | `MFG-004` | Blocked | Requires material reservation/consumption UI. | Need inventory/material/job seed. |
-| `MFG-005` | Blocked | Requires manufacturing status event/SignalR. | Need authenticated job status event trigger. |
+| `MFG-005` | Automated | `Intranet_ManufacturingLifecycle_OrderToJobStatusUpdateWithSignalRBroadcast` creates a customer and order, advances the order through New → Reviewing → Reviewed → Quoted → Accepted → Paid via OrderService, waits for JobService to create a production job via the `OrderPaidEvent` → `OrderPaidEventConsumer` event chain, updates the job to InProgress via `PATCH /api/v1/jobs/{id}/status`, and verifies the 204 response proves `ProductionHub.JobStatusChanged` fired. A queue re-read and page reload confirm the status is fresh for watching employees. | Rich UI click coverage (Kanban drag-and-drop, live SignalR push to a connected browser client without page reload) deferred. |
 | `PROC-001` | Blocked | Requires authenticated PO creation. | Need Aspire test admin and supplier/material seed. |
 | `PROC-002` | Partial after automated run | Later automated browser E2E signs in as the Aspire automation employee, opens `/purchasing/suppliers`, creates a supplier through the rendered UI, verifies the supplier detail route, edits profile/address/capabilities through the UI, verifies SupplierService JSON, and also verifies the supplier is selectable in `/purchasing/new` for a supplier-backed PO. | Need supplier document upload, payment terms, duplicate/tax-id validation, supplier audit display, supplier status transitions, and low-permission action checks. |
 | `PROC-003` | Partial after automated run | Later automated browser E2E creates a PO, verifies persisted detail JSON, uploads customer PO evidence, confirms the attachment record, cancels the PO with a reason, and verifies `Cancelled` state in UI and API. | Need approval workflow, cancellation audit trail display, PO PDF/output artifacts, and permission/action-level negative checks. |

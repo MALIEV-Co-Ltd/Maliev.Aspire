@@ -106,6 +106,8 @@ static partial class Program
         var gcpProjectId = builder.AddParameterFromConfig("GcpProjectId", "GCP:ProjectId", secret: true);
         var gcpServiceAccountKeyBase64 = builder.AddParameterFromConfig("GcpServiceAccountKeyBase64", "GCP:ServiceAccountKeyBase64", secret: true);
 
+        var webGoogleMapsApiKey = builder.AddParameterFromConfig("WebGoogleMapsApiKey", "GoogleMaps:BrowserApiKey", secret: true);
+
         var omisePublicKey = builder.AddParameterFromConfig("OmisePublicKey", "PaymentProviders:Omise:PublicKey", secret: true);
         var omiseSecretKey = builder.AddParameterFromConfig("OmiseSecretKey", "PaymentProviders:Omise:SecretKey", secret: true);
         var omiseWebhookSecret = builder.AddParameterFromConfig(
@@ -137,7 +139,8 @@ static partial class Program
             OmisePublicKey: omisePublicKey,
             OmiseSecretKey: omiseSecretKey,
             OmiseWebhookSecret: omiseWebhookSecret,
-            NotificationEncryptionKey: notificationEncryptionKey
+            NotificationEncryptionKey: notificationEncryptionKey,
+            WebGoogleMapsApiKey: webGoogleMapsApiKey
             );
     }
 
@@ -415,7 +418,9 @@ static partial class Program
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .WithEnvironment("WebAuthn__RPId", "localhost")
+            .WithEnvironment("WebAuthn__AllowedOrigins", "https://localhost:56139");
 
         // --- Business Services ---
         var accountingService = WithSharedSecrets(
@@ -1001,7 +1006,8 @@ static partial class Program
             otelCollector,
             environmentName)
             .WithEnvironment("Authentication__Google__ClientId", config.WebGoogleClientId)
-            .WithEnvironment("Authentication__Google__ClientSecret", config.WebGoogleClientSecret);
+            .WithEnvironment("Authentication__Google__ClientSecret", config.WebGoogleClientSecret)
+            .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey);
 
         var inventoryService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_InventoryService_Api>("InventoryService")
@@ -1238,7 +1244,8 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> OmisePublicKey,
     IResourceBuilder<ParameterResource> OmiseSecretKey,
     IResourceBuilder<ParameterResource> OmiseWebhookSecret,
-    IResourceBuilder<ParameterResource> NotificationEncryptionKey);
+    IResourceBuilder<ParameterResource> NotificationEncryptionKey,
+    IResourceBuilder<ParameterResource> WebGoogleMapsApiKey);
 
 /// <summary>
 /// Infrastructure resource references (messaging, caching, database server).
