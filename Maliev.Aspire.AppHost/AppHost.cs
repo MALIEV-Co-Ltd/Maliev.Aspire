@@ -14,15 +14,44 @@ Environment.SetEnvironmentVariable("PGGSSENCMODE", "disable");
 var builder = DistributedApplication.CreateBuilder(args);
 
 var config = Program.LoadSharedConfiguration(builder);
+
+// ──────────────────────────────────────────────
+// 1. Frontends — registered first for dashboard display order
+// ──────────────────────────────────────────────
+var intranetBff = builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
+    .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
+    .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
+    .WithTestingSafeHttpHealthCheck("/intranet/aspire-liveness");
+
+var quoteEngineBff = builder.AddProject<Projects.Maliev_QuoteEngine_Bff>("QuoteEngineBff")
+    .WithUrlForEndpoint("http", u => u.DisplayText = "Quote Engine (HTTP)")
+    .WithUrlForEndpoint("https", u => u.DisplayText = "Quote Engine (HTTPS)")
+    .WithTestingSafeHttpHealthCheck("/quote/aspire-liveness");
+
+var webBff = builder.AddProject<Projects.Maliev_Web_Bff>("WebBff")
+    .WithUrlForEndpoint("http", u => u.DisplayText = "Customer Web (HTTP)")
+    .WithUrlForEndpoint("https", u => u.DisplayText = "Customer Web (HTTPS)")
+    .WithTestingSafeHttpHealthCheck("/web/aspire-liveness");
+
+// ──────────────────────────────────────────────
+// 2. Infrastructure
+// ──────────────────────────────────────────────
 var infrastructure = Program.ConfigureInfrastructure(builder);
 var databases = Program.ConfigureDatabases(infrastructure.Postgres);
 
-// --- Monitoring (Prometheus, Grafana, OpenTelemetry) ---
+// ──────────────────────────────────────────────
+// 3. Monitoring (Prometheus, Grafana, OpenTelemetry)
+// ──────────────────────────────────────────────
 var prometheus = ConfigurePrometheus(builder);
 var grafana = ConfigureGrafana(builder, prometheus);
 var otelCollector = ConfigureOpenTelemetry(builder, prometheus);
 
-Program.ConfigureServices(builder, infrastructure, databases, config, grafana, otelCollector);
+// ──────────────────────────────────────────────
+// 4. Services + wire frontends internally
+// ──────────────────────────────────────────────
+Program.ConfigureServices(
+    builder, infrastructure, databases, config, grafana, otelCollector,
+    intranetBff, quoteEngineBff, webBff);
 
 builder.Build().Run();
 
@@ -108,6 +137,8 @@ static partial class Program
 
         var webGoogleMapsApiKey = builder.AddParameterFromConfig("WebGoogleMapsApiKey", "GoogleMaps:BrowserApiKey", secret: true);
 
+        var businessRegistryDdbApiKey = builder.AddParameterFromConfig("BusinessRegistryDdbApiKey", "BusinessRegistry:DdbApiKey", secret: true);
+
         var omisePublicKey = builder.AddParameterFromConfig("OmisePublicKey", "PaymentProviders:Omise:PublicKey", secret: true);
         var omiseSecretKey = builder.AddParameterFromConfig("OmiseSecretKey", "PaymentProviders:Omise:SecretKey", secret: true);
         var omiseWebhookSecret = builder.AddParameterFromConfig(
@@ -140,7 +171,8 @@ static partial class Program
             OmiseSecretKey: omiseSecretKey,
             OmiseWebhookSecret: omiseWebhookSecret,
             NotificationEncryptionKey: notificationEncryptionKey,
-            WebGoogleMapsApiKey: webGoogleMapsApiKey
+            WebGoogleMapsApiKey: webGoogleMapsApiKey,
+            BusinessRegistryDdbApiKey: businessRegistryDdbApiKey
             );
     }
 
@@ -275,7 +307,10 @@ static partial class Program
         ServiceDatabases databases,
         SharedConfiguration config,
         IResourceBuilder<ContainerResource> grafana,
-        IResourceBuilder<ContainerResource> otelCollector)
+        IResourceBuilder<ContainerResource> otelCollector,
+        IResourceBuilder<ProjectResource> intranetBff,
+        IResourceBuilder<ProjectResource> quoteEngineBff,
+        IResourceBuilder<ProjectResource> webBff)
     {
         var environmentName = builder.Environment.EnvironmentName;
 
@@ -889,125 +924,7 @@ static partial class Program
             otelCollector,
             environmentName);
 
-        var intranetBff = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis)
-                .WithReference(databases.Intranet, "IntranetDbContext")
-                .WaitFor(databases.Intranet)
-                .WithReference(authService)
-                .WithReference(customerService)
-                .WithReference(orderService)
-                .WithReference(deliveryService)
-                .WithReference(iamService)
-                .WaitFor(iamService)
-                .WithReference(countryService)
-                .WaitFor(countryService)
-                .WithReference(registryService)
-                .WithReference(uploadService)
-                .WithReference(quotationService)
-                .WithReference(materialService)
-                .WithReference(employeeService)
-                .WithReference(invoiceService)
-                .WithReference(paymentService)
-                .WithReference(pdfService)
-                .WithReference(supplierService)
-                .WithReference(chatbotService)
-                .WithReference(careerService)
-                .WithReference(complianceService)
-                .WithReference(performanceService)
-                .WithReference(compensationService)
-                .WithReference(accountingService)
-                .WithReference(contactService)
-                .WithReference(receiptService)
-                .WithReference(lifecycleService)
-                .WithReference(purchaseOrderService)
-                .WithReference(leaveService)
-                .WithReference(pricingService)
-                .WithReference(notificationService)
-                .WithReference(facilityService)
-                .WithReference(projectService)
-                .WithReference(searchService)
-                .WithReference(currencyService)
-                .WithReference(commerceService)
-                .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
-                .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
-                .WithTestingSafeHttpHealthCheck("/intranet/aspire-liveness")
-                .WithHttpCommand(
-                    path: "/api/v1/seed/customers",
-                    displayName: "Seed Customer Data",
-                    commandOptions: new HttpCommandOptions
-                    {
-                        IconName = "Database",
-                        IconVariant = IconVariant.Filled,
-                        IsHighlighted = true,
-                        Description = "Seed Maliev customer data (Company, Customer, Addresses)"
-                    }),
-            config,
-            grafana,
-            otelCollector,
-            environmentName);
 
-        var quoteEngineBff = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_QuoteEngine_Bff>("QuoteEngineBff")
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis)
-                .WithReference(authService)
-                .WithReference(iamService)
-                .WaitFor(iamService)
-                .WithReference(customerService)
-                .WithReference(registryService)
-                .WithReference(uploadService)
-                .WithReference(materialService)
-                .WithReference(pricingService)
-                .WithReference(projectService)
-                .WithReference(quotationService)
-                .WithReference(pdfService)
-                .WithReference(orderService)
-                .WithReference(paymentService)
-                .WithReference(deliveryService)
-                .WithReference(chatbotService)
-                .WithUrlForEndpoint("http", u => u.DisplayText = "Quote Engine (HTTP)")
-                .WithUrlForEndpoint("https", u => u.DisplayText = "Quote Engine (HTTPS)")
-                .WithTestingSafeHttpHealthCheck("/quote/aspire-liveness"),
-            config,
-            grafana,
-            otelCollector,
-            environmentName);
-
-        _ = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_Web_Bff>("WebBff")
-                .WithReference(authService)
-                .WaitFor(authService)
-                .WithReference(iamService)
-                .WaitFor(iamService)
-                .WithReference(customerService)
-                .WaitFor(customerService)
-                .WithReference(countryService)
-                .WithReference(registryService)
-                .WithReference(contactService)
-                .WithReference(deliveryService)
-                .WithReference(materialService)
-                .WithReference(orderService)
-                .WithReference(paymentService)
-                .WithReference(pricingService)
-                .WithReference(uploadService)
-                .WithReference(commerceService)
-                .WithReference(chatbotService)
-                .WithReference(pdfService)
-                .WithEnvironment("QuoteEngine__BaseUrl", quoteEngineBff.GetEndpoint("https"))
-                .WithUrlForEndpoint("http", u => u.DisplayText = "Customer Web (HTTP)")
-                .WithUrlForEndpoint("https", u => u.DisplayText = "Customer Web (HTTPS)")
-                .WithTestingSafeHttpHealthCheck("/web/aspire-liveness"),
-            config,
-            grafana,
-            otelCollector,
-            environmentName)
-            .WithEnvironment("Authentication__Google__ClientId", config.WebGoogleClientId)
-            .WithEnvironment("Authentication__Google__ClientSecret", config.WebGoogleClientSecret)
-            .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey);
 
         var inventoryService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_InventoryService_Api>("InventoryService")
@@ -1045,11 +962,6 @@ static partial class Program
             otelCollector,
             environmentName);
 
-        intranetBff = intranetBff.WithReference(inventoryService);
-
-        // Add JobService reference to IntranetBff now that jobService is declared
-        intranetBff = intranetBff.WithReference(jobService);
-
         // PricingService queries JobService for queue depth — wire the reference here
         // because jobService is declared after pricingService.
         pricingService = pricingService.WithReference(jobService).WaitFor(jobService);
@@ -1068,8 +980,6 @@ static partial class Program
             grafana,
             otelCollector,
             environmentName);
-
-        intranetBff = intranetBff.WithReference(predictionService);
 
         // --- Geometry Service (Python FastAPI — Linux Docker container) ---
         //
@@ -1121,8 +1031,111 @@ static partial class Program
         // GeometryService is a Docker container (not a .NET project), so its endpoint is injected
         // via EndpointReference — which Aspire translates to the services__GeometryService__http__0
         // environment variable that AddServiceDiscovery() reads on the BFF side.
-        intranetBff = intranetBff.WithReference(geometryService.GetEndpoint("http"));
-        quoteEngineBff = quoteEngineBff.WithReference(geometryService.GetEndpoint("http"));
+        intranetBff.WithReference(geometryService.GetEndpoint("http"));
+        quoteEngineBff.WithReference(geometryService.GetEndpoint("http"));
+
+        // ──────────────────────────────────────────────
+        // Frontend service wiring (infrastructure + service references)
+        // ──────────────────────────────────────────────
+        intranetBff
+            .WithReference(infrastructure.RabbitMQ).WaitFor(infrastructure.RabbitMQ)
+            .WithReference(infrastructure.Redis)
+            .WithReference(databases.Intranet, "IntranetDbContext").WaitFor(databases.Intranet)
+            .WithReference(authService)
+            .WithReference(customerService)
+            .WithReference(orderService)
+            .WithReference(deliveryService)
+            .WithReference(iamService).WaitFor(iamService)
+            .WithReference(countryService).WaitFor(countryService)
+            .WithReference(registryService)
+            .WithReference(uploadService)
+            .WithReference(quotationService)
+            .WithReference(materialService)
+            .WithReference(employeeService)
+            .WithReference(invoiceService)
+            .WithReference(paymentService)
+            .WithReference(pdfService)
+            .WithReference(supplierService)
+            .WithReference(chatbotService)
+            .WithReference(careerService)
+            .WithReference(complianceService)
+            .WithReference(performanceService)
+            .WithReference(compensationService)
+            .WithReference(accountingService)
+            .WithReference(contactService)
+            .WithReference(receiptService)
+            .WithReference(lifecycleService)
+            .WithReference(purchaseOrderService)
+            .WithReference(leaveService)
+            .WithReference(pricingService)
+            .WithReference(notificationService)
+            .WithReference(facilityService)
+            .WithReference(projectService)
+            .WithReference(searchService)
+            .WithReference(currencyService)
+            .WithReference(commerceService)
+            .WithReference(inventoryService)
+            .WithReference(jobService)
+            .WithReference(predictionService)
+            .WithHttpCommand(
+                path: "/api/v1/seed/customers",
+                displayName: "Seed Customer Data",
+                commandOptions: new HttpCommandOptions
+                {
+                    IconName = "Database",
+                    IconVariant = IconVariant.Filled,
+                    IsHighlighted = true,
+                    Description = "Seed Maliev customer data (Company, Customer, Addresses)"
+                });
+
+        quoteEngineBff
+            .WithReference(infrastructure.RabbitMQ).WaitFor(infrastructure.RabbitMQ)
+            .WithReference(infrastructure.Redis)
+            .WithReference(authService)
+            .WithReference(iamService).WaitFor(iamService)
+            .WithReference(customerService)
+            .WithReference(registryService)
+            .WithReference(uploadService)
+            .WithReference(materialService)
+            .WithReference(pricingService)
+            .WithReference(projectService)
+            .WithReference(quotationService)
+            .WithReference(pdfService)
+            .WithReference(orderService)
+            .WithReference(paymentService)
+            .WithReference(deliveryService)
+            .WithReference(chatbotService);
+
+        webBff
+            .WithReference(authService).WaitFor(authService)
+            .WithReference(iamService).WaitFor(iamService)
+            .WithReference(customerService).WaitFor(customerService)
+            .WithReference(countryService)
+            .WithReference(registryService)
+            .WithReference(contactService)
+            .WithReference(deliveryService)
+            .WithReference(materialService)
+            .WithReference(orderService)
+            .WithReference(paymentService)
+            .WithReference(pricingService)
+            .WithReference(uploadService)
+            .WithReference(commerceService)
+            .WithReference(chatbotService)
+            .WithReference(pdfService);
+
+        // ──────────────────────────────────────────────
+        // Apply shared secrets to frontends
+        // ──────────────────────────────────────────────
+        intranetBff = WithSharedSecrets(intranetBff, config, grafana, otelCollector, environmentName);
+        quoteEngineBff = WithSharedSecrets(quoteEngineBff, config, grafana, otelCollector, environmentName)
+            .WithEnvironment("Web__BaseUrl", webBff.GetEndpoint("https"))
+            .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey);
+        webBff = WithSharedSecrets(webBff, config, grafana, otelCollector, environmentName)
+            .WithEnvironment("QuoteEngine__BaseUrl", quoteEngineBff.GetEndpoint("https"))
+            .WithEnvironment("Authentication__Google__ClientId", config.WebGoogleClientId)
+            .WithEnvironment("Authentication__Google__ClientSecret", config.WebGoogleClientSecret)
+            .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey)
+            .WithEnvironment("BusinessRegistry__DdbApiKey", config.BusinessRegistryDdbApiKey);
     }
 
     /// <summary>
@@ -1245,7 +1258,8 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> OmiseSecretKey,
     IResourceBuilder<ParameterResource> OmiseWebhookSecret,
     IResourceBuilder<ParameterResource> NotificationEncryptionKey,
-    IResourceBuilder<ParameterResource> WebGoogleMapsApiKey);
+    IResourceBuilder<ParameterResource> WebGoogleMapsApiKey,
+    IResourceBuilder<ParameterResource> BusinessRegistryDdbApiKey);
 
 /// <summary>
 /// Infrastructure resource references (messaging, caching, database server).
