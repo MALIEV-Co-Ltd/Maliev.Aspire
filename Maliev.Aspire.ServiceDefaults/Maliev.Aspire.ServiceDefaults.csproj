@@ -60,7 +60,6 @@
 
     <!-- Authentication -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.5" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.7" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.16.0" />
 
     <!-- API Documentation -->
