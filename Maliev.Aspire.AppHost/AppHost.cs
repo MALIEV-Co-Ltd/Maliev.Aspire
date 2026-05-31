@@ -4,7 +4,9 @@ using Maliev.Aspire.DatabaseSeeder.Seeding.Services.IAMService;
 using Maliev.Aspire.AppHost;
 using Maliev.Aspire.AppHost.Extensions;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
+using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Configuration;
+using System.Net.Http.Headers;
 
 // Disable GSSAPI negotiation globally for the AppHost process and its probes.
 // This silences the "SPNEGO cannot find mechanisms to negotiate" logs in postgres-server.
@@ -1085,7 +1087,15 @@ static partial class Program
                     IconName = "Database",
                     IconVariant = IconVariant.Filled,
                     IsHighlighted = true,
-                    Description = "Seed Maliev customer data (Company, Customer, Addresses)"
+                    Description = "Seed Maliev customer data (Company, Customer, Addresses)",
+                    PrepareRequest = context =>
+                    {
+                        var tokenProvider = new ServiceAccountTokenProvider(builder.Configuration, "IntranetBff");
+                        context.Request.Headers.Authorization =
+                            new AuthenticationHeaderValue("Bearer", tokenProvider.GetToken());
+
+                        return Task.CompletedTask;
+                    }
                 });
 
         quoteEngineBff

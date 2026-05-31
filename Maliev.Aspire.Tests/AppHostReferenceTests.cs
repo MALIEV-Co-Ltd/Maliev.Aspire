@@ -136,6 +136,30 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
+    /// The Intranet customer seed dashboard command calls a protected BFF endpoint.
+    /// </summary>
+    [Fact]
+    public void AppHost_IntranetCustomerSeedCommand_AddsServiceAccountBearerToken()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var commandStart = appHostSource.IndexOf(
+            "path: \"/api/v1/seed/customers\"",
+            StringComparison.Ordinal);
+        var nextResourceStart = appHostSource.IndexOf(
+            "quoteEngineBff",
+            commandStart,
+            StringComparison.Ordinal);
+
+        Assert.True(commandStart >= 0, "Intranet customer seed command was not found.");
+        Assert.True(nextResourceStart > commandStart, "Intranet customer seed command block end was not found.");
+
+        var commandBlock = appHostSource[commandStart..nextResourceStart];
+        Assert.Contains("PrepareRequest", commandBlock, StringComparison.Ordinal);
+        Assert.Contains("ServiceAccountTokenProvider(builder.Configuration, \"IntranetBff\")", commandBlock, StringComparison.Ordinal);
+        Assert.Contains("AuthenticationHeaderValue(\"Bearer\", tokenProvider.GetToken())", commandBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Customer creation paths require CountryService data before address forms are usable.
     /// </summary>
     [Fact]
