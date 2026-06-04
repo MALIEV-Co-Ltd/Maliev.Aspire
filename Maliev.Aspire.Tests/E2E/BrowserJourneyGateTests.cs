@@ -1039,30 +1039,50 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 var runtimeProbe = await page.EvaluateAsync<string>(
                     """
                     async () => {
-                        const manifestResponse = await fetch('/api/v1/geometry/runtime/manifest', { credentials: 'include' });
-                        const manifest = await manifestResponse.json();
-                        const workerPath = String(manifest?.assets?.worker ?? '');
-                        const workerName = workerPath.split('/').pop();
-                        const assetResponse = await fetch(`/api/v1/geometry/runtime/assets/${encodeURIComponent(workerName)}`, { credentials: 'include' });
-                        return JSON.stringify({
-                            viewport: {
-                                width: window.innerWidth,
-                                height: window.innerHeight,
-                                coarsePointer: matchMedia('(pointer: coarse)').matches
-                            },
-                            manifestStatus: manifestResponse.status,
-                            assetStatus: assetResponse.status,
-                            executionModeHeader: manifestResponse.headers.get('x-maliev-geometry-execution-mode'),
-                            authorityHeader: manifestResponse.headers.get('x-maliev-geometry-authority'),
-                            serverRoleHeader: manifestResponse.headers.get('x-maliev-geometry-server-role'),
-                            runtimeKind: manifest.runtimeKind,
-                            executionMode: manifest.executionMode,
-                            authority: manifest.authority,
-                            serverRole: manifest.serverRole,
-                            directViewerExtensions: manifest.artifactPolicy?.directBrowserViewerExtensions ?? [],
-                            browserViewableUploads: manifest.artifactPolicy?.browserViewableUploads ?? null,
-                            deviceProfiles: Object.keys(manifest.deviceProfiles ?? {})
-                        });
+                        let probe = null;
+                        for (let attempt = 1; attempt <= 20; attempt++) {
+                            const manifestResponse = await fetch('/api/v1/geometry/runtime/manifest', { credentials: 'include' });
+                            const manifestBody = await manifestResponse.text();
+                            let manifest = null;
+                            let manifestParseError = null;
+                            try {
+                                manifest = manifestBody ? JSON.parse(manifestBody) : null;
+                            } catch (error) {
+                                manifestParseError = String(error);
+                            }
+                            const workerPath = String(manifest?.assets?.worker ?? '');
+                            const workerName = workerPath.split('/').pop();
+                            const assetResponse = workerName
+                                ? await fetch(`/api/v1/geometry/runtime/assets/${encodeURIComponent(workerName)}`, { credentials: 'include' })
+                                : null;
+                            probe = {
+                                attempts: attempt,
+                                viewport: {
+                                    width: window.innerWidth,
+                                    height: window.innerHeight,
+                                    coarsePointer: matchMedia('(pointer: coarse)').matches
+                                },
+                                manifestStatus: manifestResponse.status,
+                                manifestBody,
+                                manifestParseError,
+                                assetStatus: assetResponse?.status ?? 0,
+                                executionModeHeader: manifestResponse.headers.get('x-maliev-geometry-execution-mode'),
+                                authorityHeader: manifestResponse.headers.get('x-maliev-geometry-authority'),
+                                serverRoleHeader: manifestResponse.headers.get('x-maliev-geometry-server-role'),
+                                runtimeKind: manifest?.runtimeKind ?? null,
+                                executionMode: manifest?.executionMode ?? null,
+                                authority: manifest?.authority ?? null,
+                                serverRole: manifest?.serverRole ?? null,
+                                directViewerExtensions: manifest?.artifactPolicy?.directBrowserViewerExtensions ?? [],
+                                browserViewableUploads: manifest?.artifactPolicy?.browserViewableUploads ?? null,
+                                deviceProfiles: Object.keys(manifest?.deviceProfiles ?? {})
+                            };
+                            if (probe.manifestStatus === 200 && !probe.manifestParseError && probe.assetStatus === 200) {
+                                break;
+                            }
+                            await new Promise(resolve => setTimeout(resolve, 500));
+                        }
+                        return JSON.stringify(probe);
                     }
                     """);
                 using var document = JsonDocument.Parse(runtimeProbe);
@@ -1070,6 +1090,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
                 Assert.Equal(viewportProfile.Width, root.GetProperty("viewport").GetProperty("width").GetInt32());
                 Assert.Equal(200, root.GetProperty("manifestStatus").GetInt32());
+                Assert.Equal(JsonValueKind.Null, root.GetProperty("manifestParseError").ValueKind);
                 Assert.Equal(200, root.GetProperty("assetStatus").GetInt32());
                 Assert.Equal("primary_interactive", GetJsonString(root, "executionModeHeader"));
                 Assert.Equal("local_primary", GetJsonString(root, "authorityHeader"));
