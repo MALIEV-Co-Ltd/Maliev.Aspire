@@ -1001,6 +1001,94 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies the authenticated Intranet project viewer can load the browser geometry runtime package
+    /// from the user's current device class.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-005,INT-006,INT-018,INT-020")]
+    public async Task Intranet_ProjectGeometryRuntime_LoadsAcrossDeviceViewports()
+    {
+        var intranetBase = GetEndpoint("IntranetBff");
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var projectTitle = $"E2E device runtime workspace {unique}";
+
+        await using (var setupContext = await NewContextAsync())
+        {
+            var setupPage = await setupContext.NewPageAsync();
+            await SignInToIntranetAsync(setupPage, intranetBase, "/");
+            var customer = await CreateIntranetCorporateCustomerAsync(setupPage);
+            var project = await CreateIntranetProjectAsync(setupPage, customer.CustomerId, customer.FullName, projectTitle);
+            var modelUpload = await UploadProjectFileAsync(setupPage, project.ProjectId, customer.CustomerId, $"e2e-device-runtime-{unique}.step", "application/step");
+            await AddConfiguredProjectPartAsync(setupPage, project.ProjectId, customer.CustomerId, modelUpload, quantity: 1, dfmAcknowledged: false);
+
+            foreach (var viewportProfile in new[]
+            {
+                BrowserViewportProfile.MobilePhone,
+                BrowserViewportProfile.Tablet,
+                BrowserViewportProfile.Desktop
+            })
+            {
+                await using var context = await NewContextAsync(viewportProfile: viewportProfile);
+                var page = await context.NewPageAsync();
+
+                await SignInToIntranetAsync(page, intranetBase, $"/sales/projects/{project.ProjectId}?tab=parts");
+                await Expect(page.Locator("body")).ToContainTextAsync(projectTitle, new() { Timeout = 30_000 });
+                await Expect(page.Locator("body")).ToContainTextAsync(modelUpload.FileName, new() { Timeout = 30_000 });
+
+                var runtimeProbe = await page.EvaluateAsync<string>(
+                    """
+                    async () => {
+                        const manifestResponse = await fetch('/api/v1/geometry/runtime/manifest', { credentials: 'include' });
+                        const manifest = await manifestResponse.json();
+                        const workerPath = String(manifest?.assets?.worker ?? '');
+                        const workerName = workerPath.split('/').pop();
+                        const assetResponse = await fetch(`/api/v1/geometry/runtime/assets/${encodeURIComponent(workerName)}`, { credentials: 'include' });
+                        return JSON.stringify({
+                            viewport: {
+                                width: window.innerWidth,
+                                height: window.innerHeight,
+                                coarsePointer: matchMedia('(pointer: coarse)').matches
+                            },
+                            manifestStatus: manifestResponse.status,
+                            assetStatus: assetResponse.status,
+                            executionModeHeader: manifestResponse.headers.get('x-maliev-geometry-execution-mode'),
+                            authorityHeader: manifestResponse.headers.get('x-maliev-geometry-authority'),
+                            serverRoleHeader: manifestResponse.headers.get('x-maliev-geometry-server-role'),
+                            runtimeKind: manifest.runtimeKind,
+                            executionMode: manifest.executionMode,
+                            authority: manifest.authority,
+                            serverRole: manifest.serverRole,
+                            directViewerExtensions: manifest.artifactPolicy?.directBrowserViewerExtensions ?? [],
+                            browserViewableUploads: manifest.artifactPolicy?.browserViewableUploads ?? null,
+                            deviceProfiles: Object.keys(manifest.deviceProfiles ?? {})
+                        });
+                    }
+                    """);
+                using var document = JsonDocument.Parse(runtimeProbe);
+                var root = document.RootElement;
+
+                Assert.Equal(viewportProfile.Width, root.GetProperty("viewport").GetProperty("width").GetInt32());
+                Assert.Equal(200, root.GetProperty("manifestStatus").GetInt32());
+                Assert.Equal(200, root.GetProperty("assetStatus").GetInt32());
+                Assert.Equal("primary_interactive", GetJsonString(root, "executionModeHeader"));
+                Assert.Equal("local_primary", GetJsonString(root, "authorityHeader"));
+                Assert.Equal("fallback_and_final_validation", GetJsonString(root, "serverRoleHeader"));
+                Assert.Equal("browser-first-geometry", GetJsonString(root, "runtimeKind"));
+                Assert.Equal("primary_interactive", GetJsonString(root, "executionMode"));
+                Assert.Equal("local_primary", GetJsonString(root, "authority"));
+                Assert.Equal("fallback_and_final_validation", GetJsonString(root, "serverRole"));
+                Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".stl", value.GetString(), StringComparison.Ordinal));
+                Assert.Contains(root.GetProperty("deviceProfiles").EnumerateArray(), value => string.Equals(viewportProfile.ManifestProfileName, value.GetString(), StringComparison.Ordinal));
+                var browserViewableUploads = root.GetProperty("browserViewableUploads");
+                Assert.False(browserViewableUploads.GetProperty("serverEagerMetrics").GetBoolean());
+                Assert.False(browserViewableUploads.GetProperty("serverGlbExport").GetBoolean());
+                Assert.Equal("original_upload", GetJsonString(browserViewableUploads, "viewerSource"));
+            }
+        }
+    }
+
+    /// <summary>
     /// Verifies signed customer project mode is gated before customer-owned uploads.
     /// Covers the authentication-gated entry portions of QUOTE-001, QUOTE-005, and QUOTE-017.
     /// </summary>
