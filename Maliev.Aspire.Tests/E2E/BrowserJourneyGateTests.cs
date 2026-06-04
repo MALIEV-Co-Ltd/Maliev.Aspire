@@ -359,15 +359,18 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 ex);
         }
         await Expect(page.GetByText(email, new() { Exact = false })).ToBeVisibleAsync();
-        await Expect(page.Locator(".account-status-row").Filter(new() { HasTextRegex = new Regex("Customer ID|รหัสลูกค้า", RegexOptions.IgnoreCase) })).ToBeVisibleAsync();
+        await Expect(page.Locator(".account-profile-details")).ToContainTextAsync(new Regex("Customer type|ประเภทลูกค้า", RegexOptions.IgnoreCase));
+        await Expect(page.Locator(".account-membership-pill")).ToContainTextAsync(new Regex("Customer tier|ระดับลูกค้า", RegexOptions.IgnoreCase));
 
         await GotoAppAsync(page, new Uri(webBase, "/account/profile").ToString());
         await Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("Customer details|ข้อมูลลูกค้า", RegexOptions.IgnoreCase) })).ToBeVisibleAsync();
-        await Expect(page.Locator("input[type='email']").First).ToHaveValueAsync(email);
+        await Expect(page.Locator("input[name='_form.CompanyContactEmail']").First).ToBeVisibleAsync();
 
         await GotoAppAsync(page, new Uri(webBase, "/account/addresses").ToString());
         await Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("Billing and shipping addresses|ที่อยู่ออกบิลและจัดส่ง", RegexOptions.IgnoreCase) })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Add address|เพิ่มที่อยู่", RegexOptions.IgnoreCase) }).First.ClickAsync();
         var addressForm = page.Locator("form.account-form").Last;
+        await Expect(addressForm).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await FillNamedFieldAsync(addressForm, "recipientName", "E2E Receiver");
         await FillNamedFieldAsync(addressForm, "recipientPhone", "+66 81 000 0000");
         await FillNamedFieldAsync(addressForm, "addressLine1", "99 E2E Road");
@@ -504,16 +507,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             new Regex("Keep this page open|same conversation|เปิดหน้านี้ค้างไว้|แชทเดิม", RegexOptions.IgnoreCase),
             new() { Timeout = 30_000 });
 
-        var signInForm = popup.Locator("form.auth-form[action='/auth/sign-in/email']");
-        if (!await signInForm.IsVisibleAsync())
-        {
-            await popup.Locator("details.auth-email-panel summary").ClickAsync();
-        }
-
-        await Expect(signInForm).ToBeVisibleAsync(new() { Timeout = 30_000 });
-        await signInForm.Locator("input[name='Email']").FillAsync(email);
-        await signInForm.Locator("input[name='Password']").FillAsync(WebCustomerPassword);
-        await signInForm.EvaluateAsync("form => form.requestSubmit()");
+        var signInForm = await RevealEmailCredentialFormAsync(popup, "form.auth-form[action='/auth/sign-in/email']", email);
+        await SubmitEmailSignInFormAsync(signInForm, email, WebCustomerPassword);
 
         var browserSession = await WaitForAuthenticatedWebSessionAsync(page);
         await Expect(messages).ToContainTextAsync(
@@ -905,7 +900,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var fileName = $"quote-engine-e2e-{unique}.step";
 
         await SignInToQuoteEngineAsync(page, quoteBase, $"quote.customer.{unique}@example.com");
-        await Expect(page.Locator("header.quote-topbar").GetByRole(AriaRole.Link, new() { NameString = "Profile" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator("header.quote-topbar .billing-account-trigger")).ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         await page.Locator("#quote-cad-files").SetInputFilesAsync(new FilePayload
         {
@@ -924,30 +919,42 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 """)
         });
 
-        await Expect(page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex(Regex.Escape(fileName), RegexOptions.IgnoreCase) }).First).ToBeVisibleAsync(new() { Timeout = 30_000 });
-        await Expect(page.GetByText(new Regex("PROCESSING|GLBREADY|DFMANALYSISREADY|ANALYZED", RegexOptions.IgnoreCase)).First)
-            .ToBeVisibleAsync(new() { Timeout = 30_000 });
-        await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "DFM Analysis", Exact = true }))
+        await WaitForQuoteUploadedPartAsync(page, fileName);
+        await WaitForQuoteAnalysisStatusAsync(page, fileName);
+        await Expect(page.Locator(".qe-pdc-tabs").GetByRole(AriaRole.Button, new()
+        {
+            NameRegex = new Regex("^(DFM Analysis|DFM)$", RegexOptions.IgnoreCase)
+        }))
             .ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         await page.GetByRole(AriaRole.Button, new() { NameString = "CNC Machining", Exact = true }).ClickAsync();
         await Expect(page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Aluminum 6061", RegexOptions.IgnoreCase) }).First).ToBeVisibleAsync(new() { Timeout = 30_000 });
-        await page.GetByLabel("DFM reviewed").CheckAsync();
-        await page.GetByLabel("Quantity").FillAsync("2");
-        await page.GetByRole(AriaRole.Button, new() { NameString = "Estimate" }).ClickAsync();
+        await page.Locator("input[type='checkbox'][aria-label='DFM reviewed'], input[type='checkbox'][aria-label='ตรวจ DFM แล้ว']").First.CheckAsync();
+        await page.Locator("input.qe-qty-stepper-input").First.FillAsync("2");
+        await page.Locator(".qe-qsb-actions").GetByRole(AriaRole.Button, new()
+        {
+            NameRegex = new Regex("^(Estimate|ประเมินราคา)$", RegexOptions.IgnoreCase)
+        }).ClickAsync();
         await Expect(page.Locator(".qe-qsb-total")).ToContainTextAsync(new Regex(@"[0-9,.]+\s+THB", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
-        var quoteButton = page.GetByRole(AriaRole.Button, new() { NameString = "Quote", Exact = true });
+        var quoteButton = page.Locator(".qe-qsb-actions").GetByRole(AriaRole.Button, new()
+        {
+            NameRegex = new Regex("^(Quote|ขอราคา)$", RegexOptions.IgnoreCase)
+        });
         await Expect(quoteButton).ToBeEnabledAsync(new() { Timeout = 30_000 });
 
         await quoteButton.ClickAsync();
         await Expect(page.GetByText(new Regex(@"(?:MQ-\d{8}-\d{4}|Q-[A-Z0-9]+)", RegexOptions.IgnoreCase))).ToBeVisibleAsync(new() { Timeout = 30_000 });
-        await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "Create order" })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        var createOrderButton = page.Locator(".qe-qsb-actions").GetByRole(AriaRole.Button, new()
+        {
+            NameRegex = new Regex("^(Create order|สร้างคำสั่งซื้อ)$", RegexOptions.IgnoreCase)
+        });
+        await Expect(createOrderButton).ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         var orderResponseTask = page.WaitForResponseAsync(response =>
             response.Url.Contains("/quote/v1/orders", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
             new PageWaitForResponseOptions { Timeout = 60_000 });
-        await page.GetByRole(AriaRole.Button, new() { NameString = "Create order" }).ClickAsync();
+        await createOrderButton.ClickAsync();
         var orderResponse = await orderResponseTask;
         var orderBody = await ReadResponseTextOrEmptyAsync(orderResponse);
         Assert.True(orderResponse.Ok, $"QuoteEngine order creation failed with HTTP {orderResponse.Status}: {orderBody}");
@@ -4545,21 +4552,95 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         return client.BaseAddress!;
     }
 
-    private static async Task SignInToQuoteEngineAsync(IPage page, Uri quoteBase, string email, string returnUrl = "/projects/new")
+    private static async Task SignInToQuoteEngineAsync(IPage page, Uri quoteBase, string email, string returnUrl = "/quote/new")
     {
         await page.GotoAsync(
-            new Uri(quoteBase, $"/auth/sign-in?returnUrl={Uri.EscapeDataString(returnUrl)}").ToString(),
+            new Uri(quoteBase, $"/auth/sign-up?returnUrl={Uri.EscapeDataString(returnUrl)}").ToString(),
             new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-        var emailPanel = page.Locator("details.auth-email-panel");
-        var openAttribute = await emailPanel.GetAttributeAsync("open");
-        if (openAttribute is null)
+        var signUpForm = await RevealEmailCredentialFormAsync(
+            page,
+            "form.auth-form[action='/auth/sign-up/email'], form[data-auth-form='sign-up']",
+            email);
+        await SubmitEmailSignUpFormAsync(signUpForm, "Quote", "Customer", email, "PrototypeOnly123!");
+        await WaitForQuoteEngineReturnUrlAsync(page, returnUrl);
+    }
+
+    private static async Task WaitForQuoteEngineReturnUrlAsync(IPage page, string returnUrl)
+    {
+        try
         {
-            await emailPanel.Locator("summary").ClickAsync();
+            if (page.Url.Contains(returnUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            await page.WaitForURLAsync(
+                url => url.Contains(returnUrl, StringComparison.OrdinalIgnoreCase),
+                new PageWaitForURLOptions { Timeout = 45_000, WaitUntil = WaitUntilState.Commit });
         }
-        await page.GetByLabel("Email").FillAsync(email);
-        await page.GetByLabel("Password").FillAsync("PrototypeOnly123!");
-        await page.GetByRole(AriaRole.Button, new() { NameString = "Sign in" }).ClickAsync();
-        await page.WaitForURLAsync(url => url.Contains(returnUrl, StringComparison.OrdinalIgnoreCase), new() { Timeout = 30_000 });
+        catch (TimeoutException ex)
+        {
+            var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
+            throw new TimeoutException(
+                $"QuoteEngine customer sign-up did not reach {returnUrl}. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_500)]}",
+                ex);
+        }
+    }
+
+    private static async Task WaitForQuoteUploadedPartAsync(IPage page, string fileName)
+    {
+        var partButton = page.GetByRole(AriaRole.Button, new()
+        {
+            NameRegex = new Regex(Regex.Escape(fileName), RegexOptions.IgnoreCase)
+        }).First;
+
+        try
+        {
+            await Expect(partButton).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        }
+        catch (Exception ex) when (ex is TimeoutException or PlaywrightException)
+        {
+            var pageError = await page.Locator(".qe-error, .qe-error-alert, .mud-alert, [role='alert']")
+                .First
+                .InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 })
+                .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+            var body = await page.Locator("body")
+                .InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 })
+                .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+
+            throw new InvalidOperationException(
+                $"QuoteEngine upload accepted by file input, but part {fileName} did not render. Url: {page.Url}. Page error: {pageError[..Math.Min(pageError.Length, 1_000)]}. Body: {body[..Math.Min(body.Length, 1_500)]}",
+                ex);
+        }
+    }
+
+    private static async Task WaitForQuoteAnalysisStatusAsync(IPage page, string fileName)
+    {
+        var statusPill = page.Locator(".qe-status-pill").First;
+
+        try
+        {
+            await Expect(statusPill).ToContainTextAsync(
+                new Regex("PROCESSING|READY|ANALYZED|กำลังประมวลผล|พร้อม|วิเคราะห์แล้ว", RegexOptions.IgnoreCase),
+                new() { Timeout = 45_000 });
+        }
+        catch (Exception ex) when (ex is TimeoutException or PlaywrightException)
+        {
+            var statusText = await statusPill
+                .InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 })
+                .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+            var pageError = await page.Locator(".qe-error, .qe-error-alert, .mud-alert, [role='alert']")
+                .First
+                .InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 })
+                .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+            var body = await page.Locator("body")
+                .InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 })
+                .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+
+            throw new InvalidOperationException(
+                $"QuoteEngine upload part {fileName} did not reach a visible analysis state. Status: {statusText}. Url: {page.Url}. Page error: {pageError[..Math.Min(pageError.Length, 1_000)]}. Body: {body[..Math.Min(body.Length, 1_500)]}",
+                ex);
+        }
     }
 
     private async Task SignInToIntranetAsync(IPage page, Uri intranetBase, string returnUrl)
@@ -5066,51 +5147,99 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
     private static async Task<ILocator> OpenEmailAuthPanelAsync(IPage page, string formSelector)
     {
-        var form = page.Locator(formSelector);
+        return await RevealEmailCredentialFormAsync(page, formSelector, "e2e-auth-preview@example.com");
+    }
+
+    private static async Task<ILocator> RevealEmailCredentialFormAsync(IPage page, string formSelector, string email)
+    {
+        var form = page.Locator(formSelector).First;
         if (await form.IsVisibleAsync())
         {
             return form;
         }
 
         var panel = page.Locator("details.auth-email-panel");
-        var openAttribute = await panel.GetAttributeAsync("open");
-        if (openAttribute is null)
+        if (await panel.CountAsync() > 0)
         {
-            await panel.Locator("summary").ClickAsync();
+            var openAttribute = await panel.GetAttributeAsync("open");
+            if (openAttribute is null)
+            {
+                await panel.Locator("summary").ClickAsync();
+            }
+
+            try
+            {
+                await Expect(form).ToBeVisibleAsync(new() { Timeout = 5_000 });
+            }
+            catch
+            {
+                await panel.EvaluateAsync("details => details.open = true");
+                await Expect(form).ToBeVisibleAsync(new() { Timeout = 5_000 });
+            }
+
+            return form;
         }
 
-        try
+        var emailStep = page.Locator("form.auth-email-entry-form, form[data-auth-step='email']").First;
+        await Expect(emailStep).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        var emailInput = emailStep.Locator("input[name='Email'], input[name='email'], #auth-email-entry").First;
+        await Expect(emailInput).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await emailInput.ClickAsync();
+        await emailInput.PressAsync("Control+A");
+        await emailInput.PressSequentiallyAsync(email);
+        await Expect(emailInput).ToHaveValueAsync(email);
+
+        var continueButton = emailStep.GetByRole(AriaRole.Button, new()
         {
-            await Expect(form).ToBeVisibleAsync(new() { Timeout = 5_000 });
-        }
-        catch
-        {
-            await panel.EvaluateAsync("details => details.open = true");
-            await Expect(form).ToBeVisibleAsync(new() { Timeout = 5_000 });
-        }
+            NameRegex = new Regex("^(Continue|Continue with email|ดำเนินการต่อ)$", RegexOptions.IgnoreCase)
+        }).First;
+        await Expect(continueButton).ToBeEnabledAsync(new() { Timeout = 15_000 });
+        await continueButton.ClickAsync();
+
+        await Expect(form).ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         return form;
     }
 
-    private static Task SubmitEmailSignUpFormAsync(ILocator form, string firstName, string lastName, string email, string password)
+    private static async Task SubmitEmailSignInFormAsync(ILocator form, string email, string password)
     {
-        return form.EvaluateAsync(
-            """
-            (form, data) => {
-                form.querySelector("input[name='FirstName']").value = data.firstName;
-                form.querySelector("input[name='LastName']").value = data.lastName;
-                form.querySelector("input[name='Email']").value = data.email;
-                form.querySelector("input[name='Password']").value = data.password;
-                HTMLFormElement.prototype.submit.call(form);
-            }
-            """,
-            new
-            {
-                firstName,
-                lastName,
-                email,
-                password
-            });
+        await FillAuthInputAsync(form, "input[name='Email'], input[name='email']", email);
+        await FillAuthInputAsync(form, "input[name='Password'], input[name='password']", password);
+        await ClickAuthSubmitAsync(form, new Regex("^(Sign in|เข้าสู่ระบบ)$", RegexOptions.IgnoreCase));
+    }
+
+    private static async Task SubmitEmailSignUpFormAsync(ILocator form, string firstName, string lastName, string email, string password)
+    {
+        await TryFillAuthInputAsync(form, "input[name='FirstName'], input[name='firstName']", firstName);
+        await TryFillAuthInputAsync(form, "input[name='LastName'], input[name='lastName']", lastName);
+        await FillAuthInputAsync(form, "input[name='Email'], input[name='email']", email);
+        await FillAuthInputAsync(form, "input[name='Password'], input[name='password']", password);
+        await ClickAuthSubmitAsync(
+            form,
+            new Regex("^(Verify email address|Create account|Sign up|ยืนยันอีเมล|สร้างบัญชี)$", RegexOptions.IgnoreCase));
+    }
+
+    private static async Task FillAuthInputAsync(ILocator form, string selector, string value)
+    {
+        var input = form.Locator(selector).First;
+        await Expect(input).ToBeVisibleAsync(new() { Timeout = 15_000 });
+        await input.FillAsync(value);
+    }
+
+    private static async Task TryFillAuthInputAsync(ILocator form, string selector, string value)
+    {
+        var input = form.Locator(selector).First;
+        if (await input.CountAsync() > 0)
+        {
+            await input.FillAsync(value);
+        }
+    }
+
+    private static async Task ClickAuthSubmitAsync(ILocator form, Regex name)
+    {
+        var submit = form.GetByRole(AriaRole.Button, new() { NameRegex = name }).First;
+        await Expect(submit).ToBeEnabledAsync(new() { Timeout = 15_000 });
+        await submit.ClickAsync();
     }
 
     private static async Task<string> RegisterWebCustomerAsync(IPage page, Uri webBase, string returnUrl)

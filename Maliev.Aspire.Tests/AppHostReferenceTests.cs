@@ -234,17 +234,28 @@ public sealed class AppHostReferenceTests
     public void AppHost_QuoteEngineBff_ReferencesProductionQuoteJourneyServices()
     {
         var appHostSource = File.ReadAllText(FindAppHostSource());
-        var quoteEngineBlockStart = appHostSource.IndexOf(
+        var quoteEngineResourceBlockStart = appHostSource.IndexOf(
             "builder.AddProject<Projects.Maliev_QuoteEngine_Bff>(\"QuoteEngineBff\")",
             StringComparison.Ordinal);
-        var webBlockStart = appHostSource.IndexOf(
+        var webResourceBlockStart = appHostSource.IndexOf(
             "builder.AddProject<Projects.Maliev_Web_Bff>(\"WebBff\")",
             StringComparison.Ordinal);
+        var webReferenceBlockStart = appHostSource.IndexOf(
+            "        webBff",
+            webResourceBlockStart,
+            StringComparison.Ordinal);
+        var quoteEngineReferenceBlockStart = appHostSource.LastIndexOf(
+            "        quoteEngineBff",
+            webReferenceBlockStart,
+            StringComparison.Ordinal);
 
-        Assert.True(quoteEngineBlockStart >= 0, "QuoteEngineBff resource declaration was not found.");
-        Assert.True(webBlockStart > quoteEngineBlockStart, "WebBff resource declaration was not found after QuoteEngineBff.");
+        Assert.True(quoteEngineResourceBlockStart >= 0, "QuoteEngineBff resource declaration was not found.");
+        Assert.True(webResourceBlockStart > quoteEngineResourceBlockStart, "WebBff resource declaration was not found after QuoteEngineBff.");
+        Assert.True(webReferenceBlockStart > webResourceBlockStart, "WebBff service reference block was not found.");
+        Assert.True(quoteEngineReferenceBlockStart > quoteEngineResourceBlockStart, "QuoteEngineBff service reference block was not found.");
 
-        var quoteEngineBlock = appHostSource[quoteEngineBlockStart..webBlockStart];
+        var quoteEngineResourceBlock = appHostSource[quoteEngineResourceBlockStart..webResourceBlockStart];
+        var quoteEngineReferenceBlock = appHostSource[quoteEngineReferenceBlockStart..webReferenceBlockStart];
         foreach (var dependency in new[]
         {
             "infrastructure.RabbitMQ",
@@ -261,16 +272,17 @@ public sealed class AppHostReferenceTests
             "orderService",
             "paymentService",
             "deliveryService",
-            "chatbotService"
+            "chatbotService",
+            "currencyService"
         })
         {
-            Assert.Contains($".WithReference({dependency})", quoteEngineBlock, StringComparison.Ordinal);
+            Assert.Contains($".WithReference({dependency})", quoteEngineReferenceBlock, StringComparison.Ordinal);
         }
 
-        Assert.Contains(".WaitFor(infrastructure.RabbitMQ)", quoteEngineBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithUrlForEndpoint(\"http\", u => u.DisplayText = \"Quote Engine (HTTP)\")", quoteEngineBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithUrlForEndpoint(\"https\", u => u.DisplayText = \"Quote Engine (HTTPS)\")", quoteEngineBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/quote/aspire-liveness\")", quoteEngineBlock, StringComparison.Ordinal);
+        Assert.Contains(".WaitFor(infrastructure.RabbitMQ)", quoteEngineReferenceBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithUrlForEndpoint(\"http\", u => u.DisplayText = \"Quote Engine (HTTP)\")", quoteEngineResourceBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithUrlForEndpoint(\"https\", u => u.DisplayText = \"Quote Engine (HTTPS)\")", quoteEngineResourceBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/quote/aspire-liveness\")", quoteEngineResourceBlock, StringComparison.Ordinal);
     }
 
     /// <summary>

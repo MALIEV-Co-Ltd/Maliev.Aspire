@@ -1114,7 +1114,8 @@ static partial class Program
             .WithReference(orderService)
             .WithReference(paymentService)
             .WithReference(deliveryService)
-            .WithReference(chatbotService);
+            .WithReference(chatbotService)
+            .WithReference(currencyService);
 
         webBff
             .WithReference(authService).WaitFor(authService)
