@@ -960,7 +960,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     const manifest = await manifestResponse.json();
                     const workerPath = String(manifest?.assets?.worker ?? '');
                     const workerName = workerPath.split('/').pop();
-                    const assetResponse = await fetch(`/quote/v1/geometry/runtime/assets/${encodeURIComponent(workerName)}`, { credentials: 'include' });
+                    const assetResponse = workerName
+                        ? await fetch(`/quote/v1/geometry/runtime/assets/${encodeURIComponent(workerName)}`, { credentials: 'include' })
+                        : null;
+                    const wasmPath = String(manifest?.assets?.wasm ?? '');
+                    const wasmName = wasmPath.split('/').pop();
+                    const wasmAssetResponse = wasmName
+                        ? await fetch(`/quote/v1/geometry/runtime/assets/${encodeURIComponent(wasmName)}`, { credentials: 'include' })
+                        : null;
                     return JSON.stringify({
                         viewport: {
                             width: window.innerWidth,
@@ -968,7 +975,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                             coarsePointer: matchMedia('(pointer: coarse)').matches
                         },
                         manifestStatus: manifestResponse.status,
-                        assetStatus: assetResponse.status,
+                        assetStatus: assetResponse?.status ?? 0,
+                        wasmAssetStatus: wasmAssetResponse?.status ?? 0,
                         executionModeHeader: manifestResponse.headers.get('x-maliev-geometry-execution-mode'),
                         runtimeKind: manifest.runtimeKind,
                         executionMode: manifest.executionMode,
@@ -986,12 +994,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.Equal(viewportProfile.Width, root.GetProperty("viewport").GetProperty("width").GetInt32());
             Assert.Equal(200, root.GetProperty("manifestStatus").GetInt32());
             Assert.Equal(200, root.GetProperty("assetStatus").GetInt32());
+            Assert.Equal(200, root.GetProperty("wasmAssetStatus").GetInt32());
             Assert.Equal("primary_interactive", GetJsonString(root, "executionModeHeader"));
             Assert.Equal("browser-first-geometry", GetJsonString(root, "runtimeKind"));
             Assert.Equal("primary_interactive", GetJsonString(root, "executionMode"));
             Assert.Equal("local_primary", GetJsonString(root, "authority"));
             Assert.Equal("fallback_and_final_validation", GetJsonString(root, "serverRole"));
             Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".stl", value.GetString(), StringComparison.Ordinal));
+            Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".gltf", value.GetString(), StringComparison.Ordinal));
             Assert.Contains(root.GetProperty("deviceProfiles").EnumerateArray(), value => string.Equals(viewportProfile.ManifestProfileName, value.GetString(), StringComparison.Ordinal));
             var browserViewableUploads = root.GetProperty("browserViewableUploads");
             Assert.False(browserViewableUploads.GetProperty("serverEagerMetrics").GetBoolean());
@@ -1055,6 +1065,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                             const assetResponse = workerName
                                 ? await fetch(`/api/v1/geometry/runtime/assets/${encodeURIComponent(workerName)}`, { credentials: 'include' })
                                 : null;
+                            const wasmPath = String(manifest?.assets?.wasm ?? '');
+                            const wasmName = wasmPath.split('/').pop();
+                            const wasmAssetResponse = wasmName
+                                ? await fetch(`/api/v1/geometry/runtime/assets/${encodeURIComponent(wasmName)}`, { credentials: 'include' })
+                                : null;
                             probe = {
                                 attempts: attempt,
                                 viewport: {
@@ -1066,6 +1081,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                                 manifestBody,
                                 manifestParseError,
                                 assetStatus: assetResponse?.status ?? 0,
+                                wasmAssetStatus: wasmAssetResponse?.status ?? 0,
                                 executionModeHeader: manifestResponse.headers.get('x-maliev-geometry-execution-mode'),
                                 authorityHeader: manifestResponse.headers.get('x-maliev-geometry-authority'),
                                 serverRoleHeader: manifestResponse.headers.get('x-maliev-geometry-server-role'),
@@ -1077,7 +1093,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                                 browserViewableUploads: manifest?.artifactPolicy?.browserViewableUploads ?? null,
                                 deviceProfiles: Object.keys(manifest?.deviceProfiles ?? {})
                             };
-                            if (probe.manifestStatus === 200 && !probe.manifestParseError && probe.assetStatus === 200) {
+                            if (probe.manifestStatus === 200 &&
+                                !probe.manifestParseError &&
+                                probe.assetStatus === 200 &&
+                                probe.wasmAssetStatus === 200) {
                                 break;
                             }
                             await new Promise(resolve => setTimeout(resolve, 500));
@@ -1092,6 +1111,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 Assert.Equal(200, root.GetProperty("manifestStatus").GetInt32());
                 Assert.Equal(JsonValueKind.Null, root.GetProperty("manifestParseError").ValueKind);
                 Assert.Equal(200, root.GetProperty("assetStatus").GetInt32());
+                Assert.Equal(200, root.GetProperty("wasmAssetStatus").GetInt32());
                 Assert.Equal("primary_interactive", GetJsonString(root, "executionModeHeader"));
                 Assert.Equal("local_primary", GetJsonString(root, "authorityHeader"));
                 Assert.Equal("fallback_and_final_validation", GetJsonString(root, "serverRoleHeader"));
@@ -1100,6 +1120,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 Assert.Equal("local_primary", GetJsonString(root, "authority"));
                 Assert.Equal("fallback_and_final_validation", GetJsonString(root, "serverRole"));
                 Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".stl", value.GetString(), StringComparison.Ordinal));
+                Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".gltf", value.GetString(), StringComparison.Ordinal));
                 Assert.Contains(root.GetProperty("deviceProfiles").EnumerateArray(), value => string.Equals(viewportProfile.ManifestProfileName, value.GetString(), StringComparison.Ordinal));
                 var browserViewableUploads = root.GetProperty("browserViewableUploads");
                 Assert.False(browserViewableUploads.GetProperty("serverEagerMetrics").GetBoolean());
