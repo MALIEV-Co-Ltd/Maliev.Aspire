@@ -24,6 +24,42 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     private static bool _webBffWarmed;
     private static bool _browserCleanupRegistered;
     private static PageGotoOptions AppGotoOptions => new() { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 90_000 };
+    private sealed record BrowserViewportProfile(
+        string Name,
+        int Width,
+        int Height,
+        float DeviceScaleFactor,
+        bool IsMobile,
+        bool HasTouch,
+        string ManifestProfileName)
+    {
+        public static readonly BrowserViewportProfile MobilePhone = new(
+            "mobile phone",
+            390,
+            844,
+            3,
+            true,
+            true,
+            "mobile");
+
+        public static readonly BrowserViewportProfile Tablet = new(
+            "tablet",
+            820,
+            1180,
+            2,
+            false,
+            true,
+            "tablet");
+
+        public static readonly BrowserViewportProfile Desktop = new(
+            "desktop",
+            1440,
+            1000,
+            1,
+            false,
+            false,
+            "desktop");
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BrowserJourneyGateTests"/> class.
@@ -878,6 +914,90 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         var pdfButton = page.GetByRole(AriaRole.Button, new() { NameString = "PDF" }).First;
         await Expect(pdfButton).ToBeDisabledAsync();
+    }
+
+    /// <summary>
+    /// Verifies QuoteEngine can load the browser geometry runtime package from the user's current device class.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "QUOTE-002,QUOTE-003,QUOTE-018,QUOTE-020")]
+    public async Task QuoteEngine_GeometryRuntime_LoadsAcrossDeviceViewports()
+    {
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        foreach (var viewportProfile in new[]
+        {
+            BrowserViewportProfile.MobilePhone,
+            BrowserViewportProfile.Tablet,
+            BrowserViewportProfile.Desktop
+        })
+        {
+            await using var context = await NewContextAsync(viewportProfile: viewportProfile);
+            var page = await context.NewPageAsync();
+
+            await page.GotoAsync(new Uri(quoteBase, "/demo").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await WaitForQuoteEngineReadyAsync(page);
+            if (viewportProfile.Width < 1200)
+            {
+                var partsButton = page.GetByRole(AriaRole.Button, new() { NameString = "Parts", Exact = true });
+                await Expect(partsButton).ToBeVisibleAsync(new() { Timeout = 30_000 });
+                await partsButton.ClickAsync();
+            }
+
+            var partNameScope = viewportProfile.Width < 1200
+                ? page.Locator(".qe-pn-parts-drawer--open .qe-plp-info strong")
+                : page.Locator(".qe-pn-body > .qe-plp-root .qe-plp-info strong");
+            await Expect(partNameScope.Filter(new() { HasText = "sample.step" }).First).ToBeVisibleAsync(new() { Timeout = 30_000 });
+            await Expect(page.Locator(".qe-pdc-tabs").GetByRole(AriaRole.Button, new()
+            {
+                NameRegex = new Regex("^(3D Model|DFM Analysis|DFM)$", RegexOptions.IgnoreCase)
+            }).First).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+            var runtimeProbe = await page.EvaluateAsync<string>(
+                """
+                async () => {
+                    const manifestResponse = await fetch('/quote/v1/geometry/runtime/manifest', { credentials: 'include' });
+                    const manifest = await manifestResponse.json();
+                    const workerPath = String(manifest?.assets?.worker ?? '');
+                    const workerName = workerPath.split('/').pop();
+                    const assetResponse = await fetch(`/quote/v1/geometry/runtime/assets/${encodeURIComponent(workerName)}`, { credentials: 'include' });
+                    return JSON.stringify({
+                        viewport: {
+                            width: window.innerWidth,
+                            height: window.innerHeight,
+                            coarsePointer: matchMedia('(pointer: coarse)').matches
+                        },
+                        manifestStatus: manifestResponse.status,
+                        assetStatus: assetResponse.status,
+                        executionModeHeader: manifestResponse.headers.get('x-maliev-geometry-execution-mode'),
+                        runtimeKind: manifest.runtimeKind,
+                        executionMode: manifest.executionMode,
+                        authority: manifest.authority,
+                        serverRole: manifest.serverRole,
+                        directViewerExtensions: manifest.artifactPolicy?.directBrowserViewerExtensions ?? [],
+                        browserViewableUploads: manifest.artifactPolicy?.browserViewableUploads ?? null,
+                        deviceProfiles: Object.keys(manifest.deviceProfiles ?? {})
+                    });
+                }
+                """);
+            using var document = JsonDocument.Parse(runtimeProbe);
+            var root = document.RootElement;
+
+            Assert.Equal(viewportProfile.Width, root.GetProperty("viewport").GetProperty("width").GetInt32());
+            Assert.Equal(200, root.GetProperty("manifestStatus").GetInt32());
+            Assert.Equal(200, root.GetProperty("assetStatus").GetInt32());
+            Assert.Equal("primary_interactive", GetJsonString(root, "executionModeHeader"));
+            Assert.Equal("browser-first-geometry", GetJsonString(root, "runtimeKind"));
+            Assert.Equal("primary_interactive", GetJsonString(root, "executionMode"));
+            Assert.Equal("local_primary", GetJsonString(root, "authority"));
+            Assert.Equal("fallback_and_final_validation", GetJsonString(root, "serverRole"));
+            Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".stl", value.GetString(), StringComparison.Ordinal));
+            Assert.Contains(root.GetProperty("deviceProfiles").EnumerateArray(), value => string.Equals(viewportProfile.ManifestProfileName, value.GetString(), StringComparison.Ordinal));
+            var browserViewableUploads = root.GetProperty("browserViewableUploads");
+            Assert.False(browserViewableUploads.GetProperty("serverEagerMetrics").GetBoolean());
+            Assert.False(browserViewableUploads.GetProperty("serverGlbExport").GetBoolean());
+            Assert.Equal("original_upload", GetJsonString(browserViewableUploads, "viewerSource"));
+        }
     }
 
     /// <summary>
@@ -4536,20 +4656,26 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             $"Job {jobId} not found in reloaded queue. Body: {reloadedQueueResult[..Math.Min(reloadedQueueResult.Length, 2_000)]}");
     }
 
-    private async Task<IBrowserContext> NewContextAsync(bool presetCookieConsent = true)
+    private async Task<IBrowserContext> NewContextAsync(
+        bool presetCookieConsent = true,
+        BrowserViewportProfile? viewportProfile = null)
     {
+        viewportProfile ??= BrowserViewportProfile.Desktop;
         var context = await _browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
             Locale = "en-US",
+            DeviceScaleFactor = viewportProfile.DeviceScaleFactor,
             ExtraHTTPHeaders = new Dictionary<string, string>
             {
                 ["Accept-Language"] = "en-US,en;q=0.9"
             },
+            HasTouch = viewportProfile.HasTouch,
+            IsMobile = viewportProfile.IsMobile,
             ViewportSize = new ViewportSize
             {
-                Width = 1440,
-                Height = 1000
+                Width = viewportProfile.Width,
+                Height = viewportProfile.Height
             }
         });
 
