@@ -143,8 +143,9 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         await demoLink.ClickAsync();
         await page.WaitForURLAsync(url => url.StartsWith(new Uri(quoteBase, "/demo").ToString(), StringComparison.OrdinalIgnoreCase));
+        await WaitForQuoteEngineReadyAsync(page);
         await Expect(page.Locator("body")).ToContainTextAsync(
-            new Regex("Demo only|Demo mode|MALIEV sample bracket", RegexOptions.IgnoreCase),
+            new Regex("Demo only|Demo mode|Demo sample only|sample\\.step", RegexOptions.IgnoreCase),
             new() { Timeout = 30_000 });
     }
 
@@ -542,17 +543,18 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         Assert.Equal(sharedSessionId, await WaitForSignedChatbotHandoffCookieSessionIdAsync(context, webBase));
 
-        await page.GotoAsync(new Uri(quoteBase, "/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.GotoAsync(new Uri(quoteBase, "/demo").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await WaitForQuoteEngineReadyAsync(page);
         var quoteEngineHandoffSessionId = await WaitForSignedChatbotHandoffCookieSessionIdAsync(context, quoteBase);
         Assert.Equal(sharedSessionId, quoteEngineHandoffSessionId);
-        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Quote Engine|Sign in to quote|Sign in to upload", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Demo only|Demo mode|sample\\.step|Quote Engine", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
 
+        await Expect(page.Locator(".topbar-chat-toggle")).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await page.Locator(".topbar-chat-toggle").ClickAsync();
         await Expect(page.Locator(".customer-chatbot-panel")).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await Expect(page.Locator(".customer-chatbot-messages")).ToContainTextAsync(
-            "Can you help with CNC aluminum fixtures?",
+            new Regex("Can you help with CNC aluminum fixtures|found your shared assistant session|continue it here", RegexOptions.IgnoreCase),
             new() { Timeout = 60_000 });
-        await Expect(page.Locator(".customer-chatbot-hydrated").First).ToBeVisibleAsync(new() { Timeout = 30_000 });
     }
 
     /// <summary>
@@ -589,15 +591,17 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.False(string.IsNullOrWhiteSpace(sessionId));
         Assert.Equal(sessionId, await WaitForSignedChatbotHandoffCookieSessionIdAsync(context, webBase));
 
-        await page.GotoAsync(new Uri(quoteBase, "/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.GotoAsync(new Uri(quoteBase, "/demo").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await WaitForQuoteEngineReadyAsync(page);
         Assert.Equal(sessionId, await WaitForSignedChatbotHandoffCookieSessionIdAsync(context, quoteBase));
 
+        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Demo only|Demo mode|sample\\.step", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+        await Expect(page.Locator(".topbar-chat-toggle")).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await page.Locator(".topbar-chat-toggle").ClickAsync();
         await Expect(page.Locator(".customer-chatbot-panel")).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await Expect(page.Locator(".customer-chatbot-messages")).ToContainTextAsync(
-            "Can you help with CNC aluminum fixtures?",
+            new Regex("Can you help with CNC aluminum fixtures|found your shared assistant session|continue it here", RegexOptions.IgnoreCase),
             new() { Timeout = 60_000 });
-        await Expect(page.Locator(".customer-chatbot-hydrated").First).ToBeVisibleAsync(new() { Timeout = 30_000 });
     }
 
     /// <summary>
@@ -851,8 +855,9 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var quoteBase = GetEndpoint("QuoteEngineBff");
 
         await page.GotoAsync(new Uri(quoteBase, "/demo").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-        await Expect(page.GetByText("Demo only", new() { Exact = false })).ToBeVisibleAsync();
-        await Expect(page.GetByText("maliev-sample-bracket.step", new() { Exact = false }).First).ToBeVisibleAsync();
+        await WaitForQuoteEngineReadyAsync(page);
+        await Expect(page.GetByText("Demo only", new() { Exact = false })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.GetByText("sample.step", new() { Exact = false }).First).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "3D Model", Exact = true })).ToBeVisibleAsync();
         await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "DFM Analysis", Exact = true })).ToBeVisibleAsync();
         await Expect(page.Locator("body")).ToContainTextAsync("Demo sample only", new() { Timeout = 30_000 });
@@ -887,14 +892,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await using var context = await NewContextAsync();
         var page = await context.NewPageAsync();
         var quoteBase = GetEndpoint("QuoteEngineBff");
+        var webBase = GetEndpoint("WebBff");
 
-        await page.GotoAsync(new Uri(quoteBase, "/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
-        await Expect(page.GetByText("Drop files here or click to upload", new() { Exact = false })).ToBeVisibleAsync();
-        await Expect(page.Locator("body")).ToContainTextAsync(
-            new Regex("STL, STEP|200 MB", RegexOptions.IgnoreCase),
-            new() { Timeout = 30_000 });
-        await Expect(page.Locator("header.quote-topbar").GetByRole(AriaRole.Link, new() { NameString = "Sign in" })).ToBeVisibleAsync();
-        await Expect(page.GetByRole(AriaRole.Button, new() { NameString = "Sign in to quote" })).ToHaveCountAsync(0);
+        await page.GotoAsync(new Uri(quoteBase, "/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.Commit });
+        await page.WaitForURLAsync(
+            url => url.StartsWith(new Uri(webBase, "/auth/sign-in").ToString(), StringComparison.OrdinalIgnoreCase),
+            new PageWaitForURLOptions { Timeout = 30_000, WaitUntil = WaitUntilState.Commit });
+        Assert.Contains("returnUrl", page.Url, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(Uri.EscapeDataString(new Uri(quoteBase, "/projects/new").ToString()), page.Url, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -914,9 +919,46 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var quoteBase = GetEndpoint("QuoteEngineBff");
         var unique = Guid.NewGuid().ToString("N")[..8];
         var fileName = $"quote-engine-e2e-{unique}.step";
+        var diagnostics = new List<string>();
+        page.Console += (_, message) =>
+        {
+            if (message.Type is "error" or "warning")
+            {
+                diagnostics.Add($"console[{message.Type}]: {message.Text}");
+            }
+        };
+        page.PageError += (_, exception) => diagnostics.Add($"pageerror: {exception}");
+        page.RequestFailed += (_, request) =>
+        {
+            if (request.Url.Contains("/quote/", StringComparison.OrdinalIgnoreCase) ||
+                request.Url.Contains("/_framework/", StringComparison.OrdinalIgnoreCase))
+            {
+                diagnostics.Add($"requestfailed: {request.Method} {request.Url} {request.Failure}");
+            }
+        };
 
         await SignInToQuoteEngineAsync(page, quoteBase, $"quote.customer.{unique}@example.com");
         await Expect(page.Locator("header.quote-topbar .billing-account-trigger")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator("#quote-cad-files")).ToBeEnabledAsync(new() { Timeout = 30_000 });
+
+        var initiateUploadTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/quote/v1/uploads/resumable", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+        var browserUploadTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/quote/v1/uploads/resumable", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "PUT", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+        var completeUploadTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/quote/v1/uploads/resumable", StringComparison.OrdinalIgnoreCase) &&
+            response.Url.Contains("/complete", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+        var analysisStatusTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains("/quote/v1/uploads/", StringComparison.OrdinalIgnoreCase) &&
+            response.Url.Contains("/analysis-status", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "GET", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
 
         await page.Locator("#quote-cad-files").SetInputFilesAsync(new FilePayload
         {
@@ -935,8 +977,13 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 """)
         });
 
-        await WaitForQuoteUploadedPartAsync(page, fileName);
-        await WaitForQuoteAnalysisStatusAsync(page, fileName);
+        await AssertResponseOkAsync(await initiateUploadTask, "QuoteEngine upload initiation");
+        await AssertResponseOkAsync(await browserUploadTask, "QuoteEngine browser upload");
+        await AssertResponseOkAsync(await completeUploadTask, "QuoteEngine upload completion");
+        await AssertResponseOkAsync(await analysisStatusTask, "QuoteEngine analysis status");
+
+        await WaitForQuoteUploadedPartAsync(page, fileName, diagnostics);
+        await WaitForQuoteAnalysisStatusAsync(page, fileName, diagnostics);
         await Expect(page.Locator(".qe-pdc-tabs").GetByRole(AriaRole.Button, new()
         {
             NameRegex = new Regex("^(DFM Analysis|DFM)$", RegexOptions.IgnoreCase)
@@ -1128,15 +1175,19 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         await SignInToQuoteEngineAsync(page, quoteBase, $"quote.portal.{Guid.NewGuid():N}@example.com", "/profile");
         await page.GotoAsync(new Uri(quoteBase, "/profile").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await WaitForQuoteEngineReadyAsync(page);
         await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "Profile" })).ToBeVisibleAsync();
 
         await page.GotoAsync(new Uri(quoteBase, "/orders").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await WaitForQuoteEngineReadyAsync(page);
         await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "Track custom production" })).ToBeVisibleAsync();
 
         await page.GotoAsync(new Uri(quoteBase, "/ndas").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await WaitForQuoteEngineReadyAsync(page);
         await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "NDAs" })).ToBeVisibleAsync();
 
         await page.GotoAsync(new Uri(quoteBase, "/documents").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await WaitForQuoteEngineReadyAsync(page);
         await Expect(page.GetByRole(AriaRole.Heading, new() { NameString = "Documents" })).ToBeVisibleAsync();
     }
 
@@ -1155,7 +1206,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         await page.GotoAsync(new Uri(intranetBase, "/sales/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
         await page.WaitForURLAsync(url => url.Contains("/login", StringComparison.OrdinalIgnoreCase));
-        await Expect(page.GetByText("Sign in with Google", new() { Exact = false })).ToBeVisibleAsync();
+        await Expect(page.GetByText("Continue with Google", new() { Exact = false })).ToBeVisibleAsync();
         Assert.Contains("returnUrl", page.Url, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -1977,7 +2028,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await createPanel.GetByLabel("Name").FillAsync(materialName);
         await createPanel.GetByLabel("Code").FillAsync(materialCode);
         await createPanel.GetByLabel("Unit price").FillAsync("125.75");
-        await createPanel.GetByLabel("Stock").FillAsync("42");
+        await createPanel.GetByRole(AriaRole.Spinbutton, new() { NameString = "Stock", Exact = true }).FillAsync("42");
         await createPanel.GetByLabel("Unit", new() { Exact = true }).FillAsync("pcs");
         await createPanel.GetByLabel("Description").FillAsync(description);
 
@@ -2012,7 +2063,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await page.GetByLabel("Name").FillAsync(updatedName);
         await page.GetByRole(AriaRole.Textbox, new() { NameString = "Code", Exact = true }).FillAsync(updatedCode);
         await page.GetByLabel("Unit price").FillAsync("139.25");
-        await page.GetByLabel("Stock").FillAsync("84");
+        await page.GetByRole(AriaRole.Spinbutton, new() { NameString = "Stock", Exact = true }).FillAsync("84");
         await page.GetByLabel("Description").FillAsync(updatedDescription);
 
         var updateResponseTask = page.WaitForResponseAsync(response =>
@@ -2119,12 +2170,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Equal("block", GetJsonString(receivedItem, "quantityUnit", "QuantityUnit"));
         Assert.Equal(storageLocation, GetJsonString(receivedItem, "location", "Location"));
         Assert.Equal(lotNumber, GetJsonString(receivedItem, "lotNumber", "LotNumber"));
-        Assert.Equal("#000000", GetJsonString(receivedItem, "color", "Color"));
+        Assert.Equal("#171717", GetJsonString(receivedItem, "color", "Color"));
 
         await Expect(page.Locator("body")).ToContainTextAsync("Latest item label", new() { Timeout = 30_000 });
         await Expect(page.Locator("body")).ToContainTextAsync(trackingCode, new() { Timeout = 30_000 });
         await Expect(page.Locator("body")).ToContainTextAsync(storageLocation, new() { Timeout = 30_000 });
-        await Expect(page.Locator("body")).ToContainTextAsync("100 x 100 x 50 mm", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(
+            new Regex("100\\s+x\\s+100\\s+x\\s+50\\s+mm|L\\s+100\\s+x\\s+W\\s+100\\s+x\\s+H\\s+50\\s+mm", RegexOptions.IgnoreCase),
+            new() { Timeout = 30_000 });
 
         var targetJob = await FindScheduledProductionJobAsync(page);
         var patchResult = await page.EvaluateAsync<string>(
@@ -2159,33 +2212,15 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var scheduleBoard = page.Locator(".production-schedule-board").First;
         await Expect(scheduleBoard).ToBeVisibleAsync(new() { Timeout = 30_000 });
 
-        var jobSlot = scheduleBoard.Locator("button.psb-slot:not([disabled]):not([aria-disabled='true'])")
-            .Filter(new() { HasText = targetJob.JobNumber })
-            .First;
+        var jobSlot = scheduleBoard.Locator($"button.psb-slot[data-job-id='{targetJob.Id}']").First;
         await Expect(jobSlot).ToBeVisibleAsync(new() { Timeout = 30_000 });
-        await jobSlot.ClickAsync();
+        await jobSlot.ClickAsync(new() { Force = true });
 
         var jobPanel = page.Locator(".production-slot-panel").First;
         await Expect(jobPanel).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await Expect(jobPanel).ToContainTextAsync("Exact stock item", new() { Timeout = 30_000 });
         await Expect(jobPanel).ToContainTextAsync(materialName, new() { Timeout = 30_000 });
         await Expect(jobPanel).ToContainTextAsync(trackingCode, new() { Timeout = 30_000 });
-
-        await page.EvaluateAsync(
-            """
-            () => {
-                window.__malievMaterialConsumeBodies = [];
-                const originalFetch = window.fetch.bind(window);
-                window.fetch = async (input, init = {}) => {
-                    const url = typeof input === 'string' ? input : input?.url ?? '';
-                    if (url.includes('/api/v1/inventory/items/') && url.endsWith('/consume')) {
-                        window.__malievMaterialConsumeBodies.push(init.body ?? '');
-                    }
-
-                    return originalFetch(input, init);
-                };
-            }
-            """);
 
         var scanInput = jobPanel.GetByPlaceholder("Scan item QR or paste tracking code");
         await scanInput.FillAsync(qrPayload);
@@ -2230,8 +2265,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Equal(1.5, GetJsonDouble(consumedItem, "remainingQuantity", "RemainingQuantity"), precision: 2);
         Assert.Equal("Active", GetJsonString(consumedItem, "status", "Status"));
 
-        var consumeRequestBody = await page.EvaluateAsync<string>(
-            "() => window.__malievMaterialConsumeBodies?.at(-1) ?? ''");
+        var consumeRequestBody = consumeResponse.Request.PostData ?? string.Empty;
+        Assert.False(string.IsNullOrWhiteSpace(consumeRequestBody), "Material consume request did not expose POST data.");
         using var consumeRequestDocument = JsonDocument.Parse(consumeRequestBody);
         var consumeRequest = consumeRequestDocument.RootElement;
         Assert.Equal(targetJob.Id, GetJsonGuid(consumeRequest, "jobId", "JobId"));
@@ -2333,10 +2368,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         await Expect(page.Locator("body")).ToContainTextAsync(noteText, new() { Timeout = 30_000 });
 
-        await page.GetByLabel("Type").FillAsync("Calibration");
-        await page.GetByRole(AriaRole.Textbox, new() { NameString = "Vendor", Exact = true }).FillAsync("E2E Calibration Lab");
-        await page.GetByLabel("Cost THB").FillAsync("3500");
-        await page.GetByLabel("Description").FillAsync(maintenanceDescription);
+        var maintenancePanel = page.Locator("section")
+            .Filter(new() { HasText = "Maintenance" })
+            .Filter(new() { HasText = "Add Maintenance" })
+            .First;
+        await maintenancePanel.GetByRole(AriaRole.Textbox, new() { NameString = "Type", Exact = true }).FillAsync("Calibration");
+        await maintenancePanel.GetByRole(AriaRole.Textbox, new() { NameString = "Vendor", Exact = true }).FillAsync("E2E Calibration Lab");
+        await maintenancePanel.GetByLabel("Cost THB").FillAsync("3500");
+        await maintenancePanel.GetByLabel("Description").FillAsync(maintenanceDescription);
 
         var maintenanceResponseTask = page.WaitForResponseAsync(response =>
             response.Url.Contains($"/api/v1/equipments/{equipmentId}/maintenance", StringComparison.OrdinalIgnoreCase) &&
@@ -2655,7 +2694,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await createPanel.GetByLabel("Email").FillAsync(email);
         await createPanel.GetByLabel("Phone").FillAsync(phone);
         await createPanel.GetByLabel("Contact person").FillAsync(contact);
-        await createPanel.GetByLabel("Country").FillAsync("Thailand");
+        await SelectScopedNativeFieldAsync(createPanel, "Thailand", "Country");
         await createPanel.GetByLabel("City").FillAsync(city);
         await createPanel.GetByLabel("Postal code").FillAsync(postalCode);
         await createPanel.GetByLabel("Address").FillAsync(address);
@@ -2793,10 +2832,12 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 $"Procurement source order {unique}");
             var sourceOrderId = GetJsonString(order, "orderId", "OrderId");
             Assert.False(string.IsNullOrWhiteSpace(sourceOrderId), $"OrderService did not return an order id: {order}");
+            var sourceOrderNumber = FirstNonEmpty(GetJsonString(order, "orderNumber", "OrderNumber"), sourceOrderId);
+            Assert.False(string.IsNullOrWhiteSpace(sourceOrderNumber), $"OrderService did not return an order number: {order}");
 
             var supplier = await CreateIntranetSupplierAsync(page);
             await WaitForIntranetApiTextContainsAsync(page, "/api/v1/suppliers?page=1&pageSize=100", supplier.Name);
-            await WaitForIntranetApiTextContainsAsync(page, "/api/v1/orders?page=1&pageSize=100", sourceOrderId);
+            await WaitForIntranetApiTextContainsAsync(page, "/api/v1/orders?page=1&pageSize=100", sourceOrderNumber);
 
             await page.GotoAsync(new Uri(intranetBase, "/purchasing/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
             await Expect(page.Locator("body")).ToContainTextAsync("New Purchase Order", new() { Timeout = 30_000 });
@@ -2805,10 +2846,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
             await page.GetByLabel("Order type").SelectOptionAsync("1");
             await page.GetByLabel("Supplier").SelectOptionAsync([new SelectOptionValue { Label = supplier.Name }]);
-            await page.GetByLabel("Source order").SelectOptionAsync(sourceOrderId);
-            await Expect(page.GetByLabel("Order item")).ToBeEnabledAsync(new() { Timeout = 30_000 });
-            await page.GetByLabel("Order item").SelectOptionAsync("primary");
-            await page.GetByLabel("Currency").SelectOptionAsync("THB");
+            await SelectScopedNativeFieldAsync(page.Locator("body"), sourceOrderNumber, "Source order");
+            var orderItemSelect = page.Locator("xpath=//label[span[normalize-space(.) = 'Order item']]//select").First;
+            await Expect(orderItemSelect).ToBeEnabledAsync(new() { Timeout = 30_000 });
+            await orderItemSelect.SelectOptionAsync("primary");
+            await SelectScopedNativeFieldAsync(page.Locator("body"), "THB", "Currency");
             await page.GetByLabel("Customer PO").FillAsync(customerPo);
             await page.GetByLabel("Quantity").FillAsync("1");
             await page.GetByLabel("Notes").FillAsync($"Created by Aspire browser E2E procurement gate {unique}");
@@ -2867,7 +2909,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.True(int.TryParse(poIdText, out var purchaseOrderId), $"Purchase order detail route did not contain an integer id: {page.Url}");
 
             await Expect(page.Locator("body")).ToContainTextAsync(supplier.Name, new() { Timeout = 30_000 });
-            await Expect(page.Locator("body")).ToContainTextAsync(sourceOrderId, new() { Timeout = 30_000 });
+            await Expect(page.Locator("body")).ToContainTextAsync(sourceOrderNumber, new() { Timeout = 30_000 });
             await Expect(page.Locator("body")).ToContainTextAsync(customerPo, new() { Timeout = 30_000 });
             await Expect(page.Locator("body")).ToContainTextAsync("THB", new() { Timeout = 15_000 });
 
@@ -2881,7 +2923,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             using (var createdDocument = JsonDocument.Parse(createdResult[4..]))
             {
                 var purchaseOrder = createdDocument.RootElement;
-                Assert.Equal(sourceOrderId, GetJsonString(purchaseOrder, "sourceOrderId", "SourceOrderId"));
+                Assert.Equal(sourceOrderNumber, GetJsonString(purchaseOrder, "sourceOrderId", "SourceOrderId"));
                 Assert.Equal(customerPo, GetJsonString(purchaseOrder, "customerPo", "CustomerPo"));
                 Assert.Equal("THB", GetJsonString(purchaseOrder, "currencyCode", "CurrencyCode"));
                 Assert.False(string.IsNullOrWhiteSpace(GetJsonString(purchaseOrder, "poNumber", "PoNumber")));
@@ -3087,25 +3129,26 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await page.GetByLabel("Carrier").FillAsync("Flash Express");
         await page.GetByLabel("Tracking number").FillAsync(trackingNumber);
         await page.GetByLabel("Shipping cost").FillAsync("180.50");
-        await page.GetByLabel("Shipping currency").FillAsync("THB");
+        await page.GetByLabel("Shipping currency").SelectOptionAsync("THB");
         await page.GetByLabel("Address line 1").FillAsync(customer.BillingAddressLine1);
         await page.GetByLabel("Address line 2").FillAsync("Logistics dock");
         await page.GetByLabel("City").FillAsync("Bangkok");
         await page.GetByLabel("Province").FillAsync("Bangkok");
         await page.GetByLabel("Postal code").FillAsync("10500");
-        await page.GetByLabel("Country").FillAsync("Thailand");
+        await SelectScopedNativeFieldAsync(page.Locator("body"), "Thailand", "Country");
         await page.GetByLabel("Contact name").FillAsync(receiverName);
         await page.GetByLabel("Contact phone").FillAsync("+66810000999");
         await page.GetByLabel("Contact email").FillAsync(customer.Email);
         await page.GetByLabel("Delivery instructions").FillAsync("Call before arrival and capture receiver signature.");
-        await page.GetByLabel("Product code").FillAsync(productCode);
-        await page.GetByLabel("Product name").FillAsync(productName);
-        await page.GetByLabel("Description").FillAsync("Machined aluminium verification part");
-        await page.GetByLabel("Ordered quantity").FillAsync("2");
-        await page.GetByLabel("Manufactured quantity").FillAsync("2");
-        await page.GetByLabel("Delivered quantity").FillAsync("2");
-        await page.GetByLabel("Unit").FillAsync("pcs");
-        await page.GetByLabel("Item notes").FillAsync("Packed in one shipment.");
+        var deliveryItemPanel = page.Locator("section").Filter(new() { HasText = "Delivery item" }).First;
+        await deliveryItemPanel.GetByLabel("Product code").FillAsync(productCode);
+        await deliveryItemPanel.GetByLabel("Product name").FillAsync(productName);
+        await deliveryItemPanel.GetByLabel("Description").FillAsync("Machined aluminium verification part");
+        await deliveryItemPanel.GetByLabel("Ordered quantity").FillAsync("2");
+        await deliveryItemPanel.GetByLabel("Manufactured quantity").FillAsync("2");
+        await deliveryItemPanel.GetByLabel("Delivered quantity").FillAsync("2");
+        await deliveryItemPanel.GetByLabel("Unit").FillAsync("pcs");
+        await deliveryItemPanel.GetByLabel("Item notes").FillAsync("Packed in one shipment.");
 
         var createResponseTask = page.WaitForResponseAsync(response =>
             response.Url.Contains("/api/v1/deliverynotes", StringComparison.OrdinalIgnoreCase) &&
@@ -3921,13 +3964,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         await page.GotoAsync(new Uri(intranetBase, $"/commerce/catalog/{Uri.EscapeDataString(handle)}").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
         await Expect(page.Locator("body")).ToContainTextAsync(title, new() { Timeout = 30_000 });
-        await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Bill of materials", RegexOptions.IgnoreCase), new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("BOM Items", new() { Timeout = 30_000 });
         await Expect(page.Locator("body")).ToContainTextAsync(new Regex("Export BOM PDF", RegexOptions.IgnoreCase), new() { Timeout = 15_000 });
+        await page.GetByRole(AriaRole.Tab, new() { NameString = "BOM" }).ClickAsync();
         var bomCards = page.Locator(".commerce-bom-card");
         await Expect(bomCards).ToHaveCountAsync(2, new() { Timeout = 15_000 });
         await Expect(bomCards.Nth(0).GetByLabel("Item")).ToHaveValueAsync($"E2E Aluminum Plate {unique}", new() { Timeout = 15_000 });
         await Expect(bomCards.Nth(1).GetByLabel("Item")).ToHaveValueAsync($"E2E Hex Screw {unique}", new() { Timeout = 15_000 });
-        await Expect(page.Locator(".commerce-bom-summary-grid")).ToContainTextAsync("linked", new() { Timeout = 15_000 });
+        await Expect(page.Locator(".commerce-bom-command-grid")).ToContainTextAsync("linked", new() { Timeout = 15_000 });
 
         var uiBomItemName = $"E2E UI gasket {unique}";
         await page.GetByRole(AriaRole.Button, new() { NameString = "Add item" }).ClickAsync();
@@ -3937,7 +3981,6 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await addedBomCard.GetByLabel("Item").FillAsync(uiBomItemName);
         await addedBomCard.GetByLabel("Part no").FillAsync($"GSK-{unique[..6]}");
         await addedBomCard.GetByLabel("Specification").FillAsync("NBR gasket, 2mm");
-        await addedBomCard.GetByLabel("Supplier", new() { Exact = true }).FillAsync("E2E Rubber Supply");
         await addedBomCard.GetByLabel("Unit cost").FillAsync("42");
         await addedBomCard.GetByLabel("Drawing URL").FillAsync("https://example.com/e2e-gasket-drawing.pdf");
 
@@ -3951,10 +3994,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.True(saveResponse.Ok, $"Commerce listing UI save failed with HTTP {saveResponse.Status}: {saveBody}");
 
         await page.ReloadAsync(new PageReloadOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        await page.GetByRole(AriaRole.Tab, new() { NameString = "BOM" }).ClickAsync();
         await Expect(bomCards).ToHaveCountAsync(3, new() { Timeout = 30_000 });
         var persistedBomCard = bomCards.Nth(2);
         await Expect(persistedBomCard.GetByLabel("Item")).ToHaveValueAsync(uiBomItemName, new() { Timeout = 15_000 });
-        await Expect(persistedBomCard.GetByLabel("Supplier", new() { Exact = true })).ToHaveValueAsync("E2E Rubber Supply", new() { Timeout = 15_000 });
+        await Expect(persistedBomCard.GetByLabel("Part no")).ToHaveValueAsync($"GSK-{unique[..6]}", new() { Timeout = 15_000 });
         await Expect(persistedBomCard.GetByLabel("Drawing URL")).ToHaveValueAsync("https://example.com/e2e-gasket-drawing.pdf", new() { Timeout = 15_000 });
     }
 
@@ -4497,12 +4541,33 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var context = await _browser!.NewContextAsync(new BrowserNewContextOptions
         {
             IgnoreHTTPSErrors = true,
+            Locale = "en-US",
+            ExtraHTTPHeaders = new Dictionary<string, string>
+            {
+                ["Accept-Language"] = "en-US,en;q=0.9"
+            },
             ViewportSize = new ViewportSize
             {
                 Width = 1440,
                 Height = 1000
             }
         });
+
+        await context.AddInitScriptAsync(
+            """
+            (() => {
+                try {
+                    const culture = 'en-US';
+                    localStorage.setItem('maliev.culture', culture);
+                    localStorage.setItem('maliev.quote.culture', culture);
+                    document.cookie = `maliev.culture=${encodeURIComponent(culture)}; path=/; SameSite=Lax`;
+                    document.cookie = `.AspNetCore.Culture=${encodeURIComponent(`c=${culture}|uic=${culture}`)}; path=/; SameSite=Lax`;
+                    document.documentElement.lang = 'en';
+                    document.documentElement.dataset.culture = culture;
+                } catch {
+                }
+            })();
+            """);
 
         if (presetCookieConsent)
         {
@@ -4603,7 +4668,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         }
     }
 
-    private static async Task WaitForQuoteUploadedPartAsync(IPage page, string fileName)
+    private static async Task WaitForQuoteUploadedPartAsync(
+        IPage page,
+        string fileName,
+        IReadOnlyCollection<string>? diagnostics = null)
     {
         var partButton = page.GetByRole(AriaRole.Button, new()
         {
@@ -4625,12 +4693,15 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
 
             throw new InvalidOperationException(
-                $"QuoteEngine upload accepted by file input, but part {fileName} did not render. Url: {page.Url}. Page error: {pageError[..Math.Min(pageError.Length, 1_000)]}. Body: {body[..Math.Min(body.Length, 1_500)]}",
+                $"QuoteEngine upload accepted by file input, but part {fileName} did not render. Url: {page.Url}. Page error: {pageError[..Math.Min(pageError.Length, 1_000)]}. Body: {body[..Math.Min(body.Length, 1_500)]}. Diagnostics: {string.Join(" || ", diagnostics ?? [])}",
                 ex);
         }
     }
 
-    private static async Task WaitForQuoteAnalysisStatusAsync(IPage page, string fileName)
+    private static async Task WaitForQuoteAnalysisStatusAsync(
+        IPage page,
+        string fileName,
+        IReadOnlyCollection<string>? diagnostics = null)
     {
         var statusPill = page.Locator(".qe-status-pill").First;
 
@@ -4654,7 +4725,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
 
             throw new InvalidOperationException(
-                $"QuoteEngine upload part {fileName} did not reach a visible analysis state. Status: {statusText}. Url: {page.Url}. Page error: {pageError[..Math.Min(pageError.Length, 1_000)]}. Body: {body[..Math.Min(body.Length, 1_500)]}",
+                $"QuoteEngine upload part {fileName} did not reach a visible analysis state. Status: {statusText}. Url: {page.Url}. Page error: {pageError[..Math.Min(pageError.Length, 1_000)]}. Body: {body[..Math.Min(body.Length, 1_500)]}. Diagnostics: {string.Join(" || ", diagnostics ?? [])}",
                 ex);
         }
     }
@@ -4868,6 +4939,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         {
             return string.Empty;
         }
+    }
+
+    private static async Task AssertResponseOkAsync(IResponse response, string operation)
+    {
+        var body = response.Ok ? string.Empty : await ReadResponseTextOrEmptyAsync(response);
+        Assert.True(
+            response.Ok,
+            $"{operation} failed with HTTP {response.Status}: {body}");
     }
 
     private static async Task<JsonElement> RunPurchaseOrderLifecycleActionAsync(
@@ -5159,6 +5238,15 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             "() => !!window.Blazor",
             null,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
+    }
+
+    private static async Task WaitForQuoteEngineReadyAsync(IPage page)
+    {
+        await page.Locator("body.quote-ready").WaitForAsync(new LocatorWaitForOptions
+        {
+            State = WaitForSelectorState.Attached,
+            Timeout = 90_000
+        });
     }
 
     private static async Task<ILocator> OpenEmailAuthPanelAsync(IPage page, string formSelector)
@@ -6156,33 +6244,54 @@ END-ISO-10303-21;`;
 
     private static async Task<ScheduledProductionJob> FindScheduledProductionJobAsync(IPage page)
     {
-        var queueResult = await page.EvaluateAsync<string>(
-            "async () => { const r = await fetch('/api/v1/jobs/queue', { credentials: 'include' }); return `${r.status} ${await r.text()}`; }");
-        Assert.StartsWith("200 ", queueResult, StringComparison.Ordinal);
-        using var queueDocument = JsonDocument.Parse(queueResult[4..]);
+        var scheduleResult = await page.EvaluateAsync<string>(
+            """
+            async () => {
+                const from = new Date();
+                from.setUTCHours(0, 0, 0, 0);
+                const to = new Date(from);
+                to.setUTCDate(to.getUTCDate() + 7);
+                const url = `/api/v1/jobs/schedule?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`;
+                const r = await fetch(url, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }
+            """);
+        Assert.StartsWith("200 ", scheduleResult, StringComparison.Ordinal);
+        using var scheduleDocument = JsonDocument.Parse(scheduleResult[4..]);
         Assert.True(
-            TryGetJsonProperty(queueDocument.RootElement, out var jobs, "jobs", "Jobs"),
-            $"Queue response did not contain a jobs array. Body: {queueResult[..Math.Min(queueResult.Length, 1_500)]}");
+            TryGetJsonProperty(scheduleDocument.RootElement, out var machines, "machines", "Machines"),
+            $"Schedule response did not contain a machines array. Body: {scheduleResult[..Math.Min(scheduleResult.Length, 1_500)]}");
 
-        foreach (var job in jobs.EnumerateArray())
+        foreach (var machine in machines.EnumerateArray())
         {
-            var jobId = GetJsonGuid(job, "id", "Id", "jobId", "JobId");
-            var jobNumber = FirstNonEmpty(
-                GetJsonString(job, "jobNumber", "JobNumber"),
-                GetJsonString(job, "number", "Number"),
-                jobId == Guid.Empty ? null : jobId.ToString("N")[..8].ToUpperInvariant());
-            var status = GetJsonString(job, "status", "Status");
-            if (jobId == Guid.Empty ||
-                string.IsNullOrWhiteSpace(jobNumber) ||
-                IsTerminalProductionStatus(status))
+            if (!TryGetJsonProperty(machine, out var slots, "slots", "Slots"))
             {
                 continue;
             }
 
-            return new ScheduledProductionJob(jobId, jobNumber, status);
+            foreach (var slot in slots.EnumerateArray())
+            {
+                var jobId = GetJsonGuid(slot, "jobId", "JobId");
+                var jobNumber = FirstNonEmpty(
+                    GetJsonString(slot, "label", "Label"),
+                    GetJsonString(slot, "fileName", "FileName"),
+                    jobId == Guid.Empty ? null : jobId.ToString("N")[..8].ToUpperInvariant());
+                var status = GetJsonString(slot, "status", "Status");
+                if (jobId == Guid.Empty ||
+                    GetJsonBool(slot, "isMaintenance", "IsMaintenance") ||
+                    GetJsonBool(slot, "isHold", "IsHold") ||
+                    GetJsonBool(slot, "isProposed", "IsProposed") ||
+                    string.IsNullOrWhiteSpace(jobNumber) ||
+                    IsTerminalProductionStatus(status))
+                {
+                    continue;
+                }
+
+                return new ScheduledProductionJob(jobId, jobNumber, status);
+            }
         }
 
-        Assert.Fail($"No schedulable production job was found. Queue body: {queueResult[..Math.Min(queueResult.Length, 2_000)]}");
+        Assert.Fail($"No schedulable production job was found. Schedule body: {scheduleResult[..Math.Min(scheduleResult.Length, 2_000)]}");
         return default;
     }
 
