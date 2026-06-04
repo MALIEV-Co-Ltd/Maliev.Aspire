@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-05 Geometry Runtime Regression E2E Gate
+
+### Scope
+
+- Re-ran the focused browser geometry runtime device-profile checks for QuoteEngine and Intranet after the DFM/server-miss fallback work.
+- Re-ran the complete Aspire `Tier=E2E` browser gate to verify the broader integrated user journeys still pass.
+- Current offload proof gap remains telemetry/load comparison against the GeometryService fallback path.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_GeometryRuntime_LoadsAcrossDeviceViewports|FullyQualifiedName~Intranet_ProjectGeometryRuntime_LoadsAcrossDeviceViewports" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 2 browser E2E tests across mobile phone, tablet, and desktop viewport profiles |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 51 E2E tests |
+
 ## 2026-06-04 Geometry Browser Offload And Full E2E Gate Run
 
 ### Scope
