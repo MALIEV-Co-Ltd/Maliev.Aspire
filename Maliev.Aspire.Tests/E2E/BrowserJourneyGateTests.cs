@@ -368,9 +368,25 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         await GotoAppAsync(page, new Uri(webBase, "/account/addresses").ToString());
         await Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("Billing and shipping addresses|ที่อยู่ออกบิลและจัดส่ง", RegexOptions.IgnoreCase) })).ToBeVisibleAsync();
+        await WaitForBlazorAsync(page);
+        await Expect(page.Locator(".empty-state, .address-grid").First).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Add address|เพิ่มที่อยู่", RegexOptions.IgnoreCase) }).First.ClickAsync();
         var addressForm = page.Locator("form.account-form").Last;
-        await Expect(addressForm).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        try
+        {
+            await Expect(addressForm).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        }
+        catch (Exception ex) when (ex is TimeoutException or PlaywrightException)
+        {
+            var body = await page.Locator("body")
+                .InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 })
+                .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+            var blazorState = await page.EvaluateAsync<string>(
+                "() => JSON.stringify({ hasBlazor: !!window.Blazor, url: location.href })");
+            throw new InvalidOperationException(
+                $"Account address add form did not open after clicking Add address. Blazor: {blazorState}. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_500)]}. Browser diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, browserDiagnostics)}",
+                ex);
+        }
         await FillNamedFieldAsync(addressForm, "recipientName", "E2E Receiver");
         await FillNamedFieldAsync(addressForm, "recipientPhone", "+66 81 000 0000");
         await FillNamedFieldAsync(addressForm, "addressLine1", "99 E2E Road");
@@ -5180,20 +5196,21 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             return form;
         }
 
+        await WaitForBlazorAsync(page);
         var emailStep = page.Locator("form.auth-email-entry-form, form[data-auth-step='email']").First;
         await Expect(emailStep).ToBeVisibleAsync(new() { Timeout = 30_000 });
         var emailInput = emailStep.Locator("input[name='Email'], input[name='email'], #auth-email-entry").First;
         await Expect(emailInput).ToBeVisibleAsync(new() { Timeout = 15_000 });
-        await emailInput.ClickAsync();
-        await emailInput.PressAsync("Control+A");
-        await emailInput.PressSequentiallyAsync(email);
+        await emailInput.FillAsync(email);
+        await emailInput.DispatchEventAsync("input");
+        await emailInput.DispatchEventAsync("change");
         await Expect(emailInput).ToHaveValueAsync(email);
 
         var continueButton = emailStep.GetByRole(AriaRole.Button, new()
         {
             NameRegex = new Regex("^(Continue|Continue with email|ดำเนินการต่อ)$", RegexOptions.IgnoreCase)
         }).First;
-        await Expect(continueButton).ToBeEnabledAsync(new() { Timeout = 15_000 });
+        await FillAuthEmailStepUntilContinueEnabledAsync(page, emailInput, continueButton, email);
         await continueButton.ClickAsync();
 
         await Expect(form).ToBeVisibleAsync(new() { Timeout = 30_000 });
@@ -5224,6 +5241,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var input = form.Locator(selector).First;
         await Expect(input).ToBeVisibleAsync(new() { Timeout = 15_000 });
         await input.FillAsync(value);
+        await input.DispatchEventAsync("input");
+        await input.DispatchEventAsync("change");
     }
 
     private static async Task TryFillAuthInputAsync(ILocator form, string selector, string value)
@@ -5240,6 +5259,40 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var submit = form.GetByRole(AriaRole.Button, new() { NameRegex = name }).First;
         await Expect(submit).ToBeEnabledAsync(new() { Timeout = 15_000 });
         await submit.ClickAsync();
+    }
+
+    private static async Task FillAuthEmailStepUntilContinueEnabledAsync(IPage page, ILocator emailInput, ILocator continueButton, string email)
+    {
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            await emailInput.FillAsync(string.Empty);
+            await emailInput.FillAsync(email);
+            await emailInput.DispatchEventAsync("input");
+            await emailInput.DispatchEventAsync("change");
+            await Expect(emailInput).ToHaveValueAsync(email);
+
+            try
+            {
+                await Expect(continueButton).ToBeEnabledAsync(new() { Timeout = 3_000 });
+                return;
+            }
+            catch (Exception ex) when (attempt < 5 && (ex is TimeoutException or PlaywrightException))
+            {
+                await Task.Delay(TimeSpan.FromSeconds(attempt));
+            }
+        }
+
+        var buttonMarkup = await continueButton
+            .EvaluateAsync<string>("button => button.outerHTML")
+            .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+        var blazorState = await page.EvaluateAsync<string>(
+            "() => JSON.stringify({ hasBlazor: !!window.Blazor, url: location.href })");
+        var body = await page.Locator("body")
+            .InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 })
+            .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+
+        throw new InvalidOperationException(
+            $"Auth email step did not enable Continue after filling a valid email. Button: {buttonMarkup}. Blazor: {blazorState}. Body: {body[..Math.Min(body.Length, 1_500)]}");
     }
 
     private static async Task<string> RegisterWebCustomerAsync(IPage page, Uri webBase, string returnUrl)
