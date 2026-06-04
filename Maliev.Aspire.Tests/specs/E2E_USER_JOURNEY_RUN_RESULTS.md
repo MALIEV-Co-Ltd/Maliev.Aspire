@@ -4,6 +4,30 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-04 Geometry Browser Offload And Full E2E Gate Run
+
+### Scope
+
+- Verified the QuoteEngine browser DFM/upload journeys after the GeometryService browser-primary upload change (`Maliev.GeometryService` `abc0928`).
+- Confirmed the affected QuoteEngine browser subset still completes customer-owned upload initiation, browser upload, upload completion, analysis-status polling, DFM visibility, estimating, formal quote creation, order creation, and account history checks.
+- Re-ran the complete Aspire `Tier=E2E` gate. The first full run found one transient GeometryService liveness timeout in the system-health browser journey; a focused retry passed, and the final full rerun passed cleanly.
+- Current device coverage gap: the executable Aspire browser e2e gate still uses the fixed desktop viewport in `NewContextAsync`; this run does not prove mobile/tablet viewport behavior for the geometry runtime.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.slnx --filter "FullyQualifiedName~QuoteEngine_AnonymousDemo_EstimatesWithoutFormalArtifacts|FullyQualifiedName~QuoteEngine_PrototypeSignedCustomer_UploadsEstimatesQuotesOrdersAndRecordsHistory" --logger "console;verbosity=normal"` | Passed: selected QuoteEngine DFM/demo and signed customer upload-history browser e2e slice |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 6 QuoteEngine browser E2E tests |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Failed: 48 passed, 1 failed. `Intranet_SystemHealth_ShowsIamAndGeometryReadiness` saw GeometryService `/geometry/liveness` time out after 5 seconds. |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~Intranet_SystemHealth_ShowsIamAndGeometryReadiness" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test |
+| `dotnet test B:\maliev\Maliev.Aspire\Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 49 E2E tests |
+
+### Follow-Up
+
+- Add mobile and tablet viewport browser checks for QuoteEngine/Intranet geometry runtime surfaces once stable device-specific selectors are available.
+- Keep the GeometryService system-health liveness timeout visible as a load-sensitivity signal; it passed on focused retry and on the final full rerun, but the first full gate shows this path can still be tight under suite load.
+
 ## 2026-05-20 MFG-005 Manufacturing Lifecycle Browser E2E
 
 ### Scope
