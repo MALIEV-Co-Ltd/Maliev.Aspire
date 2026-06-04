@@ -9,6 +9,8 @@
 ### Scope
 
 - Re-ran the focused browser geometry runtime device-profile checks for QuoteEngine and Intranet after the DFM/server-miss fallback work.
+- Added and ran `GeometryRuntime_ExecutesBrowserWorkerAcrossFrontendsAndDeviceViewports`, which imports the frontend viewer modules in a real browser, feeds direct OBJ bytes to `runLocalAdvisoryGeometry`, verifies Web Worker + WASM execution, checks the local-primary DFM contract, confirms Blazor acceptance callbacks, and observes same-origin telemetry across QuoteEngine and Intranet mobile phone, tablet, and desktop viewport profiles.
+- The execution gate exposed a cold/transient QuoteEngine manifest fetch failure (`500` followed by `200`); QuoteEngine and Intranet viewer scripts now retry transient manifest failures before falling back to the server path.
 - Re-ran the complete Aspire `Tier=E2E` browser gate to verify the broader integrated user journeys still pass.
 - Current offload proof gap remains telemetry/load comparison against the GeometryService fallback path.
 
@@ -16,6 +18,10 @@
 
 | Command | Result |
 |---------|--------|
+| `node --test Maliev.Intranet.Tests\Viewer\part-viewer-analysis-tools.test.mjs` | Passed: 36 viewer JavaScript tests, including transient browser-runtime manifest retry coverage |
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~QuoteEngineSourceTests.QuotePartViewerJs_has_correct_window_handle_and_no_internal_tools" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 source-contract test confirming the QuoteEngine viewer exposes the browser runtime path and manifest retry helper |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~GeometryRuntime_ExecutesBrowserWorkerAcrossFrontendsAndDeviceViewports" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test executing the local GeometryService-owned worker/WASM DFM path across QuoteEngine and Intranet mobile phone, tablet, and desktop viewport profiles |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_GeometryRuntime_LoadsAcrossDeviceViewports|FullyQualifiedName~Intranet_ProjectGeometryRuntime_LoadsAcrossDeviceViewports|FullyQualifiedName~GeometryRuntime_ExecutesBrowserWorkerAcrossFrontendsAndDeviceViewports" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 3 browser E2E tests covering runtime delivery and actual browser worker execution |
 | `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_GeometryRuntime_LoadsAcrossDeviceViewports|FullyQualifiedName~Intranet_ProjectGeometryRuntime_LoadsAcrossDeviceViewports" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 2 browser E2E tests across mobile phone, tablet, and desktop viewport profiles |
 | `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "Tier=E2E" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 51 E2E tests |
 

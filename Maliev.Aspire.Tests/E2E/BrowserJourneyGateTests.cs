@@ -1131,6 +1131,74 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies both Blazor frontends execute the GeometryService-owned browser worker locally,
+    /// not just fetch the runtime package metadata.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "QUOTE-002,QUOTE-018,INT-018,INT-020")]
+    public async Task GeometryRuntime_ExecutesBrowserWorkerAcrossFrontendsAndDeviceViewports()
+    {
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        var intranetBase = GetEndpoint("IntranetBff");
+
+        foreach (var viewportProfile in new[]
+        {
+            BrowserViewportProfile.MobilePhone,
+            BrowserViewportProfile.Tablet,
+            BrowserViewportProfile.Desktop
+        })
+        {
+            await using (var quoteContext = await NewContextAsync(viewportProfile: viewportProfile))
+            {
+                var quotePage = await quoteContext.NewPageAsync();
+
+                await quotePage.GotoAsync(new Uri(quoteBase, "/demo").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+                await WaitForQuoteEngineReadyAsync(quotePage);
+                if (viewportProfile.Width < 1200)
+                {
+                    var partsButton = quotePage.GetByRole(AriaRole.Button, new() { NameString = "Parts", Exact = true });
+                    await Expect(partsButton).ToBeVisibleAsync(new() { Timeout = 30_000 });
+                    await partsButton.ClickAsync();
+                }
+
+                var partNameScope = viewportProfile.Width < 1200
+                    ? quotePage.Locator(".qe-pn-parts-drawer--open .qe-plp-info strong")
+                    : quotePage.Locator(".qe-pn-body > .qe-plp-root .qe-plp-info strong");
+                await Expect(partNameScope.Filter(new() { HasText = "sample.step" }).First).ToBeVisibleAsync(new() { Timeout = 30_000 });
+                await Expect(quotePage.Locator(".qe-pdc-tabs").GetByRole(AriaRole.Button, new()
+                {
+                    NameRegex = new Regex("^(3D Model|DFM Analysis|DFM)$", RegexOptions.IgnoreCase)
+                }).First).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+                await VerifyBrowserLocalGeometryRuntimeAsync(
+                    quotePage,
+                    $"QuoteEngine {viewportProfile.Name}",
+                    "/js/quote-part-viewer.js",
+                    "/quote/v1/geometry/runtime/manifest",
+                    "/quote/v1/geometry/runtime/assets/",
+                    "/quote/v1/geometry/runtime/telemetry");
+            }
+
+            await using (var intranetContext = await NewContextAsync(viewportProfile: viewportProfile))
+            {
+                var intranetPage = await intranetContext.NewPageAsync();
+
+                await SignInToIntranetAsync(intranetPage, intranetBase, "/");
+                await Expect(intranetPage.Locator("body")).ToContainTextAsync("Dashboard", new() { Timeout = 30_000 });
+
+                await VerifyBrowserLocalGeometryRuntimeAsync(
+                    intranetPage,
+                    $"Intranet {viewportProfile.Name}",
+                    "/js/part-viewer.js",
+                    "/api/v1/geometry/runtime/manifest",
+                    "/api/v1/geometry/runtime/assets/",
+                    "/api/v1/geometry/runtime/telemetry");
+            }
+        }
+    }
+
+    /// <summary>
     /// Verifies signed customer project mode is gated before customer-owned uploads.
     /// Covers the authentication-gated entry portions of QUOTE-001, QUOTE-005, and QUOTE-017.
     /// </summary>
@@ -5203,6 +5271,201 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.True(
             response.Ok,
             $"{operation} failed with HTTP {response.Status}: {body}");
+    }
+
+    private static async Task VerifyBrowserLocalGeometryRuntimeAsync(
+        IPage page,
+        string surfaceName,
+        string modulePath,
+        string manifestUrl,
+        string assetBaseUrl,
+        string telemetryUrl)
+    {
+        var runtimeProbe = await page.EvaluateAsync<string>(
+            """
+            async ({ modulePath, manifestUrl, assetBaseUrl, telemetryUrl }) => {
+                const eventDetails = [];
+                const runtimeFetchResponses = [];
+                const telemetryResponses = [];
+                const telemetryPromises = [];
+                const eventTypes = [
+                    'maliev:geometry-local-runtime-started',
+                    'maliev:geometry-local-runtime-complete',
+                    'maliev:geometry-local-runtime-unavailable'
+                ];
+                for (const eventType of eventTypes) {
+                    window.addEventListener(eventType, event => {
+                        eventDetails.push({
+                            type: event.type,
+                            detail: event.detail ?? null
+                        });
+                    });
+                }
+
+                try {
+                    Object.defineProperty(navigator, 'sendBeacon', {
+                        value: () => false,
+                        configurable: true
+                    });
+                } catch (_) {
+                    navigator.sendBeacon = () => false;
+                }
+
+                const originalFetch = window.fetch.bind(window);
+                window.fetch = (url, init = {}) => {
+                    const responsePromise = originalFetch(url, init);
+                    const urlText = String(url);
+                    if (urlText.includes(manifestUrl) || urlText.includes(assetBaseUrl)) {
+                        telemetryPromises.push(responsePromise
+                            .then(response => {
+                                runtimeFetchResponses.push({
+                                    url: urlText,
+                                    status: response.status,
+                                    ok: response.ok
+                                });
+                                return response;
+                            })
+                            .catch(error => {
+                                runtimeFetchResponses.push({
+                                    url: urlText,
+                                    status: 0,
+                                    ok: false,
+                                    error: String(error)
+                                });
+                            }));
+                    }
+
+                    if (urlText.includes(telemetryUrl)) {
+                        telemetryPromises.push(responsePromise
+                            .then(response => {
+                                telemetryResponses.push({
+                                    url: urlText,
+                                    status: response.status,
+                                    ok: response.ok,
+                                    requestBody: String(init?.body ?? '')
+                                });
+                                return response;
+                            })
+                            .catch(error => {
+                                telemetryResponses.push({
+                                    url: urlText,
+                                    status: 0,
+                                    ok: false,
+                                    requestBody: String(init?.body ?? ''),
+                                    error: String(error)
+                                });
+                            }));
+                    }
+
+                    return responsePromise;
+                };
+
+                const module = await import(`${modulePath}?e2e=${Date.now()}`);
+                const fileBytes = new TextEncoder().encode([
+                    'v 0 0 0',
+                    'v 20 0 0',
+                    'v 0 20 0',
+                    'f 1 2 3',
+                    ''
+                ].join('\n'));
+                const dotNetCalls = [];
+                const result = await module.runLocalAdvisoryGeometry(
+                    `e2e-local-runtime-${Date.now()}`,
+                    {
+                        processCode: 'FDM',
+                        fileName: 'e2e-local-runtime.obj',
+                        storagePath: 'e2e/local-runtime.obj',
+                        fileBytes,
+                        manifestUrl,
+                        assetBaseUrl,
+                        timeoutMs: 15000,
+                        dotNetRef: {
+                            invokeMethodAsync: async (method, payload) => {
+                                dotNetCalls.push({ method, payload });
+                                return method === 'NotifyLocalGeometryRuntimeComplete';
+                            }
+                        }
+                    });
+
+                await Promise.allSettled(telemetryPromises);
+
+                return JSON.stringify({
+                    workerSupported: typeof Worker !== 'undefined',
+                    wasmSupported: typeof WebAssembly !== 'undefined',
+                    result,
+                    eventDetails,
+                    dotNetCalls,
+                    runtimeFetchResponses,
+                    telemetryResponses
+                });
+            }
+            """,
+            new
+            {
+                modulePath,
+                manifestUrl,
+                assetBaseUrl,
+                telemetryUrl
+            });
+
+        using var document = JsonDocument.Parse(runtimeProbe);
+        var root = document.RootElement;
+        Assert.True(GetJsonBool(root, "workerSupported"), $"{surfaceName} must support Web Workers.");
+        Assert.True(GetJsonBool(root, "wasmSupported"), $"{surfaceName} must support WebAssembly.");
+
+        var result = root.GetProperty("result");
+        Assert.True(
+            result.ValueKind == JsonValueKind.Object,
+            $"{surfaceName} browser local DFM returned no result. Probe: {runtimeProbe}");
+
+        Assert.Equal("analysis_complete", GetJsonString(result, "status"));
+        Assert.False(GetJsonBool(result, "isAuthoritative"));
+        Assert.Equal("local_primary", GetJsonString(result, "authority"));
+        Assert.Equal("primary_interactive", GetJsonString(result, "executionMode"));
+        Assert.Equal("browser-first-dfm-v1", GetJsonString(result, "algorithmVersion"));
+        Assert.Equal("FDM", GetJsonString(result, "processCode"));
+        Assert.Equal("e2e/local-runtime.obj", GetJsonString(result, "storagePath"));
+        Assert.True(GetJsonInt(result.GetProperty("metrics"), "faceCount") > 0);
+        Assert.True(GetJsonBool(result.GetProperty("runtimeKernel"), "wasmLoaded"));
+
+        var dotNetCalls = root.GetProperty("dotNetCalls").EnumerateArray().ToArray();
+        Assert.Contains(dotNetCalls, call => GetJsonString(call, "method") == "NotifyLocalGeometryRuntimeStarted");
+        Assert.Contains(dotNetCalls, call => GetJsonString(call, "method") == "NotifyLocalGeometryRuntimeComplete");
+
+        var eventDetails = root.GetProperty("eventDetails").EnumerateArray().ToArray();
+        Assert.Contains(eventDetails, item =>
+        {
+            if (GetJsonString(item, "type") != "maliev:geometry-local-runtime-started") return false;
+            return item.TryGetProperty("detail", out var detail) &&
+                string.Equals(GetJsonString(detail, "processCode"), "FDM", StringComparison.OrdinalIgnoreCase);
+        });
+        var completionEvent = eventDetails.Single(item =>
+        {
+            if (GetJsonString(item, "type") != "maliev:geometry-local-runtime-complete") return false;
+            return item.TryGetProperty("detail", out var detail) &&
+                string.Equals(GetJsonString(detail, "processCode"), "FDM", StringComparison.OrdinalIgnoreCase);
+        });
+        var completionDetail = completionEvent.GetProperty("detail");
+        Assert.Equal("local_primary", GetJsonString(completionDetail, "authority"));
+        Assert.Equal("primary_interactive", GetJsonString(completionDetail, "executionMode"));
+        Assert.True(GetJsonBool(completionDetail, "accepted"));
+        Assert.Equal("FDM", GetJsonString(completionDetail, "processCode"));
+
+        var telemetryResponses = root.GetProperty("telemetryResponses").EnumerateArray().ToArray();
+        var startTelemetry = telemetryResponses.Single(response =>
+        {
+            var requestBody = GetJsonString(response, "requestBody");
+            return requestBody.Contains("\"status\":\"started\"", StringComparison.OrdinalIgnoreCase) &&
+                requestBody.Contains("\"processCode\":\"FDM\"", StringComparison.OrdinalIgnoreCase);
+        });
+        var completionTelemetry = telemetryResponses.Single(response =>
+        {
+            var requestBody = GetJsonString(response, "requestBody");
+            return requestBody.Contains("\"accepted\":true", StringComparison.OrdinalIgnoreCase) &&
+                requestBody.Contains("\"processCode\":\"FDM\"", StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.True(GetJsonBool(startTelemetry, "ok"), $"{surfaceName} browser local DFM start telemetry failed.");
+        Assert.True(GetJsonBool(completionTelemetry, "ok"), $"{surfaceName} browser local DFM completion telemetry failed.");
     }
 
     private static async Task<JsonElement> RunPurchaseOrderLifecycleActionAsync(
