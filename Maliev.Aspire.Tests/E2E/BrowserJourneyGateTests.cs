@@ -4607,7 +4607,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
                 await page.Locator("#login-email, #Username").First.WaitForAsync(new LocatorWaitForOptions
                 {
-                    State = WaitForSelectorState.Attached,
+                    State = WaitForSelectorState.Visible,
                     Timeout = 15_000
                 });
             }
@@ -4640,10 +4640,35 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
             var emailInput = page.Locator("#login-email, #Username").First;
             var passwordInput = page.Locator("#login-password, #Password").First;
-            await emailInput.FillAsync(email, new LocatorFillOptions { Force = true });
-            await passwordInput.FillAsync(password, new LocatorFillOptions { Force = true });
+            await emailInput.FillAsync(email);
+
+            var continueWithEmailButton = page.GetByRole(AriaRole.Button, new()
+            {
+                NameRegex = new Regex("^Continue with email$", RegexOptions.IgnoreCase)
+            }).First;
+            if (await continueWithEmailButton.CountAsync() > 0)
+            {
+                await Expect(continueWithEmailButton).ToBeEnabledAsync(new() { Timeout = 15_000 });
+                await continueWithEmailButton.ClickAsync();
+            }
+
+            await passwordInput.WaitForAsync(new LocatorWaitForOptions
+            {
+                State = WaitForSelectorState.Visible,
+                Timeout = 15_000
+            });
+            await passwordInput.FillAsync(password);
+
+            var signInWithEmailButton = page.GetByRole(AriaRole.Button, new()
+            {
+                NameRegex = new Regex("^Sign in( with email)?$", RegexOptions.IgnoreCase)
+            }).First;
             var serverLoginForm = page.Locator("form[action='/api/v1/auth/login-form']").First;
-            if (await serverLoginForm.CountAsync() > 0)
+            if (await signInWithEmailButton.CountAsync() > 0)
+            {
+                await signInWithEmailButton.ClickAsync(new LocatorClickOptions { Timeout = 15_000 });
+            }
+            else if (await serverLoginForm.CountAsync() > 0)
             {
                 await serverLoginForm.EvaluateAsync("form => form.requestSubmit()");
             }
