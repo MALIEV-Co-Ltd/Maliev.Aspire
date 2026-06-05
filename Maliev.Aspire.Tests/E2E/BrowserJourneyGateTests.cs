@@ -1212,6 +1212,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     "/quote/v1/geometry/runtime/manifest",
                     "/quote/v1/geometry/runtime/assets/",
                     "/quote/v1/geometry/runtime/telemetry");
+                await AssertBrowserLocalGeometryMetricsExportedAsync(
+                    quotePage,
+                    $"QuoteEngine {viewportProfile.Name}",
+                    "/quote/metrics",
+                    "quote");
             }
 
             await using (var intranetContext = await NewContextAsync(viewportProfile: viewportProfile))
@@ -1228,6 +1233,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     "/api/v1/geometry/runtime/manifest",
                     "/api/v1/geometry/runtime/assets/",
                     "/api/v1/geometry/runtime/telemetry");
+                await AssertBrowserLocalGeometryMetricsExportedAsync(
+                    intranetPage,
+                    $"Intranet {viewportProfile.Name}",
+                    "/intranet/metrics",
+                    "intranet");
             }
         }
     }
@@ -5310,6 +5320,73 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.True(
             response.Ok,
             $"{operation} failed with HTTP {response.Status}: {body}");
+    }
+
+    private static async Task AssertBrowserLocalGeometryMetricsExportedAsync(
+        IPage page,
+        string surfaceName,
+        string metricsPath,
+        string metricPrefix)
+    {
+        var metricsProbe = await page.EvaluateAsync<string>(
+            """
+            async ({ metricsPath }) => {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 20000);
+                try {
+                    const response = await fetch(metricsPath, {
+                        credentials: 'include',
+                        signal: controller.signal
+                    });
+                    return JSON.stringify({
+                        status: response.status,
+                        ok: response.ok,
+                        body: await response.text(),
+                        timedOut: false
+                    });
+                } catch (error) {
+                    return JSON.stringify({
+                        status: 0,
+                        ok: false,
+                        body: String(error),
+                        timedOut: error?.name === 'AbortError'
+                    });
+                } finally {
+                    clearTimeout(timeoutId);
+                }
+            }
+            """,
+            new
+            {
+                metricsPath
+            });
+
+        using var document = JsonDocument.Parse(metricsProbe);
+        var root = document.RootElement;
+        var body = GetJsonString(root, "body");
+        Assert.False(
+            GetJsonBool(root, "timedOut"),
+            $"{surfaceName} metrics scrape timed out at {metricsPath}.");
+        Assert.True(
+            GetJsonBool(root, "ok"),
+            $"{surfaceName} metrics scrape failed with HTTP {GetJsonInt(root, "status")}: {body}");
+
+        foreach (var metricName in new[]
+        {
+            $"{metricPrefix}_browser_dfm_runtime_starts",
+            $"{metricPrefix}_browser_dfm_runtime_completions",
+            $"{metricPrefix}_dfm_execution_decisions",
+            $"{metricPrefix}_dfm_server_avoided_input_bytes",
+            $"{metricPrefix}_dfm_server_avoided_input_triangles"
+        })
+        {
+            Assert.Contains(metricName, body, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("process_family=\"fdm\"", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("process_family=\"cnc\"", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("execution_path=\"browser_primary\"", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("server_cpu=\"avoided\"", body, StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task VerifyBrowserLocalGeometryRuntimeAsync(
