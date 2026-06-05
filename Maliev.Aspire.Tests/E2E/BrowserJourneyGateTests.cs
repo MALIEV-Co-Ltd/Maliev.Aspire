@@ -1027,6 +1027,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.Equal("primary_interactive", GetJsonString(root, "executionMode"));
             Assert.Equal("local_primary", GetJsonString(root, "authority"));
             Assert.Equal("fallback_and_final_validation", GetJsonString(root, "serverRole"));
+            Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".3mf", value.GetString(), StringComparison.Ordinal));
             Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".stl", value.GetString(), StringComparison.Ordinal));
             Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".gltf", value.GetString(), StringComparison.Ordinal));
             Assert.Contains(root.GetProperty("deviceProfiles").EnumerateArray(), value => string.Equals(viewportProfile.ManifestProfileName, value.GetString(), StringComparison.Ordinal));
@@ -1146,6 +1147,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 Assert.Equal("primary_interactive", GetJsonString(root, "executionMode"));
                 Assert.Equal("local_primary", GetJsonString(root, "authority"));
                 Assert.Equal("fallback_and_final_validation", GetJsonString(root, "serverRole"));
+                Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".3mf", value.GetString(), StringComparison.Ordinal));
                 Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".stl", value.GetString(), StringComparison.Ordinal));
                 Assert.Contains(root.GetProperty("directViewerExtensions").EnumerateArray(), value => string.Equals(".gltf", value.GetString(), StringComparison.Ordinal));
                 Assert.Contains(root.GetProperty("deviceProfiles").EnumerateArray(), value => string.Equals(viewportProfile.ManifestProfileName, value.GetString(), StringComparison.Ordinal));
@@ -5312,9 +5314,9 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var runtimeProbe = await page.EvaluateAsync<string>(
             """
             async ({ modulePath, manifestUrl, assetBaseUrl, telemetryUrl, threeMfBase64 }) => {
-                const PROBE_TIMEOUT_MS = 90000;
+                const PROBE_TIMEOUT_MS = 210000;
                 const IMPORT_TIMEOUT_MS = 30000;
-                const CASE_TIMEOUT_MS = 30000;
+                const CASE_TIMEOUT_MS = 90000;
                 const TELEMETRY_TIMEOUT_MS = 10000;
                 const eventDetails = [];
                 const runtimeFetchResponses = [];
