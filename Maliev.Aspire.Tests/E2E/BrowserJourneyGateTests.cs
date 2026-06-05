@@ -5312,10 +5312,29 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var runtimeProbe = await page.EvaluateAsync<string>(
             """
             async ({ modulePath, manifestUrl, assetBaseUrl, telemetryUrl, threeMfBase64 }) => {
+                const PROBE_TIMEOUT_MS = 90000;
+                const IMPORT_TIMEOUT_MS = 30000;
+                const CASE_TIMEOUT_MS = 30000;
+                const TELEMETRY_TIMEOUT_MS = 10000;
                 const eventDetails = [];
                 const runtimeFetchResponses = [];
                 const telemetryResponses = [];
                 const telemetryPromises = [];
+                const results = [];
+                const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+                const withTimeout = (promise, ms, timeoutValue) => Promise.race([
+                    promise,
+                    wait(ms).then(() => timeoutValue)
+                ]);
+                const snapshot = extra => JSON.stringify({
+                    workerSupported: typeof Worker !== 'undefined',
+                    wasmSupported: typeof WebAssembly !== 'undefined',
+                    results,
+                    eventDetails,
+                    runtimeFetchResponses,
+                    telemetryResponses,
+                    ...extra
+                });
                 const eventTypes = [
                     'maliev:geometry-local-runtime-started',
                     'maliev:geometry-local-runtime-complete',
@@ -5388,70 +5407,89 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     return responsePromise;
                 };
 
-                const module = await import(`${modulePath}?e2e=${Date.now()}`);
-                const objFileBytes = new TextEncoder().encode([
-                    'v 0 0 0',
-                    'v 20 0 0',
-                    'v 0 20 0',
-                    'f 1 2 3',
-                    ''
-                ].join('\n'));
-                const threeMfFileBytes = Uint8Array.from(atob(threeMfBase64), char => char.charCodeAt(0));
-                const runtimeCases = [
-                    {
-                        label: 'obj',
-                        processCode: 'FDM',
-                        fileName: 'e2e-local-runtime.obj',
-                        storagePath: 'e2e/local-runtime.obj',
-                        fileBytes: objFileBytes
-                    },
-                    {
-                        label: '3mf',
-                        processCode: 'CNC_MILL',
-                        fileName: 'e2e-local-runtime.3mf',
-                        storagePath: 'e2e/local-runtime.3mf',
-                        fileBytes: threeMfFileBytes
+                const runProbe = async () => {
+                    const module = await withTimeout(import(`${modulePath}?e2e=${Date.now()}`), IMPORT_TIMEOUT_MS, null);
+                    if (!module) {
+                        return snapshot({ importTimedOut: true, importTimeoutMs: IMPORT_TIMEOUT_MS });
                     }
-                ];
-                const results = [];
-                for (const runtimeCase of runtimeCases) {
-                    const dotNetCalls = [];
-                    const result = await module.runLocalAdvisoryGeometry(
-                        `e2e-local-runtime-${runtimeCase.label}-${Date.now()}`,
+
+                    const objFileBytes = new TextEncoder().encode([
+                        'v 0 0 0',
+                        'v 20 0 0',
+                        'v 0 20 0',
+                        'f 1 2 3',
+                        ''
+                    ].join('\n'));
+                    const threeMfFileBytes = Uint8Array.from(atob(threeMfBase64), char => char.charCodeAt(0));
+                    const runtimeCases = [
                         {
+                            label: 'obj',
+                            processCode: 'FDM',
+                            fileName: 'e2e-local-runtime.obj',
+                            storagePath: 'e2e/local-runtime.obj',
+                            fileBytes: objFileBytes
+                        },
+                        {
+                            label: '3mf',
+                            processCode: 'CNC_MILL',
+                            fileName: 'e2e-local-runtime.3mf',
+                            storagePath: 'e2e/local-runtime.3mf',
+                            fileBytes: threeMfFileBytes
+                        }
+                    ];
+                    for (const runtimeCase of runtimeCases) {
+                        const dotNetCalls = [];
+                        const result = await withTimeout(
+                            module.runLocalAdvisoryGeometry(
+                                `e2e-local-runtime-${runtimeCase.label}-${Date.now()}`,
+                                {
+                                    processCode: runtimeCase.processCode,
+                                    fileName: runtimeCase.fileName,
+                                    storagePath: runtimeCase.storagePath,
+                                    fileBytes: runtimeCase.fileBytes,
+                                    manifestUrl,
+                                    assetBaseUrl,
+                                    timeoutMs: 15000,
+                                    dotNetRef: {
+                                        invokeMethodAsync: async (method, payload) => {
+                                            dotNetCalls.push({ method, payload });
+                                            return method === 'NotifyLocalGeometryRuntimeComplete';
+                                        }
+                                    }
+                                }),
+                            CASE_TIMEOUT_MS,
+                            {
+                                status: 'worker_timeout',
+                                timeoutMs: CASE_TIMEOUT_MS,
+                                processCode: runtimeCase.processCode,
+                                storagePath: runtimeCase.storagePath,
+                                metrics: { faceCount: 0 },
+                                runtimeKernel: { wasmLoaded: false }
+                            });
+                        results.push({
+                            label: runtimeCase.label,
                             processCode: runtimeCase.processCode,
-                            fileName: runtimeCase.fileName,
                             storagePath: runtimeCase.storagePath,
-                            fileBytes: runtimeCase.fileBytes,
-                            manifestUrl,
-                            assetBaseUrl,
-                            timeoutMs: 15000,
-                            dotNetRef: {
-                                invokeMethodAsync: async (method, payload) => {
-                                    dotNetCalls.push({ method, payload });
-                                    return method === 'NotifyLocalGeometryRuntimeComplete';
-                                }
-                            }
+                            result,
+                            dotNetCalls
                         });
-                    results.push({
-                        label: runtimeCase.label,
-                        processCode: runtimeCase.processCode,
-                        storagePath: runtimeCase.storagePath,
-                        result,
-                        dotNetCalls
+                    }
+
+                    await withTimeout(Promise.allSettled(telemetryPromises), TELEMETRY_TIMEOUT_MS, []);
+
+                    return snapshot({
+                        probeTimedOut: false,
+                        importTimedOut: false
                     });
-                }
+                };
 
-                await Promise.allSettled(telemetryPromises);
-
-                return JSON.stringify({
-                    workerSupported: typeof Worker !== 'undefined',
-                    wasmSupported: typeof WebAssembly !== 'undefined',
-                    results,
-                    eventDetails,
-                    runtimeFetchResponses,
-                    telemetryResponses
-                });
+                return await withTimeout(
+                    runProbe(),
+                    PROBE_TIMEOUT_MS,
+                    snapshot({
+                        probeTimedOut: true,
+                        probeTimeoutMs: PROBE_TIMEOUT_MS
+                    }));
             }
             """,
             new
@@ -5465,6 +5503,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         using var document = JsonDocument.Parse(runtimeProbe);
         var root = document.RootElement;
+        Assert.False(GetJsonBool(root, "probeTimedOut"), $"{surfaceName} browser local DFM probe timed out. Probe: {runtimeProbe}");
+        Assert.False(GetJsonBool(root, "importTimedOut"), $"{surfaceName} browser local DFM module import timed out. Probe: {runtimeProbe}");
         Assert.True(GetJsonBool(root, "workerSupported"), $"{surfaceName} must support Web Workers.");
         Assert.True(GetJsonBool(root, "wasmSupported"), $"{surfaceName} must support WebAssembly.");
 
@@ -5480,7 +5520,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 result.ValueKind == JsonValueKind.Object,
                 $"{surfaceName} browser local DFM returned no {label} result. Probe: {runtimeProbe}");
 
-            Assert.Equal("analysis_complete", GetJsonString(result, "status"));
+            var status = GetJsonString(result, "status");
+            Assert.True(
+                string.Equals("analysis_complete", status, StringComparison.Ordinal),
+                $"{surfaceName} browser local DFM {label} expected analysis_complete but got {status}. Probe: {runtimeProbe}");
             Assert.False(GetJsonBool(result, "isAuthoritative"));
             Assert.Equal("local_primary", GetJsonString(result, "authority"));
             Assert.Equal("primary_interactive", GetJsonString(result, "executionMode"));
@@ -6249,7 +6292,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var lastName = $"Finance {unique}";
         var fullName = $"{firstName} {lastName}";
         var companyName = $"E2E Finance Components {unique}";
-        var taxId = $"01055{DateTimeOffset.UtcNow:HHmmssff}";
+        var taxSuffix = Convert.ToUInt32(unique[..4], 16) % 10_000;
+        var taxId = $"TH-{DateTimeOffset.UtcNow:HHmmssff}{taxSuffix:0000}";
         const string billingAddressLine1 = "99 Invoice Verification Road";
 
         var payload = new
