@@ -5320,6 +5320,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 const TELEMETRY_TIMEOUT_MS = 10000;
                 const eventDetails = [];
                 const runtimeFetchResponses = [];
+                const serverDfmFallbackRequests = [];
                 const telemetryResponses = [];
                 const telemetryPromises = [];
                 const results = [];
@@ -5334,6 +5335,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     results,
                     eventDetails,
                     runtimeFetchResponses,
+                    serverDfmFallbackRequests,
                     telemetryResponses,
                     ...extra
                 });
@@ -5364,6 +5366,13 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 window.fetch = (url, init = {}) => {
                     const responsePromise = originalFetch(url, init);
                     const urlText = String(url);
+                    if (urlText.includes('/dfm/') && !urlText.includes('/runtime/')) {
+                        serverDfmFallbackRequests.push({
+                            url: urlText,
+                            method: String(init?.method ?? 'GET')
+                        });
+                    }
+
                     if (urlText.includes(manifestUrl) || urlText.includes(assetBaseUrl)) {
                         telemetryPromises.push(responsePromise
                             .then(response => {
@@ -5552,6 +5561,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         var eventDetails = root.GetProperty("eventDetails").EnumerateArray().ToArray();
         var telemetryResponses = root.GetProperty("telemetryResponses").EnumerateArray().ToArray();
+        var serverDfmFallbackRequests = root.GetProperty("serverDfmFallbackRequests").EnumerateArray().ToArray();
+        Assert.Empty(serverDfmFallbackRequests);
         foreach (var processCode in new[] { "FDM", "CNC_MILL" })
         {
             Assert.Contains(eventDetails, item =>
@@ -5586,6 +5597,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             });
             Assert.True(GetJsonBool(startTelemetry, "ok"), $"{surfaceName} browser local DFM {processCode} start telemetry failed.");
             Assert.True(GetJsonBool(completionTelemetry, "ok"), $"{surfaceName} browser local DFM {processCode} completion telemetry failed.");
+
+            using var completionBody = JsonDocument.Parse(GetJsonString(completionTelemetry, "requestBody"));
+            Assert.True(
+                GetJsonDouble(completionBody.RootElement, "inputByteCount") > 0,
+                $"{surfaceName} browser local DFM {processCode} completion telemetry must include offloaded input bytes.");
+            Assert.True(
+                GetJsonDouble(completionBody.RootElement, "inputTriangleCount") > 0,
+                $"{surfaceName} browser local DFM {processCode} completion telemetry must include offloaded triangle workload.");
         }
     }
 
