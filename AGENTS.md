@@ -181,6 +181,8 @@ Maliev.Aspire.Tests/
 
 `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_STORIES.md` is the source of truth for browser-level production gate coverage. Future agents must update it when user-facing customer or employee journeys change.
 
+`Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_SPECIFICATION.md` is the centralized coverage overview. Keep it aligned with executable E2E method names, declared story ids, what each method verifies, and the current pass/partial/blocked story rollup.
+
 `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_RUN_RESULTS.md` records dated execution evidence. Use it to record commands run, pass/fail counts, blocked tests, fixes applied, and whether browser E2E automation exists yet.
 
 Use these rules for the E2E story catalog:

@@ -22,9 +22,12 @@ public sealed partial class E2EStoryCatalogTraceabilityTests
     {
         var storyIds = ExtractStoryIds(Path.Combine(SpecsDirectory, "E2E_USER_JOURNEY_STORIES.md"));
         var resultIds = ExtractStoryIds(Path.Combine(SpecsDirectory, "E2E_USER_JOURNEY_RUN_RESULTS.md"));
+        var specificationIds = ExtractStoryIds(Path.Combine(SpecsDirectory, "E2E_USER_JOURNEY_SPECIFICATION.md"));
 
         var missing = storyIds.Except(resultIds, StringComparer.Ordinal).ToArray();
         var extra = resultIds.Except(storyIds, StringComparer.Ordinal).ToArray();
+        var missingFromSpecification = storyIds.Except(specificationIds, StringComparer.Ordinal).ToArray();
+        var extraInSpecification = specificationIds.Except(storyIds, StringComparer.Ordinal).ToArray();
 
         Assert.True(
             missing.Length == 0,
@@ -32,6 +35,12 @@ public sealed partial class E2EStoryCatalogTraceabilityTests
         Assert.True(
             extra.Length == 0,
             $"Run-result file contains ids that are not in the story catalog: {string.Join(", ", extra)}");
+        Assert.True(
+            missingFromSpecification.Length == 0,
+            $"Missing specification overview rows for story ids: {string.Join(", ", missingFromSpecification)}");
+        Assert.True(
+            extraInSpecification.Length == 0,
+            $"Specification overview contains ids that are not in the story catalog: {string.Join(", ", extraInSpecification)}");
         Assert.Equal(102, storyIds.Count);
     }
 
@@ -42,6 +51,7 @@ public sealed partial class E2EStoryCatalogTraceabilityTests
     [Trait("Tier", "E2E")]
     public void BrowserE2ETests_DeclareStoryCoverage()
     {
+        var specificationText = File.ReadAllText(Path.Combine(SpecsDirectory, "E2E_USER_JOURNEY_SPECIFICATION.md"));
         var automatedStoryIds = typeof(BrowserJourneyGateTests)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .SelectMany(method => method.GetCustomAttributesData())
@@ -61,6 +71,21 @@ public sealed partial class E2EStoryCatalogTraceabilityTests
         Assert.Contains("WEB-014", automatedStoryIds);
         Assert.Contains("QUOTE-024", automatedStoryIds);
         Assert.Contains("INT-001", automatedStoryIds);
+
+        var missingFromSpecification = typeof(BrowserJourneyGateTests)
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(method => method.GetCustomAttributesData().Any(attribute =>
+                attribute.AttributeType == typeof(TraitAttribute) &&
+                string.Equals(attribute.ConstructorArguments.ElementAtOrDefault(0).Value as string, "Tier", StringComparison.Ordinal) &&
+                string.Equals(attribute.ConstructorArguments.ElementAtOrDefault(1).Value as string, "E2E", StringComparison.Ordinal)))
+            .Select(method => method.Name)
+            .Where(methodName => !specificationText.Contains(methodName, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            missingFromSpecification.Length == 0,
+            $"Missing specification overview rows for browser E2E methods: {string.Join(", ", missingFromSpecification)}");
     }
 
     private static IReadOnlySet<string> ExtractStoryIds(string path)

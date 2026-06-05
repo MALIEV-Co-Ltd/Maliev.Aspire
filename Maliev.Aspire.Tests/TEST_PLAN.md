@@ -71,6 +71,7 @@
 - Project-based quote revision, quote-to-order, quote-to-payment, commerce publish-to-storefront, and operations workflows
 - One quotation per project with immutable quotation versions, exact version PDF artifacts, source project linkage, and version-aware acceptance/order creation
 - Source of truth: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_STORIES.md`
+- Coverage overview: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_SPECIFICATION.md`
 - Execution evidence: `Maliev.Aspire.Tests/specs/E2E_USER_JOURNEY_RUN_RESULTS.md`
 - If no `[Trait("Tier", "E2E")]` browser tests exist, the gate is not complete: run manual browser/Playwright checks against the Aspire-hosted frontend URLs, record story-level pass/partial/blocked/fail evidence, then run available service-level E2E and system integration checks separately.
 - Service/system integration checks may support the E2E gate, but they must not be documented as browser E2E results unless a browser actually opened the relevant user journey.
@@ -209,6 +210,7 @@ Maliev.Aspire.Tests/
 │   ├── MESSAGING_TESTS.md   # Event chain specs (NEW)
 │   ├── WORKFLOW_TESTS.md    # Cross-service workflow specs (NEW)
 │   ├── E2E_USER_JOURNEY_STORIES.md # Production-gate browser journey catalog
+│   ├── E2E_USER_JOURNEY_SPECIFICATION.md # Executable E2E method and story-result overview
 │   └── E2E_USER_JOURNEY_RUN_RESULTS.md # Dated production-gate run evidence
 └── TEST_PLAN.md             # This document
 ```
