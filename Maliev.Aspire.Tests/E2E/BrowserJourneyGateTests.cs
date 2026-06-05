@@ -1,5 +1,6 @@
 using Maliev.Aspire.Tests.Infrastructure;
 using Microsoft.Playwright;
+using System.IO.Compression;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -5307,9 +5308,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         string assetBaseUrl,
         string telemetryUrl)
     {
+        var threeMfBase64 = BuildTinyThreeMfCubeBase64();
         var runtimeProbe = await page.EvaluateAsync<string>(
             """
-            async ({ modulePath, manifestUrl, assetBaseUrl, telemetryUrl }) => {
+            async ({ modulePath, manifestUrl, assetBaseUrl, telemetryUrl, threeMfBase64 }) => {
                 const eventDetails = [];
                 const runtimeFetchResponses = [];
                 const telemetryResponses = [];
@@ -5387,40 +5389,66 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 };
 
                 const module = await import(`${modulePath}?e2e=${Date.now()}`);
-                const fileBytes = new TextEncoder().encode([
+                const objFileBytes = new TextEncoder().encode([
                     'v 0 0 0',
                     'v 20 0 0',
                     'v 0 20 0',
                     'f 1 2 3',
                     ''
                 ].join('\n'));
-                const dotNetCalls = [];
-                const result = await module.runLocalAdvisoryGeometry(
-                    `e2e-local-runtime-${Date.now()}`,
+                const threeMfFileBytes = Uint8Array.from(atob(threeMfBase64), char => char.charCodeAt(0));
+                const runtimeCases = [
                     {
+                        label: 'obj',
                         processCode: 'FDM',
                         fileName: 'e2e-local-runtime.obj',
                         storagePath: 'e2e/local-runtime.obj',
-                        fileBytes,
-                        manifestUrl,
-                        assetBaseUrl,
-                        timeoutMs: 15000,
-                        dotNetRef: {
-                            invokeMethodAsync: async (method, payload) => {
-                                dotNetCalls.push({ method, payload });
-                                return method === 'NotifyLocalGeometryRuntimeComplete';
+                        fileBytes: objFileBytes
+                    },
+                    {
+                        label: '3mf',
+                        processCode: 'CNC_MILL',
+                        fileName: 'e2e-local-runtime.3mf',
+                        storagePath: 'e2e/local-runtime.3mf',
+                        fileBytes: threeMfFileBytes
+                    }
+                ];
+                const results = [];
+                for (const runtimeCase of runtimeCases) {
+                    const dotNetCalls = [];
+                    const result = await module.runLocalAdvisoryGeometry(
+                        `e2e-local-runtime-${runtimeCase.label}-${Date.now()}`,
+                        {
+                            processCode: runtimeCase.processCode,
+                            fileName: runtimeCase.fileName,
+                            storagePath: runtimeCase.storagePath,
+                            fileBytes: runtimeCase.fileBytes,
+                            manifestUrl,
+                            assetBaseUrl,
+                            timeoutMs: 15000,
+                            dotNetRef: {
+                                invokeMethodAsync: async (method, payload) => {
+                                    dotNetCalls.push({ method, payload });
+                                    return method === 'NotifyLocalGeometryRuntimeComplete';
+                                }
                             }
-                        }
+                        });
+                    results.push({
+                        label: runtimeCase.label,
+                        processCode: runtimeCase.processCode,
+                        storagePath: runtimeCase.storagePath,
+                        result,
+                        dotNetCalls
                     });
+                }
 
                 await Promise.allSettled(telemetryPromises);
 
                 return JSON.stringify({
                     workerSupported: typeof Worker !== 'undefined',
                     wasmSupported: typeof WebAssembly !== 'undefined',
-                    result,
+                    results,
                     eventDetails,
-                    dotNetCalls,
                     runtimeFetchResponses,
                     telemetryResponses
                 });
@@ -5431,7 +5459,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 modulePath,
                 manifestUrl,
                 assetBaseUrl,
-                telemetryUrl
+                telemetryUrl,
+                threeMfBase64
             });
 
         using var document = JsonDocument.Parse(runtimeProbe);
@@ -5439,59 +5468,131 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.True(GetJsonBool(root, "workerSupported"), $"{surfaceName} must support Web Workers.");
         Assert.True(GetJsonBool(root, "wasmSupported"), $"{surfaceName} must support WebAssembly.");
 
-        var result = root.GetProperty("result");
-        Assert.True(
-            result.ValueKind == JsonValueKind.Object,
-            $"{surfaceName} browser local DFM returned no result. Probe: {runtimeProbe}");
+        var runtimeCases = root.GetProperty("results").EnumerateArray().ToArray();
+        Assert.Equal(2, runtimeCases.Length);
+        foreach (var runtimeCase in runtimeCases)
+        {
+            var processCode = GetJsonString(runtimeCase, "processCode");
+            var storagePath = GetJsonString(runtimeCase, "storagePath");
+            var label = GetJsonString(runtimeCase, "label");
+            var result = runtimeCase.GetProperty("result");
+            Assert.True(
+                result.ValueKind == JsonValueKind.Object,
+                $"{surfaceName} browser local DFM returned no {label} result. Probe: {runtimeProbe}");
 
-        Assert.Equal("analysis_complete", GetJsonString(result, "status"));
-        Assert.False(GetJsonBool(result, "isAuthoritative"));
-        Assert.Equal("local_primary", GetJsonString(result, "authority"));
-        Assert.Equal("primary_interactive", GetJsonString(result, "executionMode"));
-        Assert.Equal("browser-first-dfm-v1", GetJsonString(result, "algorithmVersion"));
-        Assert.Equal("FDM", GetJsonString(result, "processCode"));
-        Assert.Equal("e2e/local-runtime.obj", GetJsonString(result, "storagePath"));
-        Assert.True(GetJsonInt(result.GetProperty("metrics"), "faceCount") > 0);
-        Assert.True(GetJsonBool(result.GetProperty("runtimeKernel"), "wasmLoaded"));
+            Assert.Equal("analysis_complete", GetJsonString(result, "status"));
+            Assert.False(GetJsonBool(result, "isAuthoritative"));
+            Assert.Equal("local_primary", GetJsonString(result, "authority"));
+            Assert.Equal("primary_interactive", GetJsonString(result, "executionMode"));
+            Assert.Equal("browser-first-dfm-v1", GetJsonString(result, "algorithmVersion"));
+            Assert.Equal(processCode, GetJsonString(result, "processCode"));
+            Assert.Equal(storagePath, GetJsonString(result, "storagePath"));
+            Assert.True(GetJsonInt(result.GetProperty("metrics"), "faceCount") > 0);
+            Assert.True(GetJsonBool(result.GetProperty("runtimeKernel"), "wasmLoaded"));
 
-        var dotNetCalls = root.GetProperty("dotNetCalls").EnumerateArray().ToArray();
-        Assert.Contains(dotNetCalls, call => GetJsonString(call, "method") == "NotifyLocalGeometryRuntimeStarted");
-        Assert.Contains(dotNetCalls, call => GetJsonString(call, "method") == "NotifyLocalGeometryRuntimeComplete");
+            if (string.Equals(label, "3mf", StringComparison.OrdinalIgnoreCase))
+            {
+                var metrics = result.GetProperty("metrics");
+                var boundingBox = metrics.GetProperty("boundingBox");
+                Assert.Equal(12, GetJsonInt(metrics, "faceCount"));
+                Assert.Equal(50, GetJsonDouble(boundingBox, "x"));
+                Assert.Equal(50, GetJsonDouble(boundingBox, "y"));
+                Assert.Equal(50, GetJsonDouble(boundingBox, "z"));
+            }
+
+            var dotNetCalls = runtimeCase.GetProperty("dotNetCalls").EnumerateArray().ToArray();
+            Assert.Contains(dotNetCalls, call => GetJsonString(call, "method") == "NotifyLocalGeometryRuntimeStarted");
+            Assert.Contains(dotNetCalls, call => GetJsonString(call, "method") == "NotifyLocalGeometryRuntimeComplete");
+        }
 
         var eventDetails = root.GetProperty("eventDetails").EnumerateArray().ToArray();
-        Assert.Contains(eventDetails, item =>
-        {
-            if (GetJsonString(item, "type") != "maliev:geometry-local-runtime-started") return false;
-            return item.TryGetProperty("detail", out var detail) &&
-                string.Equals(GetJsonString(detail, "processCode"), "FDM", StringComparison.OrdinalIgnoreCase);
-        });
-        var completionEvent = eventDetails.Single(item =>
-        {
-            if (GetJsonString(item, "type") != "maliev:geometry-local-runtime-complete") return false;
-            return item.TryGetProperty("detail", out var detail) &&
-                string.Equals(GetJsonString(detail, "processCode"), "FDM", StringComparison.OrdinalIgnoreCase);
-        });
-        var completionDetail = completionEvent.GetProperty("detail");
-        Assert.Equal("local_primary", GetJsonString(completionDetail, "authority"));
-        Assert.Equal("primary_interactive", GetJsonString(completionDetail, "executionMode"));
-        Assert.True(GetJsonBool(completionDetail, "accepted"));
-        Assert.Equal("FDM", GetJsonString(completionDetail, "processCode"));
-
         var telemetryResponses = root.GetProperty("telemetryResponses").EnumerateArray().ToArray();
-        var startTelemetry = telemetryResponses.Single(response =>
+        foreach (var processCode in new[] { "FDM", "CNC_MILL" })
         {
-            var requestBody = GetJsonString(response, "requestBody");
-            return requestBody.Contains("\"status\":\"started\"", StringComparison.OrdinalIgnoreCase) &&
-                requestBody.Contains("\"processCode\":\"FDM\"", StringComparison.OrdinalIgnoreCase);
-        });
-        var completionTelemetry = telemetryResponses.Single(response =>
+            Assert.Contains(eventDetails, item =>
+            {
+                if (GetJsonString(item, "type") != "maliev:geometry-local-runtime-started") return false;
+                return item.TryGetProperty("detail", out var detail) &&
+                    string.Equals(GetJsonString(detail, "processCode"), processCode, StringComparison.OrdinalIgnoreCase);
+            });
+            var completionEvent = eventDetails.Single(item =>
+            {
+                if (GetJsonString(item, "type") != "maliev:geometry-local-runtime-complete") return false;
+                return item.TryGetProperty("detail", out var detail) &&
+                    string.Equals(GetJsonString(detail, "processCode"), processCode, StringComparison.OrdinalIgnoreCase);
+            });
+            var completionDetail = completionEvent.GetProperty("detail");
+            Assert.Equal("local_primary", GetJsonString(completionDetail, "authority"));
+            Assert.Equal("primary_interactive", GetJsonString(completionDetail, "executionMode"));
+            Assert.True(GetJsonBool(completionDetail, "accepted"));
+            Assert.Equal(processCode, GetJsonString(completionDetail, "processCode"));
+
+            var startTelemetry = telemetryResponses.Single(response =>
+            {
+                var requestBody = GetJsonString(response, "requestBody");
+                return requestBody.Contains("\"status\":\"started\"", StringComparison.OrdinalIgnoreCase) &&
+                    requestBody.Contains($"\"processCode\":\"{processCode}\"", StringComparison.OrdinalIgnoreCase);
+            });
+            var completionTelemetry = telemetryResponses.Single(response =>
+            {
+                var requestBody = GetJsonString(response, "requestBody");
+                return requestBody.Contains("\"accepted\":true", StringComparison.OrdinalIgnoreCase) &&
+                    requestBody.Contains($"\"processCode\":\"{processCode}\"", StringComparison.OrdinalIgnoreCase);
+            });
+            Assert.True(GetJsonBool(startTelemetry, "ok"), $"{surfaceName} browser local DFM {processCode} start telemetry failed.");
+            Assert.True(GetJsonBool(completionTelemetry, "ok"), $"{surfaceName} browser local DFM {processCode} completion telemetry failed.");
+        }
+    }
+
+    private static string BuildTinyThreeMfCubeBase64()
+    {
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            var requestBody = GetJsonString(response, "requestBody");
-            return requestBody.Contains("\"accepted\":true", StringComparison.OrdinalIgnoreCase) &&
-                requestBody.Contains("\"processCode\":\"FDM\"", StringComparison.OrdinalIgnoreCase);
-        });
-        Assert.True(GetJsonBool(startTelemetry, "ok"), $"{surfaceName} browser local DFM start telemetry failed.");
-        Assert.True(GetJsonBool(completionTelemetry, "ok"), $"{surfaceName} browser local DFM completion telemetry failed.");
+            var entry = archive.CreateEntry("3D/3dmodel.model", CompressionLevel.SmallestSize);
+            using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
+            writer.Write(
+                """
+                <?xml version="1.0" encoding="utf-8"?>
+                <model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+                  <resources>
+                    <object id="1" type="model">
+                      <mesh>
+                        <vertices>
+                          <vertex x="0" y="0" z="0" />
+                          <vertex x="50" y="0" z="0" />
+                          <vertex x="50" y="50" z="0" />
+                          <vertex x="0" y="50" z="0" />
+                          <vertex x="0" y="0" z="50" />
+                          <vertex x="50" y="0" z="50" />
+                          <vertex x="50" y="50" z="50" />
+                          <vertex x="0" y="50" z="50" />
+                        </vertices>
+                        <triangles>
+                          <triangle v1="0" v2="1" v3="2" />
+                          <triangle v1="0" v2="2" v3="3" />
+                          <triangle v1="4" v2="6" v3="5" />
+                          <triangle v1="4" v2="7" v3="6" />
+                          <triangle v1="0" v2="4" v3="5" />
+                          <triangle v1="0" v2="5" v3="1" />
+                          <triangle v1="1" v2="5" v3="6" />
+                          <triangle v1="1" v2="6" v3="2" />
+                          <triangle v1="2" v2="6" v3="7" />
+                          <triangle v1="2" v2="7" v3="3" />
+                          <triangle v1="3" v2="7" v3="4" />
+                          <triangle v1="3" v2="4" v3="0" />
+                        </triangles>
+                      </mesh>
+                    </object>
+                  </resources>
+                  <build>
+                    <item objectid="1" />
+                  </build>
+                </model>
+                """);
+        }
+
+        return Convert.ToBase64String(stream.ToArray());
     }
 
     private static async Task<JsonElement> RunPurchaseOrderLifecycleActionAsync(
