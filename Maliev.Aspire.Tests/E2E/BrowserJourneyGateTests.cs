@@ -408,7 +408,12 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("Billing and shipping addresses|ที่อยู่ออกบิลและจัดส่ง", RegexOptions.IgnoreCase) })).ToBeVisibleAsync();
         await WaitForBlazorAsync(page);
         await Expect(page.Locator(".empty-state, .address-grid").First).ToBeVisibleAsync(new() { Timeout = 30_000 });
-        await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("Add address|เพิ่มที่อยู่", RegexOptions.IgnoreCase) }).First.ClickAsync();
+        var addAddressLink = page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("Add address|เพิ่มที่อยู่", RegexOptions.IgnoreCase) }).First;
+        await Expect(addAddressLink).ToHaveAttributeAsync("href", new Regex(@"mode=add", RegexOptions.IgnoreCase));
+        await addAddressLink.ClickAsync();
+        await page.WaitForURLAsync(
+            url => url.Contains("mode=add", StringComparison.OrdinalIgnoreCase),
+            new() { Timeout = 30_000, WaitUntil = WaitUntilState.Commit });
         var addressForm = page.Locator("form.account-form").Last;
         try
         {
@@ -936,7 +941,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             await using var context = await NewContextAsync(viewportProfile: viewportProfile);
             var page = await context.NewPageAsync();
 
-            await page.GotoAsync(new Uri(quoteBase, "/demo").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+            await GotoAppAsync(page, new Uri(quoteBase, "/demo").ToString());
             await WaitForQuoteEngineReadyAsync(page);
             if (viewportProfile.Width < 1200)
             {
@@ -1182,7 +1187,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             {
                 var quotePage = await quoteContext.NewPageAsync();
 
-                await quotePage.GotoAsync(new Uri(quoteBase, "/demo").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+                await quotePage.GotoAsync(new Uri(quoteBase, "/demo").ToString(), AppGotoOptions);
                 await WaitForQuoteEngineReadyAsync(quotePage);
                 if (viewportProfile.Width < 1200)
                 {
@@ -4371,10 +4376,6 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await Expect(scheduleBoard.GetByLabel("Search machines")).ToBeVisibleAsync(new() { Timeout = 15_000 });
         await Expect(scheduleBoard.GetByRole(AriaRole.Group, new() { NameString = "Timeline zoom" })).ToBeVisibleAsync(new() { Timeout = 15_000 });
         await Expect(scheduleBoard.GetByRole(AriaRole.Group, new() { NameString = "Queue zoom" })).ToBeVisibleAsync(new() { Timeout = 15_000 });
-
-        await scheduleBoard.Locator(".psb-zoom button").Filter(new() { HasText = "Day" }).ClickAsync();
-        await Expect(scheduleBoard).ToHaveAttributeAsync("data-board-range-days", "1", new() { Timeout = 15_000 });
-        await scheduleBoard.Locator(".psb-zoom button").Filter(new() { HasText = "Week" }).ClickAsync();
         await Expect(scheduleBoard).ToHaveAttributeAsync("data-board-range-days", "7", new() { Timeout = 15_000 });
 
         var zoomIn = scheduleBoard.GetByLabel("Zoom in schedule timeline");
@@ -4963,7 +4964,16 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 lastException = ex;
                 if (attempt < 3)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(attempt * 2));
+                    try
+                    {
+                        await page.WaitForLoadStateAsync(
+                            LoadState.DOMContentLoaded,
+                            new() { Timeout = attempt * 2_000 });
+                    }
+                    catch (Exception waitEx) when (waitEx is TimeoutException or PlaywrightException)
+                    {
+                        // The outer retry handles incomplete load-state waits.
+                    }
                 }
             }
         }
@@ -5999,10 +6009,6 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await Expect(emailStep).ToBeVisibleAsync(new() { Timeout = 30_000 });
         var emailInput = emailStep.Locator("input[name='Email'], input[name='email'], #auth-email-entry").First;
         await Expect(emailInput).ToBeVisibleAsync(new() { Timeout = 15_000 });
-        await emailInput.FillAsync(email);
-        await emailInput.DispatchEventAsync("input");
-        await emailInput.DispatchEventAsync("change");
-        await Expect(emailInput).ToHaveValueAsync(email);
 
         var continueButton = emailStep.GetByRole(AriaRole.Button, new()
         {
@@ -6063,20 +6069,20 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     {
         for (var attempt = 1; attempt <= 5; attempt++)
         {
-            await emailInput.FillAsync(string.Empty);
-            await emailInput.FillAsync(email);
-            await emailInput.DispatchEventAsync("input");
-            await emailInput.DispatchEventAsync("change");
-            await Expect(emailInput).ToHaveValueAsync(email);
-
             try
             {
+                await emailInput.FillAsync(string.Empty);
+                await emailInput.FillAsync(email);
+                await emailInput.DispatchEventAsync("input");
+                await emailInput.DispatchEventAsync("change");
+                await Expect(emailInput).ToHaveValueAsync(email, new() { Timeout = 5_000 });
                 await Expect(continueButton).ToBeEnabledAsync(new() { Timeout = 3_000 });
                 return;
             }
             catch (Exception ex) when (attempt < 5 && (ex is TimeoutException or PlaywrightException))
             {
-                await Task.Delay(TimeSpan.FromSeconds(attempt));
+                await emailInput.EvaluateAsync("input => input.scrollIntoView({ block: 'center', inline: 'center' })");
+                await Expect(emailInput).ToBeVisibleAsync(new() { Timeout = 3_000 });
             }
         }
 

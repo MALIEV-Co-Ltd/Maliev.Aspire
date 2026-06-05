@@ -1033,7 +1033,10 @@ static partial class Program
         // GeometryService is a Docker container (not a .NET project), so its endpoint is injected
         // via EndpointReference — which Aspire translates to the services__GeometryService__http__0
         // environment variable that AddServiceDiscovery() reads on the BFF side.
-        intranetBff.WithReference(geometryService.GetEndpoint("http"));
+        intranetBff
+            .WithReference(geometryService.GetEndpoint("http"))
+            .WithEnvironment("SystemHealth__ProbeTimeouts__GeometryService__LivenessSeconds", "20")
+            .WithEnvironment("SystemHealth__ProbeTimeouts__GeometryService__ReadinessSeconds", "20");
         quoteEngineBff.WithReference(geometryService.GetEndpoint("http"));
 
         // ──────────────────────────────────────────────
