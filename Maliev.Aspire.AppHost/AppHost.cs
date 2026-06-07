@@ -65,7 +65,8 @@ static IResourceBuilder<ContainerResource> ConfigurePrometheus(IDistributedAppli
         .WithContainerFiles("/etc/prometheus", AppHostPathResolver.ResolveRequiredDirectoryPath("../prometheus"))
         .WithArgs("--web.enable-otlp-receiver", "--config.file=/etc/prometheus/prometheus.yml")
         .WithHttpEndpoint(targetPort: 9090)
-        .WithUrlForEndpoint("http", u => u.DisplayText = "Prometheus Dashboard");
+        .WithUrlForEndpoint("http", u => u.DisplayText = "Prometheus Dashboard")
+        .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "384m");
 }
 
 static IResourceBuilder<ContainerResource> ConfigureGrafana(
@@ -77,7 +78,8 @@ static IResourceBuilder<ContainerResource> ConfigureGrafana(
         .WithContainerFiles("/var/lib/grafana/dashboards", AppHostPathResolver.ResolveRequiredDirectoryPath("../grafana/dashboards"))
         .WithEnvironment("PROMETHEUS_ENDPOINT", prometheus.GetEndpoint("http"))
         .WithHttpEndpoint(targetPort: 3000)
-        .WithUrlForEndpoint("http", u => u.DisplayText = "Grafana Dashboard");
+        .WithUrlForEndpoint("http", u => u.DisplayText = "Grafana Dashboard")
+        .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
 }
 
 static IResourceBuilder<ContainerResource> ConfigureOpenTelemetry(
@@ -85,7 +87,8 @@ static IResourceBuilder<ContainerResource> ConfigureOpenTelemetry(
     IResourceBuilder<ContainerResource> prometheus)
 {
     return builder.AddOpenTelemetryCollector("otelcollector", "../otelcollector/config.yaml")
-        .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp");
+        .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp")
+        .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
 }
 /// <summary>
 /// Main program class containing configuration methods for the Aspire AppHost.
@@ -201,18 +204,21 @@ static partial class Program
                 .WithImageTag("4.2-management-alpine")
                 .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie)
                 .WithHttpEndpoint(targetPort: 15672, name: "management")
-                .WithUrlForEndpoint("management", u => u.DisplayText = "RabbitMQ Management");
+                .WithUrlForEndpoint("management", u => u.DisplayText = "RabbitMQ Management")
+                .WithContainerRuntimeArgs("--cpus", "1", "--memory", "512m");
         }
 
         static IResourceBuilder<RedisResource> ConfigureRedis(IDistributedApplicationBuilder builder)
         {
             var redis = builder.AddRedis("redis")
-                .WithImageTag("8.4-alpine");
+                .WithImageTag("8.4-alpine")
+                .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
 
             redis.WithRedisInsight(insight =>
             {
                 insight.WithVolume("redisinsight-data", "/data")
-                    .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard");
+                    .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard")
+                    .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
             });
 
             return redis;
@@ -222,14 +228,16 @@ static partial class Program
         {
             return builder.AddPostgres("postgres-server")
                 .WithImageTag("18-alpine")
-                .WithArgs("-c", "max_connections=2000")
+                .WithArgs("-c", "max_connections=150", "-c", "shared_buffers=128MB")
+                .WithContainerRuntimeArgs("--cpus", "2", "--memory", "1536m")
                 .WithEnvironment("PGGSSENCMODE", "disable") // Disable GSSAPI for internal container probes (pg_isready)
                 .WithPgAdmin(option =>
                 {
                     option.WithImageTag("9.11")
                         .WithEnvironment("PGGSSENCMODE", "disable") // Disable GSSAPI for pgAdmin connections
                         .WithEnvironment("PYTHONWARNINGS", "ignore") // Suppress SyntaxWarnings from sshtunnel in Python 3.14+
-                        .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
+                        .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard")
+                        .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
                 });
         }
     }
@@ -1017,17 +1025,18 @@ static partial class Program
         }
 
         geometryService = geometryService
-            .WithEnvironment("GEOMETRY_MAIN_WORKERS", "2")
+            .WithEnvironment("GEOMETRY_MAIN_WORKERS", "1")
             .WithEnvironment("GEOMETRY_DFM_WORKERS", "1")
-            .WithEnvironment("GEOMETRY_PREVIEW_RENDER_WORKERS", "2")
-            .WithEnvironment("GEOMETRY_DFM_BODY_WORKERS", "2")
-            .WithEnvironment("GEOMETRY_FILE_INGEST_CONCURRENCY", "2")
-            .WithEnvironment("GEOMETRY_ARTIFACT_CONCURRENCY", "2")
-            .WithEnvironment("GEOMETRY_RABBITMQ_PREFETCH", "2")
+            .WithEnvironment("GEOMETRY_PREVIEW_RENDER_WORKERS", "1")
+            .WithEnvironment("GEOMETRY_DFM_BODY_WORKERS", "1")
+            .WithEnvironment("GEOMETRY_FILE_INGEST_CONCURRENCY", "1")
+            .WithEnvironment("GEOMETRY_ARTIFACT_CONCURRENCY", "1")
+            .WithEnvironment("GEOMETRY_RABBITMQ_PREFETCH", "1")
             .WithExternalHttpEndpoints()
             .WithHttpEndpoint(targetPort: 8081, env: "PORT")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Geometry Scalar"; })
-            .WithTestingSafeHttpHealthCheck("/geometry/aspire-liveness");
+            .WithTestingSafeHttpHealthCheck("/geometry/aspire-liveness")
+            .WithContainerRuntimeArgs("--cpus", "2", "--memory", "1024m");
 
         // Wire GeometryService into BFFs for service discovery.
         // GeometryService is a Docker container (not a .NET project), so its endpoint is injected
