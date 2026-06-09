@@ -38,8 +38,12 @@ public sealed class AppHostReferenceTests
         var geometryBlockStart = appHostSource.IndexOf(
             "var geometryService = builder.AddDockerfile(",
             StringComparison.Ordinal);
+        // The Intranet BFF is declared at the top of the file and wired at the bottom; the
+        // geometry-endpoint reference is the first chained 'intranetBff' wiring after the
+        // GeometryService declaration block.
         var bffReferenceStart = appHostSource.IndexOf(
-            "intranetBff = intranetBff.WithReference(geometryService.GetEndpoint(\"http\"));",
+            "        intranetBff",
+            geometryBlockStart,
             StringComparison.Ordinal);
 
         Assert.True(geometryBlockStart >= 0, "GeometryService resource declaration was not found.");
@@ -172,20 +176,23 @@ public sealed class AppHostReferenceTests
         var employeeBlockStart = appHostSource.IndexOf(
             "var employeeService = WithSharedSecrets(",
             StringComparison.Ordinal);
-        var intranetBlockStart = appHostSource.IndexOf(
-            "builder.AddProject<Projects.Maliev_Intranet_Bff>(\"IntranetBff\")",
+        // IntranetBff is declared at the top of the file and wired near the bottom; slice the
+        // wiring block (DbContext reference → dashboard HTTP command) to inspect its references.
+        var intranetWiringStart = appHostSource.IndexOf(
+            ".WithReference(databases.Intranet, \"IntranetDbContext\")",
             StringComparison.Ordinal);
-        var webBlockStart = appHostSource.IndexOf(
-            "builder.AddProject<Projects.Maliev_Web_Bff>(\"WebBff\")",
+        var intranetWiringEnd = appHostSource.IndexOf(
+            ".WithHttpCommand(",
+            intranetWiringStart,
             StringComparison.Ordinal);
 
         Assert.True(customerBlockStart >= 0, "CustomerService resource declaration was not found.");
         Assert.True(employeeBlockStart > customerBlockStart, "EmployeeService resource declaration was not found after CustomerService.");
-        Assert.True(intranetBlockStart >= 0, "IntranetBff resource declaration was not found.");
-        Assert.True(webBlockStart > intranetBlockStart, "WebBff resource declaration was not found after IntranetBff.");
+        Assert.True(intranetWiringStart >= 0, "IntranetBff service wiring block was not found.");
+        Assert.True(intranetWiringEnd > intranetWiringStart, "IntranetBff service wiring block end was not found.");
 
         var customerBlock = appHostSource[customerBlockStart..employeeBlockStart];
-        var intranetBlock = appHostSource[intranetBlockStart..webBlockStart];
+        var intranetBlock = appHostSource[intranetWiringStart..intranetWiringEnd];
         Assert.Contains(".WithReference(countryService)", customerBlock, StringComparison.Ordinal);
         Assert.Contains(".WaitFor(countryService)", customerBlock, StringComparison.Ordinal);
         Assert.Contains(".WithReference(countryService)", intranetBlock, StringComparison.Ordinal);
@@ -293,7 +300,7 @@ public sealed class AppHostReferenceTests
     {
         var appHostSource = File.ReadAllText(FindAppHostSource());
 
-        Assert.Contains("quoteEngineBff = quoteEngineBff.WithReference(geometryService.GetEndpoint(\"http\"));", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("quoteEngineBff.WithReference(geometryService.GetEndpoint(\"http\"));", appHostSource, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -303,17 +310,21 @@ public sealed class AppHostReferenceTests
     public void AppHost_WebBff_ReferencesCustomerFacingServices()
     {
         var appHostSource = File.ReadAllText(FindAppHostSource());
-        var webBlockStart = appHostSource.IndexOf(
-            "builder.AddProject<Projects.Maliev_Web_Bff>(\"WebBff\")",
+        // WebBff is declared at the top of the file and wired near the bottom; slice from the
+        // start of its wiring block through the end of ConfigureServices (the WithSharedSecrets
+        // helper method) so both the service references and the applied environment are covered.
+        var webWiringStart = appHostSource.IndexOf(
+            "        webBff",
             StringComparison.Ordinal);
-        var inventoryBlockStart = appHostSource.IndexOf(
-            "var inventoryService = WithSharedSecrets(",
+        var webWiringEnd = appHostSource.IndexOf(
+            "private static IResourceBuilder<ProjectResource> WithSharedSecrets(",
+            webWiringStart,
             StringComparison.Ordinal);
 
-        Assert.True(webBlockStart >= 0, "WebBff resource declaration was not found.");
-        Assert.True(inventoryBlockStart > webBlockStart, "InventoryService resource declaration was not found after WebBff.");
+        Assert.True(webWiringStart >= 0, "WebBff service wiring block was not found.");
+        Assert.True(webWiringEnd > webWiringStart, "WebBff service wiring block end was not found.");
 
-        var webBlock = appHostSource[webBlockStart..inventoryBlockStart];
+        var webBlock = appHostSource[webWiringStart..webWiringEnd];
         foreach (var dependency in new[]
         {
             "authService",
@@ -339,7 +350,8 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".WaitFor(customerService)", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientId\", config.WebGoogleClientId)", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientSecret\", config.WebGoogleClientSecret)", webBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/web/aspire-liveness\")", webBlock, StringComparison.Ordinal);
+        // The /web/aspire-liveness health check lives on the top-of-file WebBff declaration.
+        Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/web/aspire-liveness\")", appHostSource, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -445,17 +457,20 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".WithReference(databases.Commerce, \"CommerceDbContext\")", commerceBlock, StringComparison.Ordinal);
         Assert.DoesNotContain("Shopify__", commerceBlock, StringComparison.Ordinal);
 
-        var intranetBlockStart = appHostSource.IndexOf(
-            "builder.AddProject<Projects.Maliev_Intranet_Bff>(\"IntranetBff\")",
+        // IntranetBff is declared at the top of the file and wired near the bottom; slice the
+        // wiring block (DbContext reference → dashboard HTTP command) to inspect its references.
+        var intranetWiringStart = appHostSource.IndexOf(
+            ".WithReference(databases.Intranet, \"IntranetDbContext\")",
             StringComparison.Ordinal);
-        var webBlockStart = appHostSource.IndexOf(
-            "builder.AddProject<Projects.Maliev_Web_Bff>(\"WebBff\")",
+        var intranetWiringEnd = appHostSource.IndexOf(
+            ".WithHttpCommand(",
+            intranetWiringStart,
             StringComparison.Ordinal);
 
-        Assert.True(intranetBlockStart >= 0, "IntranetBff resource declaration was not found.");
-        Assert.True(webBlockStart > intranetBlockStart, "WebBff resource declaration was not found after IntranetBff.");
+        Assert.True(intranetWiringStart >= 0, "IntranetBff service wiring block was not found.");
+        Assert.True(intranetWiringEnd > intranetWiringStart, "IntranetBff service wiring block end was not found.");
 
-        var intranetBlock = appHostSource[intranetBlockStart..webBlockStart];
+        var intranetBlock = appHostSource[intranetWiringStart..intranetWiringEnd];
         Assert.Contains(".WithReference(commerceService)", intranetBlock, StringComparison.Ordinal);
     }
 

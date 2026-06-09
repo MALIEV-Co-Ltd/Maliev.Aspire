@@ -8,6 +8,9 @@ receivers:
 
 processors:
   batch:
+    timeout: 5s
+    send_batch_size: 512
+    send_batch_max_size: 1024
 
 exporters:
   debug:
@@ -21,13 +24,22 @@ exporters:
         insecure_skip_verify: true # Required in local development because cert is localhost and the endpoint is host.docker.internal
     retry_on_failure:
       enabled: true
-      initial_interval: 10s
-      max_interval: 60s
-      max_elapsed_time: 10m
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 2m
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 1000
   otlphttp/prometheus:
     endpoint: ${env:PROMETHEUS_ENDPOINT}
     tls:
         insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 2m
 
 service:
   pipelines:

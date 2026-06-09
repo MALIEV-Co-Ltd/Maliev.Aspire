@@ -3,6 +3,6 @@
     "path": "Maliev.Aspire.AppHost/Maliev.Aspire.AppHost.csproj"
   },
   "features": {
-    "defaultWatchEnabled": "false"
+    "defaultWatchEnabled": "true"
   }
 }

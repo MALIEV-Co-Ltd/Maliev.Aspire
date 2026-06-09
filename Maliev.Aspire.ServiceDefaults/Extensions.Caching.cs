@@ -12,6 +12,37 @@ namespace Microsoft.Extensions.Hosting;
 /// </summary>
 public static class CachingExtensions
 {
+    private const int DefaultRedisSyncTimeoutMs = 10000;
+    private const int DefaultRedisAsyncTimeoutMs = 10000;
+
+    private static string AppendRedisTimeouts(string connectionString)
+    {
+        if (string.IsNullOrEmpty(connectionString))
+        {
+            return connectionString;
+        }
+
+        var hasSyncTimeout = connectionString.Contains("syncTimeout", StringComparison.OrdinalIgnoreCase);
+        var hasAsyncTimeout = connectionString.Contains("asyncTimeout", StringComparison.OrdinalIgnoreCase);
+
+        if (hasSyncTimeout && hasAsyncTimeout)
+        {
+            return connectionString;
+        }
+
+        var builder = new System.Text.StringBuilder(connectionString);
+        if (!hasSyncTimeout)
+        {
+            builder.Append($",syncTimeout={DefaultRedisSyncTimeoutMs}");
+        }
+        if (!hasAsyncTimeout)
+        {
+            builder.Append($",asyncTimeout={DefaultRedisAsyncTimeoutMs}");
+        }
+
+        return builder.ToString();
+    }
+
     /// <summary>
     /// Adds distributed cache optimized for n1-standard-1 nodes (1 vCPU, 3.75GB RAM).
     /// Uses Redis when available with memory limits, falls back to in-memory cache.
@@ -25,7 +56,10 @@ public static class CachingExtensions
         string instanceName)
     {
         var redisEnabled = builder.Configuration.GetValue<bool>("Cache:RedisEnabled", true);
-        var redisConnectionString = builder.Configuration.GetConnectionString("redis");
+        var redisConnectionString = builder.Configuration.GetConnectionString("redis") ?? string.Empty;
+
+        // Append timeout parameters to prevent timeout exceptions on slower operations
+        redisConnectionString = AppendRedisTimeouts(redisConnectionString);
 
         if (redisEnabled && !string.IsNullOrEmpty(redisConnectionString) &&
             !builder.Environment.IsEnvironment("Testing"))
@@ -103,7 +137,7 @@ public static class CachingExtensions
         return builder;
     }
 
-    /// <summary>
+        /// <summary>
     /// Adds Redis distributed cache with connection string from configuration.
     /// Optimized for low-spec nodes with memory constraints.
     /// </summary>
@@ -114,7 +148,10 @@ public static class CachingExtensions
         this IHostApplicationBuilder builder,
         string instanceName)
     {
-        var connectionString = builder.Configuration.GetConnectionString("redis");
+        var connectionString = builder.Configuration.GetConnectionString("redis") ?? string.Empty;
+
+        // Append timeout parameters to prevent timeout exceptions on slower operations
+        connectionString = AppendRedisTimeouts(connectionString);
 
         if (string.IsNullOrEmpty(connectionString))
         {

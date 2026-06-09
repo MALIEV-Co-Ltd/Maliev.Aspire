@@ -228,8 +228,12 @@ static partial class Program
         {
             return builder.AddPostgres("postgres-server")
                 .WithImageTag("18-alpine")
+                // Local-dev tuning: shared_buffers 512MB→128MB (Postgres default; the OS page
+                // cache covers the rest) and a 2GB container ceiling (was 4GB). Postgres idles
+                // ~400MB even with all 37 databases, so this frees headroom inside the capped
+                // WSL VM for the rest of the always-on stack without risking OOM under seeding.
                 .WithArgs("-c", "max_connections=150", "-c", "shared_buffers=128MB")
-                .WithContainerRuntimeArgs("--cpus", "2", "--memory", "1536m")
+                .WithContainerRuntimeArgs("--cpus", "2", "--memory", "2048m")
                 .WithEnvironment("PGGSSENCMODE", "disable") // Disable GSSAPI for internal container probes (pg_isready)
                 .WithPgAdmin(option =>
                 {
@@ -1036,7 +1040,7 @@ static partial class Program
             .WithHttpEndpoint(targetPort: 8081, env: "PORT")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Geometry Scalar"; })
             .WithTestingSafeHttpHealthCheck("/geometry/aspire-liveness")
-            .WithContainerRuntimeArgs("--cpus", "2", "--memory", "1024m");
+            .WithContainerRuntimeArgs("--cpus", "2", "--memory", "2048m");
 
         // Wire GeometryService into BFFs for service discovery.
         // GeometryService is a Docker container (not a .NET project), so its endpoint is injected
@@ -1188,8 +1192,15 @@ static partial class Program
             .WithEnvironment("Observability__RuntimeMetricsEnabled", "false")
             .WithEnvironment("DOTNET_gcServer", "0")
             .WithEnvironment("COMPlus_gcServer", "0")
-            .WithEnvironment("DOTNET_GCHeapHardLimitPercent", "3")
-            .WithEnvironment("COMPlus_GCHeapHardLimitPercent", "3")
+            // Cap each service's GC heap at 2% of host RAM (~636 MB on 31.8 GB) so the
+            // ~40 services starting in parallel don't collectively exceed physical RAM.
+            .WithEnvironment("DOTNET_GCHeapHardLimitPercent", "2")
+            .WithEnvironment("COMPlus_GCHeapHardLimitPercent", "2")
+            // Conserve memory level 3 (scale 0–9): tells the GC to return freed pages
+            // to the OS promptly rather than hoarding them. Prevents per-service RSS
+            // from accumulating during the seeding burst; CPU cost at level 3 is minimal.
+            .WithEnvironment("DOTNET_GCConserveMemory", "3")
+            .WithEnvironment("COMPlus_GCConserveMemory", "3")
             .WithEnvironment("NPGSQL_GSSAPI_AUTHENTICATION", "false")
             .WithEnvironment("PGGSSENCMODE", "disable");
     }
