@@ -3636,6 +3636,128 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies the Project New hidden file input remains automatable and STL uploads reach the processed part row with dimensions and thumbnail.
+    /// Covers the critical STL upload processing path for the employee quote workspace.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "INT-004,INT-005")]
+    public async Task Intranet_ProjectNew_StlUploadProcessesThroughHiddenInput()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        var diagnostics = new List<string>();
+        page.Console += (_, message) =>
+        {
+            if (message.Type is "error" or "warning")
+                diagnostics.Add($"console[{message.Type}]: {message.Text}");
+        };
+        page.PageError += (_, exception) => diagnostics.Add($"pageerror: {exception}");
+        page.RequestFailed += (_, request) =>
+            diagnostics.Add($"requestfailed: {request.Method} {request.Url} {request.Failure}");
+        page.Response += (_, response) =>
+        {
+            if (response.Status >= 400 && response.Url.Contains("/api/v1/", StringComparison.OrdinalIgnoreCase))
+                diagnostics.Add($"response: {response.Status} {response.Url}");
+        };
+
+        var unique = Guid.NewGuid().ToString("N")[..10];
+        var fileName = $"codex-upload-probe-{unique}.stl";
+        var stlDirectory = Path.Combine(Path.GetTempPath(), $"maliev-project-new-stl-{unique}");
+        Directory.CreateDirectory(stlDirectory);
+        var stlPath = Path.Combine(stlDirectory, fileName);
+        await File.WriteAllTextAsync(
+            stlPath,
+            """
+            solid codex_probe
+              facet normal 0 0 -1
+                outer loop
+                  vertex 0 0 0
+                  vertex 10 10 0
+                  vertex 10 0 0
+                endloop
+              endfacet
+              facet normal 0 -1 0
+                outer loop
+                  vertex 0 0 0
+                  vertex 10 0 0
+                  vertex 0 0 10
+                endloop
+              endfacet
+              facet normal -1 0 0
+                outer loop
+                  vertex 0 0 0
+                  vertex 0 0 10
+                  vertex 0 10 0
+                endloop
+              endfacet
+              facet normal 1 1 1
+                outer loop
+                  vertex 10 0 0
+                  vertex 10 10 0
+                  vertex 0 0 10
+                endloop
+              endfacet
+              facet normal -1 1 1
+                outer loop
+                  vertex 0 10 0
+                  vertex 0 0 10
+                  vertex 10 10 0
+                endloop
+              endfacet
+              facet normal 0 1 0
+                outer loop
+                  vertex 0 10 0
+                  vertex 10 10 0
+                  vertex 0 0 10
+                endloop
+              endfacet
+            endsolid codex_probe
+            """,
+            Encoding.ASCII);
+
+        try
+        {
+            await SignInToIntranetAsync(page, intranetBase, "/sales/projects/new");
+            await Expect(page.Locator("body")).ToContainTextAsync("Drop CAD files to quote", new() { Timeout = 30_000 });
+
+            var fileInput = page.Locator("#project-new-file-upload input[type=file]");
+            Assert.Equal(1, await fileInput.CountAsync());
+            await fileInput.SetInputFilesAsync(stlPath);
+
+            var row = page.Locator(".plp-part").Filter(new() { HasText = fileName }).First;
+            await Expect(row).ToBeVisibleAsync(new() { Timeout = 30_000 });
+            try
+            {
+                await Expect(row.Locator("img.plp-thumb-img, img.thumbnail-img")).ToBeVisibleAsync(new() { Timeout = 90_000 });
+            }
+            catch (Exception ex) when (ex is TimeoutException or PlaywrightException)
+            {
+                var rowHtml = await row
+                    .EvaluateAsync<string>("element => element.outerHTML")
+                    .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+                var body = await page.Locator("body")
+                    .InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 })
+                    .ContinueWith(task => task.IsCompletedSuccessfully ? task.Result : string.Empty);
+                throw new InvalidOperationException(
+                    $"STL upload row rendered without a thumbnail image. Url: {page.Url}. Row: {rowHtml[..Math.Min(rowHtml.Length, 2_000)]}. Body: {body[..Math.Min(body.Length, 1_500)]}. Diagnostics: {string.Join(" || ", diagnostics)}",
+                    ex);
+            }
+
+            await Expect(row).ToContainTextAsync(new Regex(@"10\s*×\s*10\s*×\s*10\s*mm"), new() { Timeout = 90_000 });
+
+            var rowText = await row.InnerTextAsync(new LocatorInnerTextOptions { Timeout = 5_000 });
+            Assert.DoesNotContain("Upload failed", rowText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Awaiting process", rowText, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(stlDirectory, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// Verifies an employee project can move from uploaded/configured part through DFM acknowledgement,
     /// immutable quotation versions, quote PDF attachment, acceptance, and reorder duplication.
     /// Covers executable project quote lifecycle portions of INT-005, INT-006, INT-007, INT-016, INT-017,
