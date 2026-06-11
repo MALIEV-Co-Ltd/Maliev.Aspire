@@ -3622,15 +3622,16 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         await page.GotoAsync(new Uri(intranetBase, "/sales/projects/new").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
         await Expect(page.Locator("body")).ToContainTextAsync("Drop CAD files to quote", new() { Timeout = 30_000 });
-        await Expect(page.GetByText("Bill To", new() { Exact = true })).ToBeVisibleAsync();
-        await page.GetByRole(AriaRole.Button, new() { NameString = "Select customer..." }).ClickAsync();
-        var customerSearch = page.Locator(".customer-picker-search-input");
+        await Expect(page.Locator("body")).ToContainTextAsync("Bill To", new() { Timeout = 15_000 });
+        var billToPicker = page.Locator(".plp-customer-picker").First;
+        await billToPicker.Locator(".customer-picker-trigger").ClickAsync();
+        var customerSearch = billToPicker.Locator(".customer-picker-search-input");
         await customerSearch.FillAsync(customer.Email);
-        var customerOption = page.Locator(".customer-picker-option").Filter(new() { HasText = customer.FullName }).First;
+        var customerOption = billToPicker.Locator(".customer-picker-option").Filter(new() { HasText = customer.FullName }).First;
         await Expect(customerOption).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await customerOption.ClickAsync();
-        await Expect(page.Locator(".ccc-root")).ToContainTextAsync(customer.FullName, new() { Timeout = 15_000 });
-        await Expect(page.Locator("body")).ToContainTextAsync("Drop files here or click to upload", new() { Timeout = 15_000 });
+        await Expect(page.Locator(".plp-customer-card").First).ToContainTextAsync(customer.FullName, new() { Timeout = 15_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync("Upload 3D Models to Start", new() { Timeout = 15_000 });
         await Expect(page.Locator("body")).ToContainTextAsync("Quote Total", new() { Timeout = 15_000 });
     }
 
