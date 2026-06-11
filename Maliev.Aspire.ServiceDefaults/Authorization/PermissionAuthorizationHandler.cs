@@ -149,7 +149,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
 
         if (string.IsNullOrEmpty(principalId)) return false;
 
-        _logger.LogInformation("Checking permission {Permission} for Principal {PrincipalId} on Resource {ResourcePath}",
+        _logger.LogDebug("Checking permission {Permission} for Principal {PrincipalId} on Resource {ResourcePath}",
             permission, principalId, resourcePath);
 
         bool hasPermission = false;
@@ -196,7 +196,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             // used for authorization decisions. See Maliev.Intranet.Bff/UserContextHandler.cs.
             if (userPermissions.Contains("*"))
             {
-                _logger.LogInformation("JWT contains wildcard permission - granting access for {Permission}", permission);
+                _logger.LogDebug("JWT contains wildcard permission - granting access for {Permission}", permission);
                 return true;
             }
 

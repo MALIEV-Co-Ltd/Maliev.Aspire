@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
+using System.Collections.Concurrent;
 using System.Net.Http.Json;
 
 namespace Maliev.Aspire.ServiceDefaults.IAM;
@@ -7,10 +8,24 @@ namespace Maliev.Aspire.ServiceDefaults.IAM;
 /// <summary>
 /// Default implementation of IAM service client for permission checking and resolution.
 /// Supports both global and resource-scoped permission checks with automatic failover.
+/// Results are cached briefly per (principal, permission, resource) tuple — without it
+/// every HTTP request re-checks identical permissions and floods the IAM service with
+/// hundreds of duplicate check-permission calls per second.
 /// </summary>
 public partial class IamServiceClient : IIamServiceClient
 {
     private const string AspireTestAdminPrincipalId = "00000000-0000-0000-0000-000000000002";
+
+    // Allowed results are stable enough to reuse for a minute; denials expire fast so
+    // newly granted permissions propagate within seconds.
+    private static readonly TimeSpan AllowedCacheTtl = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan DeniedCacheTtl = TimeSpan.FromSeconds(5);
+    private const int CacheCleanupThreshold = 2048;
+
+    // Static: the client is registered scoped, so an instance cache would reset on
+    // every request. Keys embed the principal, so sharing across scopes is safe.
+    private static readonly ConcurrentDictionary<string, CachedPermissionResult> _permissionCache = new();
+    private static readonly ConcurrentDictionary<string, Lazy<Task<bool>>> _inFlightPermissionChecks = new();
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<IamServiceClient> _logger;
     private readonly IHostEnvironment _environment;
@@ -76,23 +91,56 @@ public partial class IamServiceClient : IIamServiceClient
             return true;
         }
 
+        var cacheKey = $"{principalId}|{permissionId}|{resourcePath ?? "global"}";
+        if (_permissionCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAtUtc > DateTime.UtcNow)
+        {
+            return cached.Allowed;
+        }
+
+        var lazyCheck = new Lazy<Task<bool>>(
+            () => FetchAndCachePermissionAsync(principalId, permissionId, resourcePath, cacheKey),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        var activeCheck = _inFlightPermissionChecks.GetOrAdd(cacheKey, lazyCheck);
+
+        try
+        {
+            // Callers can cancel their wait without canceling the shared upstream fetch.
+            return await activeCheck.Value.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            if (activeCheck.Value.IsCompleted)
+            {
+                _inFlightPermissionChecks.TryRemove(new KeyValuePair<string, Lazy<Task<bool>>>(cacheKey, activeCheck));
+            }
+        }
+    }
+
+    private async Task<bool> FetchAndCachePermissionAsync(
+        string principalId,
+        string permissionId,
+        string? resourcePath,
+        string cacheKey)
+    {
         try
         {
             var request = new CheckPermissionRequest(principalId, permissionId, resourcePath);
 
             var response = await GetHttpClient().PostAsJsonAsync(
                 "/iam/v1/auth/check-permission",
-                request,
-                cancellationToken);
+                request);
 
             if (!response.IsSuccessStatusCode)
             {
                 Log.FailedToCheckPermission(_logger, principalId, permissionId, resourcePath ?? "global", response.StatusCode);
+                // Transport/availability failures are NOT cached — the next call retries.
                 return false;
             }
 
-            var result = await response.Content.ReadFromJsonAsync<CheckPermissionResponse>(cancellationToken: cancellationToken);
-            return result?.Allowed ?? false;
+            var result = await response.Content.ReadFromJsonAsync<CheckPermissionResponse>();
+            var allowed = result?.Allowed ?? false;
+            CachePermissionResult(cacheKey, allowed);
+            return allowed;
         }
         catch (Exception ex)
         {
@@ -100,6 +148,26 @@ public partial class IamServiceClient : IIamServiceClient
             return false;
         }
     }
+
+    private void CachePermissionResult(string cacheKey, bool allowed)
+    {
+        if (_permissionCache.Count >= CacheCleanupThreshold)
+        {
+            var now = DateTime.UtcNow;
+            foreach (var entry in _permissionCache)
+            {
+                if (entry.Value.ExpiresAtUtc <= now)
+                {
+                    _permissionCache.TryRemove(entry.Key, out _);
+                }
+            }
+        }
+
+        var ttl = allowed ? AllowedCacheTtl : DeniedCacheTtl;
+        _permissionCache[cacheKey] = new CachedPermissionResult(allowed, DateTime.UtcNow.Add(ttl));
+    }
+
+    private readonly record struct CachedPermissionResult(bool Allowed, DateTime ExpiresAtUtc);
 
     /// <inheritdoc />
     public async Task<Dictionary<string, bool>> CheckPermissionsAsync(
