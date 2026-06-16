@@ -137,7 +137,7 @@ public static class CachingExtensions
         return builder;
     }
 
-        /// <summary>
+    /// <summary>
     /// Adds Redis distributed cache with connection string from configuration.
     /// Optimized for low-spec nodes with memory constraints.
     /// </summary>
