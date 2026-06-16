@@ -293,6 +293,32 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
+    /// ChatbotService must resolve the QuoteEngine BFF so the Quote Agent can execute
+    /// tool callbacks (/quote/v1/agent/tools/*); without this reference the named
+    /// "QuoteEngineBff" client falls back to the unresolvable literal service host.
+    /// </summary>
+    [Fact]
+    public void AppHost_ChatbotService_ReferencesQuoteEngineBff()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var chatbotBlockStart = appHostSource.IndexOf(
+            "var chatbotService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+        var projectBlockStart = appHostSource.IndexOf(
+            "var projectService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+
+        Assert.True(chatbotBlockStart >= 0, "ChatbotService resource declaration was not found.");
+        Assert.True(projectBlockStart > chatbotBlockStart, "ProjectService resource declaration was not found after ChatbotService.");
+
+        var chatbotBlock = appHostSource[chatbotBlockStart..projectBlockStart];
+        Assert.Contains(".WithReference(quoteEngineBff)", chatbotBlock, StringComparison.Ordinal);
+        // No WaitFor on the reverse edge: quoteEngineBff already references chatbotService,
+        // and a WaitFor here would create a startup-ordering cycle.
+        Assert.DoesNotContain(".WaitFor(quoteEngineBff)", chatbotBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// QuoteEngine BFF must receive GeometryService endpoint discovery for CAD analysis flows.
     /// </summary>
     [Fact]

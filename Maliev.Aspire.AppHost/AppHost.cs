@@ -897,6 +897,10 @@ static partial class Program
                 .WithReference(purchaseOrderService)
                 .WithReference(receiptService)
                 .WithReference(supplierService)
+                // QuoteEngine BFF discovery so ChatbotService can call back the Quote Agent
+                // tool endpoint (/quote/v1/agent/tools/*). No WaitFor: quoteEngineBff already
+                // references chatbotService, so a WaitFor here would create a startup cycle.
+                .WithReference(quoteEngineBff)
                 .WithTestingSafeHttpHealthCheck("/chatbot/aspire-liveness"),
             config,
             grafana,
