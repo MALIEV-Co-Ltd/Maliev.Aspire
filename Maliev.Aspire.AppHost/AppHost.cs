@@ -905,7 +905,8 @@ static partial class Program
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .WithEnvironment("Chatbot__AllowedThinkingCallbackOrigins__0", quoteEngineBff.GetEndpoint("https"));
 
         var projectService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_ProjectService_Api>("ProjectService")
@@ -1160,6 +1161,8 @@ static partial class Program
         intranetBff = WithSharedSecrets(intranetBff, config, grafana, otelCollector, environmentName);
         quoteEngineBff = WithSharedSecrets(quoteEngineBff, config, grafana, otelCollector, environmentName)
             .WithEnvironment("Web__BaseUrl", webBff.GetEndpoint("https"))
+            .WithEnvironment("QuoteAgent__EnableThinkingCallbacks", "true")
+            .WithEnvironment("QuoteAgent__ThinkingCallbackBaseUrl", quoteEngineBff.GetEndpoint("https"))
             .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey);
         webBff = WithSharedSecrets(webBff, config, grafana, otelCollector, environmentName)
             .WithEnvironment("QuoteEngine__BaseUrl", quoteEngineBff.GetEndpoint("https"))

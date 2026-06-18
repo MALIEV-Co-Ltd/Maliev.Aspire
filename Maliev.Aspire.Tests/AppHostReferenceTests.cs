@@ -319,6 +319,29 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
+    /// Aspire owns local Quote Agent thinking callback wiring because it knows both
+    /// the QuoteEngine public endpoint and ChatbotService callback allow-list.
+    /// </summary>
+    [Fact]
+    public void AppHost_QuoteAgentThinkingCallbacks_WiresLocalCallbackBaseAndAllowedOrigin()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+
+        Assert.Contains(
+            ".WithEnvironment(\"Chatbot__AllowedThinkingCallbackOrigins__0\", quoteEngineBff.GetEndpoint(\"https\"))",
+            appHostSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".WithEnvironment(\"QuoteAgent__EnableThinkingCallbacks\", \"true\")",
+            appHostSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".WithEnvironment(\"QuoteAgent__ThinkingCallbackBaseUrl\", quoteEngineBff.GetEndpoint(\"https\"))",
+            appHostSource,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// QuoteEngine BFF must receive GeometryService endpoint discovery for CAD analysis flows.
     /// </summary>
     [Fact]
