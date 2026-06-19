@@ -4,6 +4,22 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Employee Review Queue E2E Gate
+
+### Scope
+
+- Added a visible Intranet `Customer Review` project-list queue tab for ProjectService `CustomerReview` projects.
+- Added `QuoteEngine_MakeStudioReviewRequest_AppearsInIntranetCustomerReviewQueue` to prove a signed Make Studio customer can create a draft project, confirm the `quote_request_employee_review` agent action, and then an authenticated Intranet employee session can open the review queue.
+- The gate verifies the Intranet BFF project list returns the `CustomerReview` project and project detail restores the Make Studio review note.
+- This closes the remaining browser/API queue proof for `QUOTE-021`.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet build Maliev.Intranet.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: Intranet Client/BFF/tests compiled with 0 warnings and 0 errors after adding the `Customer Review` queue tab |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioReviewRequest_AppearsInIntranetCustomerReviewQueue" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused E2E test covering Make Studio review request, QuoteEngine confirmation artifact, Intranet `Customer Review` queue route, CustomerReview list membership, and durable review-note detail readback |
+
 ## 2026-06-20 Make Studio Employee Review Request Contract Gate
 
 ### Scope
@@ -765,7 +781,7 @@ Seven new browser-level E2E tests were added to `BrowserJourneyGateTests.cs`. Ea
 | `QUOTE-018` | Partial after automated run | Demo and signed prototype run show DFM warnings/info and `DFM reviewed`; signed run acknowledges DFM before quote. | Need real DFM warning fixture, hard-stop behavior before acknowledgement, and reanalysis after customer changes. |
 | `QUOTE-019` | Partial after automated run | Demo verifies economy/standard/express price modifiers and quantity changes; signed run verifies configured estimate before quote. | Need full lead-time matrix assertions on authenticated PricingService-backed quotes. |
 | `QUOTE-020` | Partial after automated run | Signed prototype run edits process/material/quantity before quote generation. | Need service-backed draft autosave, restore, multi-part editing, and save-conflict handling. |
-| `QUOTE-021` | Partial after 2026-06-20 contract gate | Make Studio can request employee review through a confirmation-required QuoteEngine agent tool; ChatbotService exposes/forwards the tool, and ProjectService persists `CustomerReview` status plus a review note visible through project detail/list data. | Need explicit Intranet employee queue/list browser proof for the `CustomerReview` work queue. |
+| `QUOTE-021` | Passed after 2026-06-20 queue gate | Make Studio can request employee review through a confirmation-required QuoteEngine agent tool; ChatbotService exposes/forwards the tool, ProjectService persists `CustomerReview` status plus a review note, and Intranet exposes the `Customer Review` queue with authenticated list/detail readback. | No immediate fix. |
 | `QUOTE-022` | Partial after automated run | Signed prototype run generates a formal quote and creates an order from that quote. | Need explicit quote terms/PO acceptance UI, version-specific accepted quotation, and immutable accepted snapshot. |
 | `QUOTE-023` | Blocked | Artifact downloads still require generated service-backed quote/order/manufacturing records. | Need authenticated PDF/artifact download endpoints and ownership checks. |
 | `QUOTE-024` | Passed after fix | Anonymous demo loaded sample file, DFM, pricing, and disabled formal artifacts. | Fixed QuoteEngine static web asset hosting. |

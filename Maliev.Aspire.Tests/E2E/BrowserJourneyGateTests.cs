@@ -2464,6 +2464,211 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies a Make Studio customer can ask for employee review and the request appears in the
+    /// Intranet CustomerReview project queue with the durable review note restored on project detail.
+    /// Covers the service-backed QUOTE-021 customer-to-employee review handoff.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "QUOTE-021")]
+    public async Task QuoteEngine_MakeStudioReviewRequest_AppearsInIntranetCustomerReviewQueue()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var reviewNote = $"Please review the corrected Make Studio wall-thickness risk {unique}.";
+
+        await SignInToQuoteEngineAsync(page, quoteBase, $"make.studio.review.{unique}@example.com", "/projects/new");
+        await WaitForQuoteEngineReadyAsync(page);
+
+        using var profileDocument = JsonDocument.Parse(await page.EvaluateAsync<string>(
+            @"async () => {
+                const response = await fetch('/quote/v1/account/profile', { credentials: 'include' });
+                return JSON.stringify({ status: response.status, profile: await response.json() });
+            }"));
+        var profileRoot = profileDocument.RootElement;
+        Assert.Equal(200, GetJsonInt(profileRoot, "status"));
+        Assert.True(TryGetJsonProperty(profileRoot, out var profile, "profile"));
+        var customerId = GetJsonGuid(profile, "customerId", "CustomerId");
+        Assert.NotEqual(Guid.Empty, customerId);
+
+        var sessionId = Guid.NewGuid();
+        var chatbotSessionId = Guid.NewGuid();
+        var agentContextToken = CreateQuoteAgentContextToken(sessionId, chatbotSessionId, customerId);
+        var uploadId = $"review-upload-{unique}";
+        var fileName = $"review-bracket-{unique}.step";
+        var partId = Guid.Empty;
+        var projectServiceProjectId = Guid.Empty;
+        var projectNumber = string.Empty;
+
+        using (var uploadDocument = await InvokeQuoteAgentToolAsync(
+            page,
+            agentContextToken,
+            "quote_register_uploads",
+            new
+            {
+                requirements = "Corrected Make Studio part ready for employee manufacturability review.",
+                files = new[]
+                {
+                    new
+                    {
+                        file_name = fileName,
+                        content_type = "model/step",
+                        file_size_bytes = 210_000,
+                        kind = "cad",
+                        upload_id = uploadId,
+                        storage_path = $"quotes/temp/{unique}/review.step"
+                    }
+                }
+            }))
+        {
+            var root = uploadDocument.RootElement;
+            Assert.Equal(200, GetJsonInt(root, "status"));
+            Assert.True(TryGetJsonProperty(root, out var body, "body"));
+            var part = Assert.Single(body.GetProperty("parts").EnumerateArray());
+            partId = GetJsonGuid(part, "partId", "PartId");
+            Assert.NotEqual(Guid.Empty, partId);
+        }
+
+        using (var configurationDocument = await InvokeQuoteAgentToolAsync(
+            page,
+            agentContextToken,
+            "quote_update_part_configuration",
+            new
+            {
+                part_id = partId,
+                process = "fdm",
+                material = "pla",
+                quantity = 6,
+                lead_time = "STANDARD"
+            }))
+        {
+            Assert.Equal(200, GetJsonInt(configurationDocument.RootElement, "status"));
+        }
+
+        using (var estimateDocument = await InvokeQuoteAgentToolAsync(page, agentContextToken, "quote_calculate_estimate", new { }))
+        {
+            Assert.Equal(200, GetJsonInt(estimateDocument.RootElement, "status"));
+        }
+
+        var draftActionId = await PrepareActionAsync(
+            page,
+            agentContextToken,
+            "quote_prepare_draft_project",
+            new
+            {
+                title = $"Make Studio Review {unique}",
+                requirements = "Route this Make Studio project to employee review before formal quote."
+            },
+            "draft_project");
+        using (var draftResult = await ConfirmAgentActionAsync(page, draftActionId))
+        {
+            var state = GetConfirmedState(draftResult.RootElement);
+            var draftProjectArtifact = state.GetProperty("artifacts").EnumerateArray().First(artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "draft_project" &&
+                TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
+                Guid.TryParse(GetJsonString(metadata, "projectServiceProjectId", "ProjectServiceProjectId"), out _));
+            Assert.True(TryGetJsonProperty(draftProjectArtifact, out var draftMetadata, "metadata", "Metadata"));
+            projectServiceProjectId = Guid.Parse(GetJsonString(draftMetadata, "projectServiceProjectId", "ProjectServiceProjectId"));
+            projectNumber = FirstNonEmpty(
+                GetJsonString(draftMetadata, "projectNumber", "ProjectNumber"),
+                GetJsonString(draftMetadata, "projectServiceProjectNumber", "ProjectServiceProjectNumber")) ?? string.Empty;
+        }
+
+        var reviewActionId = await PrepareActionAsync(
+            page,
+            agentContextToken,
+            "quote_request_employee_review",
+            new
+            {
+                project_id = projectServiceProjectId,
+                note = reviewNote
+            },
+            "request_employee_review");
+        using (var reviewResult = await ConfirmAgentActionAsync(page, reviewActionId))
+        {
+            var state = GetConfirmedState(reviewResult.RootElement);
+            var reviewArtifact = state.GetProperty("artifacts").EnumerateArray().First(artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "project_review_request" &&
+                GetJsonString(artifact, "status", "Status") == "customer_review" &&
+                TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
+                string.Equals(GetJsonString(metadata, "status", "Status"), "CustomerReview", StringComparison.OrdinalIgnoreCase));
+            var reviewMetadata = reviewArtifact.GetProperty("metadata");
+            Assert.Equal(projectServiceProjectId, GetJsonGuid(reviewMetadata, "projectId", "ProjectId"));
+            Assert.Contains(reviewNote, GetJsonString(reviewMetadata, "note", "Note"), StringComparison.Ordinal);
+            projectNumber = FirstNonEmpty(projectNumber, GetJsonString(reviewMetadata, "projectNumber", "ProjectNumber")) ?? string.Empty;
+        }
+
+        await using var intranetContext = await NewContextAsync();
+        var intranetPage = await intranetContext.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        await SignInToIntranetAsync(
+            intranetPage,
+            intranetBase,
+            "/sales/projects?status=CustomerReview");
+
+        await Expect(intranetPage.Locator(".mlv-module-shell")).ToContainTextAsync("Customer Review", new() { Timeout = 30_000 });
+
+        var intranetReviewState = await intranetPage.EvaluateAsync<string>(
+            @"async args => {
+                const listResponse = await fetch('/api/v1/projects?status=CustomerReview&page=1&pageSize=100', { credentials: 'include' });
+                const listText = await listResponse.text();
+                const detailResponse = await fetch(`/api/v1/projects/${args.projectId}`, { credentials: 'include' });
+                const detailText = await detailResponse.text();
+                let queueMatch = false;
+                let detailStatus = '';
+                let noteMatch = false;
+
+                try {
+                    const list = JSON.parse(listText);
+                    const items = list.data ?? list.Data ?? [];
+                    queueMatch = items.some(project =>
+                        String(project.id ?? project.Id).toLowerCase() === String(args.projectId).toLowerCase() &&
+                        String(project.status ?? project.Status).toLowerCase() === 'customerreview');
+                } catch {
+                    queueMatch = false;
+                }
+
+                try {
+                    const detail = JSON.parse(detailText);
+                    detailStatus = String(detail.status ?? detail.Status ?? '');
+                    const notes = detail.notes ?? detail.Notes ?? [];
+                    noteMatch = notes.some(note => String(note.content ?? note.Content ?? '').includes(args.reviewNote));
+                } catch {
+                    noteMatch = false;
+                }
+
+                return JSON.stringify({
+                    listStatus: listResponse.status,
+                    detailResponseStatus: detailResponse.status,
+                    queueMatch,
+                    detailStatus,
+                    noteMatch,
+                    listText,
+                    detailText
+                });
+            }",
+            new
+            {
+                projectId = projectServiceProjectId.ToString("D"),
+                projectNumber,
+                reviewNote
+            });
+        using var intranetReviewDocument = JsonDocument.Parse(intranetReviewState);
+        var intranetReviewRoot = intranetReviewDocument.RootElement;
+        Assert.Equal(200, GetJsonInt(intranetReviewRoot, "listStatus"));
+        Assert.Equal(200, GetJsonInt(intranetReviewRoot, "detailResponseStatus"));
+        Assert.True(
+            GetJsonBool(intranetReviewRoot, "queueMatch"),
+            $"Intranet CustomerReview queue did not include project {projectServiceProjectId:D}: {TruncateForAssertion(intranetReviewState)}");
+        Assert.Equal("CustomerReview", GetJsonString(intranetReviewRoot, "detailStatus"));
+        Assert.True(
+            GetJsonBool(intranetReviewRoot, "noteMatch"),
+            $"Intranet project detail did not restore the Make Studio review note: {TruncateForAssertion(intranetReviewState)}");
+    }
+
+    /// <summary>
     /// Verifies the prototype-backed signed customer path can upload, estimate, create a quote, create an order,
     /// and expose the resulting history through account APIs. This is intentionally partial until QuoteEngine is
     /// service-backed by ProjectService, UploadService, GeometryService, PricingService, QuotationService, and OrderService.
