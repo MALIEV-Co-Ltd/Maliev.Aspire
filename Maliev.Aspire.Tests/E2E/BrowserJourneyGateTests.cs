@@ -1706,6 +1706,12 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Equal("Paid", GetJsonString(summary, "currentOrderStatus", "CurrentOrderStatus"));
         Assert.Equal("Paid", GetJsonString(summary, "currentPaymentStatus", "CurrentPaymentStatus"));
 
+        await GotoAppAsync(page, new Uri(quoteBase, $"/orders/{Uri.EscapeDataString(orderNumber)}").ToString());
+        await WaitForQuoteEngineReadyAsync(page);
+        await Expect(page.Locator(".order-detail-header h1")).ToContainTextAsync(orderNumber, new() { Timeout = 30_000 });
+        await Expect(page.Locator("[data-order-section='payment']")).ToContainTextAsync("Paid", new() { Timeout = 30_000 });
+        await Expect(page.Locator("[data-order-section='manufacturing-progress']")).ToContainTextAsync("Paid", new() { Timeout = 30_000 });
+
         await using var intranetContext = await NewContextAsync();
         var intranetPage = await intranetContext.NewPageAsync();
         var intranetBase = GetEndpoint("IntranetBff");
