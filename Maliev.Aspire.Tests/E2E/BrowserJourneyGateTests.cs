@@ -1599,6 +1599,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             "start_payment");
         var transactionId = Guid.Empty;
         var orderNumber = string.Empty;
+        var invoiceId = Guid.Empty;
+        var invoiceNumber = string.Empty;
         using (var paymentResult = await ConfirmAgentActionAsync(page, paymentActionId))
         {
             var state = GetConfirmedState(paymentResult.RootElement);
@@ -1619,10 +1621,21 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             var paymentMetadata = paymentArtifact.GetProperty("metadata");
             transactionId = Guid.Parse(GetJsonString(paymentMetadata, "transactionId", "TransactionId"));
             orderNumber = GetJsonString(paymentMetadata, "orderNumber", "OrderNumber");
+
+            var orderArtifact = state.GetProperty("artifacts").EnumerateArray().First(artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "order" &&
+                TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
+                Guid.TryParse(GetJsonString(metadata, "invoiceId", "InvoiceId"), out _) &&
+                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "invoiceNumber", "InvoiceNumber")));
+            var orderMetadata = orderArtifact.GetProperty("metadata");
+            invoiceId = Guid.Parse(GetJsonString(orderMetadata, "invoiceId", "InvoiceId"));
+            invoiceNumber = GetJsonString(orderMetadata, "invoiceNumber", "InvoiceNumber");
         }
 
         Assert.NotEqual(Guid.Empty, transactionId);
         Assert.False(string.IsNullOrWhiteSpace(orderNumber));
+        Assert.NotEqual(Guid.Empty, invoiceId);
+        Assert.False(string.IsNullOrWhiteSpace(invoiceNumber));
         Assert.NotEqual(Guid.Empty, projectServiceProjectId);
         Assert.NotEqual(Guid.Empty, orderId);
 
@@ -1632,6 +1645,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         using var notificationClient = _fixture.CreateAuthenticatedClient("NotificationService");
         using var jobReadinessClient = _fixture.CreateAuthenticatedClient("JobService");
         using var accountingClient = _fixture.CreateAuthenticatedClient("AccountingService");
+        using var receiptClient = _fixture.CreateAuthenticatedClient("ReceiptService");
         _ = await TestHelpers.WaitForAsync(
             async () =>
             {
@@ -1683,6 +1697,47 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.True(
                 string.Equals("completed", paymentStatus, StringComparison.OrdinalIgnoreCase),
                 $"Expected PaymentService transaction {transactionId:D} to be completed after webhook, but status was {paymentStatus}: {paymentStatusBody}");
+        }
+
+        string receiptObservation = string.Empty;
+        try
+        {
+            _ = await TestHelpers.WaitForAsync(
+                async () =>
+                {
+                    using var response = await receiptClient.GetAsync($"/receipt/v1/receipts?invoiceId={invoiceId:D}&pageSize=20");
+                    return $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}";
+                },
+                result =>
+                {
+                    receiptObservation = result;
+                    if (!result.StartsWith("200 ", StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+
+                    using var document = JsonDocument.Parse(result[4..]);
+                    IEnumerable<JsonElement> items = TryGetJsonProperty(document.RootElement, out var data, "data", "Data")
+                        ? data.EnumerateArray()
+                        : document.RootElement.ValueKind == JsonValueKind.Array
+                            ? document.RootElement.EnumerateArray()
+                            : [];
+                    return items.Any(receipt =>
+                        string.Equals(GetJsonString(receipt, "invoiceId", "InvoiceId"), invoiceId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(GetJsonString(receipt, "externalPaymentId", "ExternalPaymentId"), transactionId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                        (string.Equals(GetJsonString(receipt, "status", "Status"), "PendingPdf", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(GetJsonString(receipt, "status", "Status"), "Active", StringComparison.OrdinalIgnoreCase)) &&
+                        GetJsonDouble(receipt, "totalAmount", "TotalAmount", "amount", "Amount") > 0);
+                },
+                timeout: TimeSpan.FromSeconds(120),
+                interval: TimeSpan.FromSeconds(2),
+                message: $"ReceiptService did not create a receipt for Make Studio invoice {invoiceNumber} ({invoiceId:D}) and payment {transactionId:D}.");
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException(
+                $"ReceiptService did not create a receipt for Make Studio invoice {invoiceNumber} ({invoiceId:D}) and payment {transactionId:D}. Last observation: {TruncateForAssertion(receiptObservation)}",
+                ex);
         }
 
         string accountingObservation = string.Empty;

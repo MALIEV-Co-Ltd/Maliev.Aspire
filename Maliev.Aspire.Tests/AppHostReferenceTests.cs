@@ -275,6 +275,7 @@ public sealed class AppHostReferenceTests
             "pricingService",
             "projectService",
             "quotationService",
+            "invoiceService",
             "pdfService",
             "orderService",
             "paymentService",

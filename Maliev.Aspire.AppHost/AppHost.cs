@@ -1131,6 +1131,7 @@ static partial class Program
             .WithReference(pricingService)
             .WithReference(projectService)
             .WithReference(quotationService)
+            .WithReference(invoiceService)
             .WithReference(pdfService)
             .WithReference(orderService)
             .WithReference(paymentService)

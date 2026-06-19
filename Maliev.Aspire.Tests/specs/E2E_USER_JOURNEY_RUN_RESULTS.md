@@ -4,6 +4,24 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-19 Make Studio Payment Receipt E2E Gate
+
+### Scope
+
+- Extended `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` to prove the signed Make Studio checkout path prepares a CustomerService company billing identity, creates/finalizes an InvoiceService invoice whose `poNumber` is the OrderService order number, completes the PaymentService webhook, lets InvoiceService allocate the payment by order number, and verifies ReceiptService creates the customer receipt with the PaymentService transaction id.
+- The gate exposed and fixed two production-readiness defects: QuoteEngine did not create the invoice required by the existing InvoiceService -> ReceiptService receipt contract, and ReceiptService did not expose `externalPaymentId` on receipt API responses even though it persisted the field.
+- QuoteEngine now preserves invoice metadata in the Make Studio workbench artifact context, and the AppHost now wires QuoteEngine to InvoiceService for deployment service discovery.
+- Remaining Make Studio deployment gaps: proof-of-delivery evidence artifact upload/download and generated formal quote/order/manufacturing PDF ownership checks remain separate gates.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~InvoiceServiceClientContractTests|FullyQualifiedName~Agent_message_forwards_payment_metadata_to_chatbot_service_after_payment_handoff" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 2 tests covering InvoiceService create/finalize route shape, order `poNumber`, invoice metadata in agent artifact context, and payment handoff context |
+| `dotnet test Maliev.ReceiptService.Tests\Maliev.ReceiptService.Tests.csproj --filter "FullyQualifiedName~PostReceipts_WithValidFullPayment_Returns201WithValidSchema" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 contract test covering receipt response `externalPaymentId` serialization |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~AppHost_QuoteEngineBff_ReferencesProductionQuoteJourneyServices" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 AppHost reference test covering QuoteEngine -> InvoiceService service discovery |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 browser E2E test covering Make Studio invoice creation, payment webhook completion, InvoiceService allocation, and ReceiptService receipt creation |
+
 ## 2026-06-19 QuoteEngine Customer Document Ownership E2E Gate
 
 ### Scope
@@ -29,7 +47,7 @@
 - Extended `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` to cover the paid Make Studio order through Intranet delivery-note creation, `InTransit` and `Delivered` status transitions, OrderService delivery snapshot persistence, QuoteEngine agent project-summary delivery milestone completion, and the customer order-detail delivery card.
 - The gate exposed and fixed a production-readiness defect: DeliveryService created and delivered notes but did not synchronize customer-visible delivery dates/contact fields back to OrderService, and its OrderService HTTP client used a non-Aspire service-discovery target.
 - DeliveryService now uses the shared authenticated `"OrderService"` service client and syncs promised/actual delivery dates plus contact fields using the current OrderService concurrency version.
-- Remaining Make Studio deployment gaps: receipt/accounting side effects, proof-of-delivery evidence artifact upload/download, and generated formal quote/order/manufacturing PDF ownership checks remain separate gates.
+- Remaining Make Studio deployment gaps: proof-of-delivery evidence artifact upload/download and generated formal quote/order/manufacturing PDF ownership checks remain separate gates.
 
 ### Commands And Results
 
