@@ -1687,6 +1687,50 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Equal(orderNumber, GetJsonString(summary, "currentOrderNumber", "CurrentOrderNumber"));
         Assert.Equal("Paid", GetJsonString(summary, "currentOrderStatus", "CurrentOrderStatus"));
         Assert.Equal("Paid", GetJsonString(summary, "currentPaymentStatus", "CurrentPaymentStatus"));
+
+        await using var intranetContext = await NewContextAsync();
+        var intranetPage = await intranetContext.NewPageAsync();
+        var intranetBase = GetEndpoint("IntranetBff");
+        await SignInToIntranetAsync(intranetPage, intranetBase, "/");
+
+        string intranetObservation = string.Empty;
+        try
+        {
+            _ = await TestHelpers.WaitForAsync(
+                async () =>
+                {
+                    return await intranetPage.EvaluateAsync<string>(
+                        @"async path => {
+                            const r = await fetch(path, { credentials: 'include' });
+                            return `${r.status} ${await r.text()}`;
+                        }",
+                        $"/api/v1/orders?page=1&pageSize=100&search={Uri.EscapeDataString(orderNumber)}");
+                },
+                result =>
+                {
+                    intranetObservation = result;
+                    if (!result.StartsWith("200 ", StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+
+                    using var document = JsonDocument.Parse(result[4..]);
+                    var root = document.RootElement;
+                    return root.TryGetProperty("data", out var data) &&
+                           data.EnumerateArray().Any(order =>
+                               string.Equals(GetJsonString(order, "orderNumber", "OrderNumber"), orderNumber, StringComparison.OrdinalIgnoreCase) &&
+                               string.Equals(GetJsonString(order, "status", "Status"), "Paid", StringComparison.OrdinalIgnoreCase));
+                },
+                timeout: TimeSpan.FromSeconds(30),
+                interval: TimeSpan.FromSeconds(2),
+                message: $"Intranet order list did not expose paid Make Studio order {orderNumber}.");
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException(
+                $"{ex.Message} Last Intranet observation: {TruncateForAssertion(intranetObservation)}",
+                ex);
+        }
     }
 
     /// <summary>
@@ -7795,6 +7839,16 @@ END-ISO-10303-21;`;
         }
 
         Assert.Fail($"Expected {path} to contain {expectedText} before timeout. Last result: {lastResult[..Math.Min(lastResult.Length, 2_000)]}");
+    }
+
+    private static string TruncateForAssertion(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value[..Math.Min(value.Length, 2_000)];
     }
 
     private static async Task SelectCustomerInPickerAsync(IPage page, string query, string expectedName)
