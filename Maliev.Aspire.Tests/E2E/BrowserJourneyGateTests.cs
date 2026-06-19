@@ -1380,7 +1380,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     [Fact]
     [Trait("Tier", "E2E")]
     [Trait("Stories", "QUOTE-001,QUOTE-004,QUOTE-006,QUOTE-007,QUOTE-018,QUOTE-025")]
-    public async Task QuoteEngine_MakeStudioAgentTools_CorrectsDfmAndStartsPayment()
+    public async Task QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob()
     {
         await using var context = await NewContextAsync();
         var page = await context.NewPageAsync();
