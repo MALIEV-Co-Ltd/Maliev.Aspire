@@ -9,9 +9,9 @@
 ### Scope
 
 - Extended `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` to prove OrderService can upload Make Studio manufacturing packet files through UploadService's authenticated internal artifact endpoint.
-- The gate verifies UploadService seeds an OrderService policy for `orders/` artifacts, OrderService attaches a manufacturing packet to the paid order, QuoteEngine exposes the order file only in the owning customer's order detail, returns a mock-storage signed URL, downloads the expected packet bytes, and denies direct cross-customer file download.
+- The gate verifies UploadService seeds an OrderService policy for `orders/` artifacts, OrderService attaches order-confirmation and manufacturing-packet PDFs to the paid order, QuoteEngine exposes the order files only in the owning customer's order detail, returns mock-storage signed URLs, downloads the expected artifact bytes, and denies direct cross-customer file download.
 - The gate exposed and fixed a production-readiness defect: OrderService used UploadService's old resumable-upload session shape and a plain unauthenticated service client, which failed in Aspire/Testing and could not satisfy UploadService's service authorization boundary.
-- Remaining `QUOTE-023` deployment gap: generated order PDF ownership still needs a service-backed artifact fixture and ownership check.
+- This closes the current service-backed `QUOTE-023` artifact ownership surface for customer documents, generated formal quotes, order-confirmation PDFs, and manufacturing-packet PDFs.
 
 ### Commands And Results
 
@@ -19,7 +19,7 @@
 |---------|--------|
 | `dotnet test Maliev.UploadService.Tests\Maliev.UploadService.Tests.csproj --filter "FullyQualifiedName~SeedSamplePoliciesAsync_WebAndQuotePoliciesAllowFbxUploads|FullyQualifiedName~SeedSamplePoliciesAsync_AddsOrderPolicyWhenOlderSamplePoliciesExist" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 2 tests covering seeded OrderService `orders/` upload authorization and backfilling the policy into databases that already have older sample policies |
 | `dotnet test Maliev.OrderService.Tests\Maliev.OrderService.Tests.csproj --filter "FullyQualifiedName~UploadServiceClientUploadFileAsyncSuccessReturnsResult" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 test covering the UploadService `/upload/v1/uploads/artifacts` JSON contract, storage path, content type, and Base64 artifact payload |
-| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 browser E2E test covering authenticated OrderService manufacturing packet upload, QuoteEngine owner order-file detail/download, mock-storage signed packet retrieval, and cross-customer denial |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 browser E2E test covering authenticated OrderService order-confirmation and manufacturing-packet uploads, QuoteEngine owner order-file detail/download, mock-storage signed artifact retrieval, and cross-customer denial |
 
 ## 2026-06-20 Make Studio Delivery Proof Evidence E2E Gate
 
@@ -28,7 +28,7 @@
 - Extended `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` to prove the paid Make Studio production handoff uploads proof-of-delivery evidence to the Intranet BFF/DeliveryService delivery-note files endpoint.
 - The gate verifies the proof upload returns a `Signature` file, marks the delivery `Delivered` with that proof file id as `signatureFileId`, reads the delivery detail back with the linked signature id, lists the delivery files, and confirms the proof record has a storage URL.
 - The gate also keeps the existing customer-facing QuoteEngine checks for delivered order milestone and order-detail delivery status.
-- Remaining `QUOTE-023` deployment gap: generated order PDF ownership still needs a service-backed artifact fixture and ownership check.
+- Later focused gates now cover generated order-confirmation and manufacturing-packet PDF owner-only downloads.
 
 ### Commands And Results
 
@@ -42,7 +42,7 @@
 
 - Extended `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` to prove the signed Make Studio formal quote path receives a real QuotationService/PdfService/UploadService-backed PDF artifact, carries its `pdfs/quotation/` storage path plus signed PDF URL in the QuoteAgent workbench artifact, and lets only the owning customer session download it.
 - The gate exposed and fixed a production-readiness defect: QuoteEngine artifact download signing checked only that a path belonged to the agent session, so another signed customer who knew the session id and storage path could request a signed URL for a customer-owned formal quote artifact.
-- Remaining `QUOTE-023` deployment gap: generated order PDF ownership still needs a service-backed artifact fixture and ownership check.
+- Later focused gates now cover generated order-confirmation and manufacturing-packet PDF owner-only downloads.
 
 ### Commands And Results
 

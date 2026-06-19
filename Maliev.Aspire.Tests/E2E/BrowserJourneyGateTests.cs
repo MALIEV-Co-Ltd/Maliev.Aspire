@@ -1877,6 +1877,24 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         var manufacturingPacketName = $"make-studio-manufacturing-packet-{unique}.pdf";
         var manufacturingPacketBytes = Encoding.UTF8.GetBytes($"%PDF-1.4\nMake Studio manufacturing packet {orderNumber}\n%%EOF");
+        var orderConfirmationName = $"make-studio-order-confirmation-{unique}.pdf";
+        var orderConfirmationBytes = Encoding.UTF8.GetBytes($"%PDF-1.4\nMake Studio order confirmation {orderNumber}\n%%EOF");
+        using (var orderConfirmationContent = new MultipartFormDataContent())
+        {
+            var fileContent = new ByteArrayContent(orderConfirmationBytes);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+            orderConfirmationContent.Add(fileContent, "file", orderConfirmationName);
+            orderConfirmationContent.Add(new StringContent("Output"), "FileRole");
+            orderConfirmationContent.Add(new StringContent("Document"), "FileCategory");
+
+            using var orderConfirmationResponse = await orderClient.PostAsync(
+                $"/order/v1/orders/{Uri.EscapeDataString(orderNumber)}/files",
+                orderConfirmationContent);
+            var orderConfirmationBody = await orderConfirmationResponse.Content.ReadAsStringAsync();
+            Assert.True(orderConfirmationResponse.StatusCode == HttpStatusCode.Created,
+                $"OrderService order confirmation upload failed: {(int)orderConfirmationResponse.StatusCode} {orderConfirmationBody}");
+        }
+
         using (var packetContent = new MultipartFormDataContent())
         {
             var fileContent = new ByteArrayContent(manufacturingPacketBytes);
@@ -1907,6 +1925,9 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 const packet = Array.isArray(files)
                     ? files.find(file => (file.fileName ?? file.FileName) === args.packetName)
                     : null;
+                const orderDocument = Array.isArray(files)
+                    ? files.find(file => (file.fileName ?? file.FileName) === args.orderDocumentName)
+                    : null;
                 let downloadStatus = 0;
                 let downloadText = '';
                 if (packet) {
@@ -1924,6 +1945,12 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     packetFileCategory: packet?.fileCategory ?? packet?.FileCategory ?? '',
                     packetObjectPath: packet?.objectPath ?? packet?.ObjectPath ?? '',
                     packetContentType: packet?.contentType ?? packet?.ContentType ?? '',
+                    orderDocumentFileId: orderDocument?.fileId ?? orderDocument?.FileId ?? 0,
+                    orderDocumentFileName: orderDocument?.fileName ?? orderDocument?.FileName ?? '',
+                    orderDocumentFileRole: orderDocument?.fileRole ?? orderDocument?.FileRole ?? '',
+                    orderDocumentFileCategory: orderDocument?.fileCategory ?? orderDocument?.FileCategory ?? '',
+                    orderDocumentObjectPath: orderDocument?.objectPath ?? orderDocument?.ObjectPath ?? '',
+                    orderDocumentContentType: orderDocument?.contentType ?? orderDocument?.ContentType ?? '',
                     downloadStatus,
                     downloadText
                 });
@@ -1931,11 +1958,20 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             new
             {
                 url = ownerOrderArtifactUrl,
-                packetName = manufacturingPacketName
+                packetName = manufacturingPacketName,
+                orderDocumentName = orderConfirmationName
             });
         using var ownerOrderArtifactDocument = JsonDocument.Parse(ownerOrderArtifactState);
         var ownerOrderArtifactRoot = ownerOrderArtifactDocument.RootElement;
         Assert.Equal(200, GetJsonInt(ownerOrderArtifactRoot, "detailStatus"));
+        var orderConfirmationFileId = GetJsonInt(ownerOrderArtifactRoot, "orderDocumentFileId");
+        Assert.True(orderConfirmationFileId > 0, $"QuoteEngine order detail did not expose the order confirmation artifact: {ownerOrderArtifactState}");
+        Assert.Equal(orderConfirmationName, GetJsonString(ownerOrderArtifactRoot, "orderDocumentFileName"));
+        Assert.Equal("Output", GetJsonString(ownerOrderArtifactRoot, "orderDocumentFileRole"));
+        Assert.Equal("Document", GetJsonString(ownerOrderArtifactRoot, "orderDocumentFileCategory"));
+        var orderConfirmationObjectPath = GetJsonString(ownerOrderArtifactRoot, "orderDocumentObjectPath");
+        Assert.Equal($"orders/{orderNumber}/files/{orderConfirmationName}", orderConfirmationObjectPath);
+        Assert.Equal("application/octet-stream", GetJsonString(ownerOrderArtifactRoot, "orderDocumentContentType"));
         var manufacturingPacketFileId = GetJsonInt(ownerOrderArtifactRoot, "packetFileId");
         Assert.True(manufacturingPacketFileId > 0, $"QuoteEngine order detail did not expose the manufacturing packet: {ownerOrderArtifactState}");
         Assert.Equal(manufacturingPacketName, GetJsonString(ownerOrderArtifactRoot, "packetFileName"));
@@ -1967,6 +2003,38 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.Contains($"Make Studio manufacturing packet {orderNumber}", GetJsonString(manufacturingPacketDownloadRoot, "body"), StringComparison.Ordinal);
         }
 
+        var orderConfirmationDownloadUrl = new Uri(
+            quoteBase,
+            $"/quote/v1/account/orders/{Uri.EscapeDataString(orderNumber)}/files/{orderConfirmationFileId}/download").ToString();
+        var orderConfirmationDownloadState = await page.EvaluateAsync<string>(
+            @"async url => {
+                const downloadResponse = await fetch(url, { credentials: 'include' });
+                const downloadText = await downloadResponse.text();
+                if (downloadResponse.status !== 200) {
+                    return JSON.stringify({ downloadStatus: downloadResponse.status, signedStatus: 0, signedBody: downloadText });
+                }
+
+                const download = JSON.parse(downloadText);
+                const signedResponse = await fetch(download.downloadUrl ?? download.DownloadUrl);
+                return JSON.stringify({
+                    downloadStatus: downloadResponse.status,
+                    signedStatus: signedResponse.status,
+                    signedBody: await signedResponse.text(),
+                    fileId: download.fileId ?? download.FileId ?? 0,
+                    fileName: download.fileName ?? download.FileName ?? ''
+                });
+            }",
+            orderConfirmationDownloadUrl);
+        using (var orderConfirmationDownloadDocument = JsonDocument.Parse(orderConfirmationDownloadState))
+        {
+            var orderConfirmationDownloadRoot = orderConfirmationDownloadDocument.RootElement;
+            Assert.Equal(200, GetJsonInt(orderConfirmationDownloadRoot, "downloadStatus"));
+            Assert.Equal(200, GetJsonInt(orderConfirmationDownloadRoot, "signedStatus"));
+            Assert.Equal(orderConfirmationFileId, GetJsonInt(orderConfirmationDownloadRoot, "fileId"));
+            Assert.Equal(orderConfirmationName, GetJsonString(orderConfirmationDownloadRoot, "fileName"));
+            Assert.Contains($"Make Studio order confirmation {orderNumber}", GetJsonString(orderConfirmationDownloadRoot, "signedBody"), StringComparison.Ordinal);
+        }
+
         await using (var otherOrderArtifactContext = await NewContextAsync())
         {
             var otherOrderArtifactPage = await otherOrderArtifactContext.NewPageAsync();
@@ -1982,6 +2050,16 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 }",
                 otherDownloadUrl);
             Assert.Equal(404, otherDownloadStatus);
+            var otherOrderConfirmationDownloadUrl = new Uri(
+                quoteBase,
+                $"/quote/v1/account/orders/{Uri.EscapeDataString(orderNumber)}/files/{orderConfirmationFileId}/download").ToString();
+            var otherOrderConfirmationDownloadStatus = await otherOrderArtifactPage.EvaluateAsync<int>(
+                @"async url => {
+                    const response = await fetch(url, { credentials: 'include' });
+                    return response.status;
+                }",
+                otherOrderConfirmationDownloadUrl);
+            Assert.Equal(404, otherOrderConfirmationDownloadStatus);
         }
 
         using var summaryDocument = await InvokeQuoteAgentToolAsync(
