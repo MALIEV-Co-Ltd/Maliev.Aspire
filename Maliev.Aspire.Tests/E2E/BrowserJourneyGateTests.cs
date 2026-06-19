@@ -1373,6 +1373,85 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies an anonymous Make Studio chat survives the real email sign-up redirect and restores
+    /// the active chat messages after the customer lands back in QuoteEngine.
+    /// Covers the browser-level login restoration portion of WEB-014, QUOTE-001, QUOTE-005, and QUOTE-015.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "WEB-014,QUOTE-001,QUOTE-005,QUOTE-015")]
+    public async Task QuoteEngine_MakeStudioAgent_LoginRedirectRestoresActiveChat()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var customerEmail = $"make.studio.login.restore.{unique}@example.com";
+        var customerMessage = $"Keep this active Make Studio chat through login {unique}.";
+
+        await GotoAppAsync(page, new Uri(quoteBase, "/quote/new").ToString());
+        await WaitForQuoteEngineReadyAsync(page);
+
+        var agentStateJson = await page.EvaluateAsync<string>(
+            @"async message => {
+                const send = await fetch('/quote/v1/agent/messages', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ message, language: 'en' })
+                });
+                const sendText = await send.text();
+                let turn = {};
+                try {
+                    turn = sendText ? JSON.parse(sendText) : {};
+                } catch {
+                    turn = { parseError: sendText };
+                }
+
+                const sessionId = turn.sessionId || turn.SessionId;
+                if (sessionId) {
+                    window.malievChatbot.writeSharedSession(
+                        'maliev.quote.makeStudio.session.v1',
+                        sessionId,
+                        null,
+                        'en',
+                        false);
+                }
+
+                return JSON.stringify({
+                    sendStatus: send.status,
+                    sessionId,
+                    assistantText: turn.assistantText || turn.AssistantText || ''
+                });
+            }",
+            customerMessage);
+
+        using (var agentDocument = JsonDocument.Parse(agentStateJson))
+        {
+            var root = agentDocument.RootElement;
+            Assert.Equal(200, GetJsonInt(root, "sendStatus"));
+            Assert.False(string.IsNullOrWhiteSpace(GetJsonString(root, "sessionId")));
+            Assert.False(string.IsNullOrWhiteSpace(GetJsonString(root, "assistantText")));
+        }
+
+        await page.GotoAsync(
+            new Uri(quoteBase, $"/auth/sign-up?returnUrl={Uri.EscapeDataString("/quote/new")}").ToString(),
+            new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
+        var signUpForm = await RevealEmailCredentialFormAsync(
+            page,
+            "form.auth-form[action='/auth/sign-up/email'], form[data-auth-form='sign-up']",
+            customerEmail);
+        await SubmitEmailSignUpFormAsync(signUpForm, "Quote", "Customer", customerEmail, "PrototypeOnly123!");
+        await WaitForQuoteEngineReturnUrlAsync(page, "/quote/new");
+        await WaitForQuoteEngineReadyAsync(page);
+
+        var restoredThread = page.Locator(".qe-agent-thread").First;
+        await Expect(restoredThread).ToContainTextAsync(customerMessage, new() { Timeout = 30_000 });
+        await Expect(page.Locator(".qe-agent-message--assistant .qe-agent-markdown").First)
+            .ToBeVisibleAsync(new() { Timeout = 30_000 });
+    }
+
+    /// <summary>
     /// Verifies the trusted Make Studio agent tool workflow can replace a DFM-blocked upload with a corrected
     /// multi-part revision, create durable project/quote/order artifacts, capture checkout details, complete
     /// payment, hand off to production, and surface customer-visible delivery completion.
