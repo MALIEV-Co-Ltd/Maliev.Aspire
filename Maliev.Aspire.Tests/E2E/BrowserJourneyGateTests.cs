@@ -4534,6 +4534,29 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.True(inTransitResponse.Ok, $"Delivery in-transit update failed with HTTP {inTransitResponse.Status}: {await ReadResponseTextOrEmptyAsync(inTransitResponse)}");
         await Expect(page.Locator("body")).ToContainTextAsync("In Transit", new() { Timeout = 30_000 });
 
+        var proofPath = Path.Combine(Path.GetTempPath(), $"make-studio-delivery-proof-{unique}.png");
+        await File.WriteAllBytesAsync(
+            proofPath,
+            Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+P+/HgAFhAJ/wVq4rQAAAABJRU5ErkJggg=="));
+
+        var proofResponseTask = page.WaitForResponseAsync(response =>
+            response.Url.Contains($"/api/v1/deliverynotes/{deliveryNoteId}/files", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(response.Request.Method, "POST", StringComparison.OrdinalIgnoreCase),
+            new PageWaitForResponseOptions { Timeout = 60_000 });
+
+        await page.Locator("input[type=file]").SetInputFilesAsync(proofPath);
+        var proofResponse = await proofResponseTask;
+        var proofBody = await ReadResponseTextOrEmptyAsync(proofResponse);
+        Assert.True(proofResponse.Ok, $"Proof-of-delivery upload failed with HTTP {proofResponse.Status}: {proofBody}");
+        using var proofDocument = JsonDocument.Parse(proofBody);
+        var proofFileId = GetJsonGuid(proofDocument.RootElement, "fileId", "FileId");
+        Assert.NotEqual(Guid.Empty, proofFileId);
+        Assert.Equal("Signature", GetJsonString(proofDocument.RootElement, "fileType", "FileType"));
+        Assert.Contains("make-studio-delivery-proof", GetJsonString(proofDocument.RootElement, "originalFileName", "OriginalFileName"), StringComparison.OrdinalIgnoreCase);
+
+        await Expect(page.Locator("body")).ToContainTextAsync("Proof of delivery uploaded.", new() { Timeout = 30_000 });
+        await Expect(page.Locator("body")).ToContainTextAsync(proofFileId.ToString("D"), new() { Timeout = 30_000 });
+
         await page.GetByLabel("Received by").FillAsync(receiverName);
         await page.GetByLabel("Actual delivery time").FillAsync(DateTime.Now.ToString("yyyy-MM-ddTHH:mm"));
 
@@ -4574,10 +4597,26 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.Equal("Delivered", GetJsonString(detail, "status", "Status"));
             Assert.Equal(receiverName, GetJsonString(detail, "receivedByName", "ReceivedByName"));
             Assert.Equal(trackingNumber, GetJsonString(detail, "trackingNumber", "TrackingNumber"));
+            Assert.Equal(proofFileId, GetJsonGuid(detail, "signatureFileId", "SignatureFileId"));
             Assert.True(TryGetJsonProperty(detail, out var items, "items", "Items"));
             Assert.Contains(items.EnumerateArray(), item =>
                 string.Equals(productCode, GetJsonString(item, "productCode", "ProductCode"), StringComparison.Ordinal) &&
                 Math.Abs(GetJsonDouble(item, "quantityDelivered", "QuantityDelivered") - 2) < 0.01);
+        }
+
+        var filesResult = await page.EvaluateAsync<string>(
+            @"async id => {
+                const r = await fetch(`/api/v1/deliverynotes/${id}/files`, { credentials: 'include' });
+                return `${r.status} ${await r.text()}`;
+            }",
+            deliveryNoteId);
+        Assert.StartsWith("200 ", filesResult, StringComparison.Ordinal);
+        using (var filesDocument = JsonDocument.Parse(filesResult[4..]))
+        {
+            Assert.Contains(filesDocument.RootElement.EnumerateArray(), file =>
+                GetJsonGuid(file, "fileId", "FileId") == proofFileId &&
+                string.Equals("Signature", GetJsonString(file, "fileType", "FileType"), StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(GetJsonString(file, "storageUrl", "StorageUrl")));
         }
 
         await page.GotoAsync(new Uri(intranetBase, "/finance/delivery-notes").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
