@@ -1641,11 +1641,12 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 GetJsonString(gate, "status", "Status") == "passed");
         }
 
+        var customerPoNumber = $"PO-{unique}";
         var orderActionId = await PrepareActionAsync(
             page,
             agentContextToken,
             "quote_create_order",
-            new { customer_po_number = $"PO-{unique}", requirements = "Create the manufacturing order for Make Studio E2E." },
+            new { customer_po_number = customerPoNumber, requirements = "Create the manufacturing order for Make Studio E2E." },
             "create_order");
         using (var orderResult = await ConfirmAgentActionAsync(page, orderActionId))
         {
@@ -1905,11 +1906,12 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     using var document = JsonDocument.Parse(result.Content);
                     var root = document.RootElement;
                     return string.Equals(GetJsonString(root, "currentStatus", "CurrentStatus"), "Paid", StringComparison.OrdinalIgnoreCase) &&
-                           string.Equals(GetJsonString(root, "paymentStatus", "PaymentStatus"), "Paid", StringComparison.OrdinalIgnoreCase);
+                           string.Equals(GetJsonString(root, "paymentStatus", "PaymentStatus"), "Paid", StringComparison.OrdinalIgnoreCase) &&
+                           string.Equals(GetJsonString(root, "customerPoNumber", "CustomerPoNumber"), customerPoNumber, StringComparison.Ordinal);
                 },
                 timeout: TimeSpan.FromSeconds(120),
                 interval: TimeSpan.FromSeconds(2),
-                message: $"Order {orderNumber} did not reach Paid after payment completion webhook.");
+                message: $"Order {orderNumber} did not reach Paid with customer PO {customerPoNumber} after payment completion webhook.");
         }
         catch (TimeoutException ex)
         {
@@ -1986,6 +1988,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
                 return JSON.stringify({
                     detailStatus: detailResponse.status,
+                    orderNumber: detail?.orderNumber ?? detail?.OrderNumber ?? '',
+                    customerPoNumber: detail?.customerPoNumber ?? detail?.CustomerPoNumber ?? '',
+                    currentStatus: detail?.currentStatus ?? detail?.CurrentStatus ?? '',
+                    paymentStatus: detail?.paymentStatus ?? detail?.PaymentStatus ?? '',
                     packetFileId: packet?.fileId ?? packet?.FileId ?? 0,
                     packetFileName: packet?.fileName ?? packet?.FileName ?? '',
                     packetFileRole: packet?.fileRole ?? packet?.FileRole ?? '',
@@ -2011,6 +2017,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         using var ownerOrderArtifactDocument = JsonDocument.Parse(ownerOrderArtifactState);
         var ownerOrderArtifactRoot = ownerOrderArtifactDocument.RootElement;
         Assert.Equal(200, GetJsonInt(ownerOrderArtifactRoot, "detailStatus"));
+        Assert.Equal(orderNumber, GetJsonString(ownerOrderArtifactRoot, "orderNumber"));
+        Assert.Equal(customerPoNumber, GetJsonString(ownerOrderArtifactRoot, "customerPoNumber"));
+        Assert.Equal("Paid", GetJsonString(ownerOrderArtifactRoot, "currentStatus"));
+        Assert.Equal("Paid", GetJsonString(ownerOrderArtifactRoot, "paymentStatus"));
         var orderConfirmationFileId = GetJsonInt(ownerOrderArtifactRoot, "orderDocumentFileId");
         Assert.True(orderConfirmationFileId > 0, $"QuoteEngine order detail did not expose the order confirmation artifact: {ownerOrderArtifactState}");
         Assert.Equal(orderConfirmationName, GetJsonString(ownerOrderArtifactRoot, "orderDocumentFileName"));
