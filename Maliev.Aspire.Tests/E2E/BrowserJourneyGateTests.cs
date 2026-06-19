@@ -1729,6 +1729,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Equal(orderNumber, GetJsonString(summary, "currentOrderNumber", "CurrentOrderNumber"));
         Assert.Equal("Paid", GetJsonString(summary, "currentOrderStatus", "CurrentOrderStatus"));
         Assert.Equal("Paid", GetJsonString(summary, "currentPaymentStatus", "CurrentPaymentStatus"));
+        Assert.Equal($"/orders/{Uri.EscapeDataString(orderNumber)}", GetJsonString(summary, "currentOrderUrl", "CurrentOrderUrl"));
+        Assert.Equal("Manufacturing", GetJsonString(summary, "currentOrderMilestoneLabel", "CurrentOrderMilestoneLabel"));
+        Assert.Equal("current", GetJsonString(summary, "currentOrderMilestoneState", "CurrentOrderMilestoneState"));
+        Assert.Equal(55, GetJsonInt(summary, "currentOrderMilestonePercent", "CurrentOrderMilestonePercent"));
+        Assert.Contains(
+            "queued",
+            GetJsonString(summary, "currentOrderMilestoneDescription", "CurrentOrderMilestoneDescription"),
+            StringComparison.OrdinalIgnoreCase);
 
         await GotoAppAsync(page, new Uri(quoteBase, $"/orders/{Uri.EscapeDataString(orderNumber)}").ToString());
         await WaitForQuoteEngineReadyAsync(page);
