@@ -4,6 +4,20 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Login Restore E2E Gate
+
+### Scope
+
+- Added `QuoteEngine_MakeStudioAgent_LoginRedirectRestoresActiveChat` to prove an anonymous Make Studio chat can start before authentication, persist the active shared QuoteEngine agent session in browser storage, complete the real email sign-up redirect, and land back on `/quote/new`.
+- The gate verifies the original customer message and the ChatbotService-backed assistant message are restored in the Make Studio thread after the authenticated return.
+- This adds browser-level proof for the original Make Studio requirement that login redirects preserve the active chat with chat messages properly restored.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgent_LoginRedirectRestoresActiveChat" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused E2E test covering anonymous active chat creation, shared session persistence, real email sign-up return to QuoteEngine, and restored customer/assistant messages in Make Studio |
+
 ## 2026-06-20 Make Studio Employee Review Queue E2E Gate
 
 ### Scope
