@@ -8,7 +8,7 @@ namespace Maliev.Aspire.Tests;
 public sealed class AppHostReferenceTests
 {
     /// <summary>
-    /// QuotationService must be able to resolve CustomerService during project quote creation.
+    /// QuotationService must be able to resolve customer data and PDF generation during formal quote creation.
     /// </summary>
     [Fact]
     public void AppHost_QuotationService_ReferencesCustomerService()
@@ -17,15 +17,18 @@ public sealed class AppHostReferenceTests
         var quotationBlockStart = appHostSource.IndexOf(
             "var quotationService = WithSharedSecrets(",
             StringComparison.Ordinal);
-        var invoiceBlockStart = appHostSource.IndexOf(
-            "var invoiceService = WithSharedSecrets(",
+        var pdfReferenceStart = appHostSource.IndexOf(
+            "quotationService = quotationService",
             StringComparison.Ordinal);
 
         Assert.True(quotationBlockStart >= 0, "QuotationService resource declaration was not found.");
-        Assert.True(invoiceBlockStart > quotationBlockStart, "InvoiceService resource declaration was not found after QuotationService.");
+        Assert.True(pdfReferenceStart > quotationBlockStart, "QuotationService PdfService reference block was not found after QuotationService.");
 
-        var quotationBlock = appHostSource[quotationBlockStart..invoiceBlockStart];
+        var quotationBlock = appHostSource[quotationBlockStart..pdfReferenceStart];
         Assert.Contains(".WithReference(customerService)", quotationBlock, StringComparison.Ordinal);
+        var pdfReferenceBlock = appHostSource[pdfReferenceStart..];
+        Assert.Contains(".WithReference(pdfService)", pdfReferenceBlock, StringComparison.Ordinal);
+        Assert.Contains(".WaitFor(pdfService)", pdfReferenceBlock, StringComparison.Ordinal);
     }
 
     /// <summary>

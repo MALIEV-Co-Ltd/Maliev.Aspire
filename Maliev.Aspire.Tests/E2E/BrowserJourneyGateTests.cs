@@ -1520,6 +1520,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             projectServiceProjectId = Guid.Parse(GetJsonString(draftMetadata, "projectServiceProjectId", "ProjectServiceProjectId"));
         }
 
+        var formalQuoteStoragePath = string.Empty;
+        var formalQuotePdfUrl = string.Empty;
         var formalQuoteActionId = await PrepareActionAsync(
             page,
             agentContextToken,
@@ -1532,6 +1534,54 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.Contains(state.GetProperty("artifacts").EnumerateArray(), artifact =>
                 GetJsonString(artifact, "artifactType", "ArtifactType") == "formal_quote" &&
                 !string.IsNullOrWhiteSpace(GetJsonString(artifact, "title", "Title")));
+            var formalQuoteArtifact = state.GetProperty("artifacts").EnumerateArray().First(artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "formal_quote" &&
+                TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
+                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "storagePath", "StoragePath")) &&
+                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "pdfUrl", "PdfUrl")));
+            Assert.True(TryGetJsonProperty(formalQuoteArtifact, out var formalQuoteMetadata, "metadata", "Metadata"));
+            formalQuoteStoragePath = GetJsonString(formalQuoteMetadata, "storagePath", "StoragePath");
+            formalQuotePdfUrl = GetJsonString(formalQuoteMetadata, "pdfUrl", "PdfUrl");
+            Assert.StartsWith("pdfs/quotation/", formalQuoteStoragePath, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("/upload/v1/mock-storage/", formalQuotePdfUrl, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var ownerFormalQuoteDownloadUrl = new Uri(
+            quoteBase,
+            $"/quote/v1/agent/sessions/{sessionId:D}/artifacts/download?path={Uri.EscapeDataString(formalQuoteStoragePath)}").ToString();
+        var ownerFormalQuoteDownload = await page.EvaluateAsync<string>(
+            @"async url => {
+                const response = await fetch(url, {
+                    credentials: 'include',
+                    redirect: 'manual'
+                });
+                return JSON.stringify({
+                    status: response.status,
+                    type: response.type,
+                    redirected: response.redirected,
+                    url: response.url
+                });
+            }",
+            ownerFormalQuoteDownloadUrl);
+        using var ownerFormalQuoteDownloadDocument = JsonDocument.Parse(ownerFormalQuoteDownload);
+        var ownerFormalQuoteDownloadRoot = ownerFormalQuoteDownloadDocument.RootElement;
+        Assert.True(
+            GetJsonInt(ownerFormalQuoteDownloadRoot, "status") == 0 &&
+            string.Equals(GetJsonString(ownerFormalQuoteDownloadRoot, "type"), "opaqueredirect", StringComparison.OrdinalIgnoreCase),
+            $"Owner formal quote artifact download should issue a signed redirect but returned: {ownerFormalQuoteDownload}");
+
+        await using (var otherContext = await NewContextAsync())
+        {
+            var otherPage = await otherContext.NewPageAsync();
+            await SignInToQuoteEngineAsync(otherPage, quoteBase, $"make.studio.tools.other.{unique}@example.com", "/projects/new");
+            await WaitForQuoteEngineReadyAsync(otherPage);
+            var otherFormalQuoteDownloadResponse = await otherPage.GotoAsync(
+                ownerFormalQuoteDownloadUrl,
+                new PageGotoOptions { WaitUntil = WaitUntilState.Load });
+            Assert.NotNull(otherFormalQuoteDownloadResponse);
+            Assert.True(
+                otherFormalQuoteDownloadResponse.Status == 400,
+                $"Cross-customer formal quote artifact download should be 400 but was {otherFormalQuoteDownloadResponse.Status}: {otherFormalQuoteDownloadResponse.Url}");
         }
 
         var approvalActionId = await PrepareActionAsync(

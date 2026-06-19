@@ -803,6 +803,10 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        quotationService = quotationService
+            .WithReference(pdfService)
+            .WaitFor(pdfService);
+
         var purchaseOrderService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PurchaseOrderService_Api>("PurchaseOrderService")
                 .WithReference(databases.PurchaseOrder, "PurchaseOrderDbContext")

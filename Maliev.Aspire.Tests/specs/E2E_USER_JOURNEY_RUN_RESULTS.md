@@ -4,6 +4,22 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-19 Make Studio Formal Quote Artifact Ownership E2E Gate
+
+### Scope
+
+- Extended `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` to prove the signed Make Studio formal quote path receives a real QuotationService/PdfService/UploadService-backed PDF artifact, carries its `pdfs/quotation/` storage path plus signed PDF URL in the QuoteAgent workbench artifact, and lets only the owning customer session download it.
+- The gate exposed and fixed a production-readiness defect: QuoteEngine artifact download signing checked only that a path belonged to the agent session, so another signed customer who knew the session id and storage path could request a signed URL for a customer-owned formal quote artifact.
+- Remaining `QUOTE-023` deployment gaps: generated order and manufacturing PDF artifacts still need service-backed fixtures and customer ownership checks.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Agent_formal_quote_artifact_download" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 2 tests covering registered formal quote PDF path download and cross-customer denial for a customer-owned agent session |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~AppHost_QuotationService_ReferencesCustomerService" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 AppHost reference test covering QuotationService references to CustomerService and PdfService |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 browser E2E test covering real QuotationService/PdfService/UploadService formal quote PDF generation, QuoteAgent workbench metadata, owner signed redirect, cross-customer denial, and the existing payment/production/delivery Make Studio flow |
+
 ## 2026-06-19 Make Studio Payment Receipt E2E Gate
 
 ### Scope
