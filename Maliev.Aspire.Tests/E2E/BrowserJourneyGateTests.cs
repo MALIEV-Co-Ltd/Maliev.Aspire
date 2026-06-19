@@ -1352,6 +1352,24 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Contains(messages.EnumerateArray(), message =>
             string.Equals("assistant", GetJsonString(message, "role", "Role"), StringComparison.OrdinalIgnoreCase) &&
             !string.IsNullOrWhiteSpace(GetJsonString(message, "content", "Content")));
+
+        await page.EvaluateAsync(
+            @"sessionId => {
+                window.malievChatbot.writeSharedSession(
+                    'maliev.quote.makeStudio.session.v1',
+                    sessionId,
+                    null,
+                    'en',
+                    true);
+            }",
+            sessionId);
+        await GotoAppAsync(page, new Uri(quoteBase, "/quote/new").ToString());
+        await WaitForQuoteEngineReadyAsync(page);
+
+        var restoredThread = page.Locator(".qe-agent-thread").First;
+        await Expect(restoredThread).ToContainTextAsync(customerMessage, new() { Timeout = 30_000 });
+        await Expect(page.Locator(".qe-agent-message--assistant .qe-agent-markdown").First)
+            .ToBeVisibleAsync(new() { Timeout = 30_000 });
     }
 
     /// <summary>
