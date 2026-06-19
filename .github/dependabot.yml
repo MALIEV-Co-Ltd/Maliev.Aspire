@@ -6,6 +6,11 @@ updates:
       interval: "weekly"
 
   - package-ecosystem: "nuget"
-    directory: "/"
+    directories:
+      - "/"
+      - "/Maliev.Aspire.AppHost"
+      - "/Maliev.Aspire.DatabaseSeeder"
+      - "/Maliev.Aspire.ServiceDefaults"
+      - "/Maliev.Aspire.Tests"
     schedule:
       interval: "weekly"
