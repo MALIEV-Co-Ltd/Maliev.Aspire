@@ -1265,6 +1265,94 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies Make Studio can start a signed customer agent conversation through QuoteEngine BFF,
+    /// persist it in ChatbotService, and restore the same session state and chat messages.
+    /// Covers the signed customer assistant portions of WEB-014, QUOTE-001, QUOTE-005, QUOTE-015, and QUOTE-025.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "WEB-014,QUOTE-001,QUOTE-005,QUOTE-015,QUOTE-025")]
+    public async Task QuoteEngine_MakeStudioAgent_RestoresSignedCustomerConversation()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var customerEmail = $"make.studio.agent.{unique}@example.com";
+        var customerMessage = $"Please help me quote a CNC aluminum bracket for Make Studio E2E {unique}.";
+
+        await SignInToQuoteEngineAsync(page, quoteBase, customerEmail, "/projects/new");
+        await WaitForQuoteEngineReadyAsync(page);
+        await Expect(page.GetByRole(AriaRole.Textbox, new()
+        {
+            NameRegex = new Regex("Message MALIEV Quote Agent", RegexOptions.IgnoreCase)
+        })).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var agentStateJson = await page.EvaluateAsync<string>(
+            @"async message => {
+                const send = await fetch('/quote/v1/agent/messages', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ message, language: 'en' })
+                });
+                const sendText = await send.text();
+                let turn = {};
+                try {
+                    turn = sendText ? JSON.parse(sendText) : {};
+                } catch {
+                    turn = { parseError: sendText };
+                }
+
+                const sessionId = turn.sessionId || turn.SessionId;
+                let stateStatus = 0;
+                let historyStatus = 0;
+                let state = {};
+                let history = {};
+                if (sessionId) {
+                    const stateResponse = await fetch(`/quote/v1/agent/sessions/${sessionId}`, { credentials: 'include' });
+                    stateStatus = stateResponse.status;
+                    state = await stateResponse.json();
+                    const historyResponse = await fetch(`/quote/v1/agent/sessions/${sessionId}/messages`, { credentials: 'include' });
+                    historyStatus = historyResponse.status;
+                    history = await historyResponse.json();
+                }
+
+                return JSON.stringify({
+                    sendStatus: send.status,
+                    turn,
+                    stateStatus,
+                    state,
+                    historyStatus,
+                    history
+                });
+            }",
+            customerMessage);
+
+        using var document = JsonDocument.Parse(agentStateJson);
+        var root = document.RootElement;
+        Assert.Equal(200, GetJsonInt(root, "sendStatus"));
+        Assert.True(TryGetJsonProperty(root, out var turn, "turn"));
+        var sessionId = GetJsonString(turn, "sessionId", "SessionId");
+        Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        Assert.False(string.IsNullOrWhiteSpace(GetJsonString(turn, "assistantText", "AssistantText")));
+        Assert.Equal(200, GetJsonInt(root, "stateStatus"));
+        Assert.True(TryGetJsonProperty(root, out var state, "state"));
+        Assert.True(GetJsonBool(state, "isAuthenticated", "IsAuthenticated"));
+        Assert.Equal(sessionId, GetJsonString(state, "sessionId", "SessionId"));
+        Assert.Equal(200, GetJsonInt(root, "historyStatus"));
+        Assert.True(TryGetJsonProperty(root, out var history, "history"));
+        Assert.Equal(sessionId, GetJsonString(history, "sessionId", "SessionId"));
+        Assert.True(TryGetJsonProperty(history, out var messages, "messages", "Messages"));
+        Assert.Contains(messages.EnumerateArray(), message =>
+            string.Equals("user", GetJsonString(message, "role", "Role"), StringComparison.OrdinalIgnoreCase) &&
+            GetJsonString(message, "content", "Content").Contains(unique, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(messages.EnumerateArray(), message =>
+            string.Equals("assistant", GetJsonString(message, "role", "Role"), StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(GetJsonString(message, "content", "Content")));
+    }
+
+    /// <summary>
     /// Verifies the prototype-backed signed customer path can upload, estimate, create a quote, create an order,
     /// and expose the resulting history through account APIs. This is intentionally partial until QuoteEngine is
     /// service-backed by ProjectService, UploadService, GeometryService, PricingService, QuotationService, and OrderService.

@@ -4,6 +4,26 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-19 Make Studio Agent Conversation Restore E2E Gate
+
+### Scope
+
+- Added `QuoteEngine_MakeStudioAgent_RestoresSignedCustomerConversation` to cover the signed Make Studio agent path that was missing from the browser E2E catalog.
+- The test signs a customer into the Aspire-hosted QuoteEngine BFF, opens `/projects/new`, waits for the Make Studio browser app, sends a message through `/quote/v1/agent/messages`, and verifies `/quote/v1/agent/sessions/{sessionId}` plus `/quote/v1/agent/sessions/{sessionId}/messages` restore the same authenticated session and ChatbotService-backed user/assistant transcript.
+- While validating the catalog, fixed a pre-existing overview gap for the already-present `Intranet_ProjectNew_StlUploadProcessesThroughHiddenInput` method so the executable browser method list and specification table are aligned.
+- This closes the immediate executable coverage gap for Make Studio conversation persistence/restoration. It does not yet cover the full DFM -> corrected reupload -> final quote/order/payment -> Intranet handoff path.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgent_RestoresSignedCustomerConversation" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test covering signed Make Studio UI startup, QuoteEngine BFF agent message send, authenticated state restore, and ChatbotService-backed message history restore |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~E2EStoryCatalogTraceabilityTests" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 2 traceability tests covering story IDs and executable browser method/spec alignment |
+
+### Follow-Up
+
+- Add a second Make Studio E2E gate for uploaded CAD/DFM artifacts, corrected reupload supersession, action confirmation, payment return, and ProjectService/Intranet handoff once the flow can be kept deterministic in Aspire.
+
 ## 2026-06-05 Geometry Runtime Regression E2E Gate
 
 ### Scope
