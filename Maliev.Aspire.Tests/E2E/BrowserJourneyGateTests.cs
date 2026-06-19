@@ -4476,7 +4476,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await page.GetByLabel("Source order ID").FillAsync(sourceOrderId);
         await page.GetByLabel("Customer ID").FillAsync(customer.CustomerId.ToString());
         await page.GetByLabel("Customer name").FillAsync(customer.CompanyName);
-        await page.GetByLabel("Carrier").FillAsync("Flash Express");
+        await page.GetByLabel("Carrier").SelectOptionAsync("");
         await page.GetByLabel("Tracking number").FillAsync(trackingNumber);
         await page.GetByLabel("Shipping cost").FillAsync("180.50");
         await page.GetByLabel("Shipping currency").SelectOptionAsync("THB");
