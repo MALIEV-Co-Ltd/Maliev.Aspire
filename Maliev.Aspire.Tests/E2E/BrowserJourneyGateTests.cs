@@ -1712,6 +1712,31 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await Expect(page.Locator("[data-order-section='payment']")).ToContainTextAsync("Paid", new() { Timeout = 30_000 });
         await Expect(page.Locator("[data-order-section='manufacturing-progress']")).ToContainTextAsync("Paid", new() { Timeout = 30_000 });
 
+        await page.EvaluateAsync(
+            @"sessionId => {
+                window.malievChatbot.writeSharedSession(
+                    'maliev.quote.makeStudio.session.v1',
+                    sessionId,
+                    null,
+                    'en',
+                    true);
+            }",
+            sessionId.ToString("D"));
+        await GotoAppAsync(page, new Uri(quoteBase, "/quote/new").ToString());
+        await WaitForQuoteEngineReadyAsync(page);
+        await WaitForBlazorAsync(page);
+        var artifactToggle = page.Locator(".qe-agent-artifact-toggle").First;
+        await Expect(artifactToggle).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(artifactToggle.Locator("b")).Not.ToHaveTextAsync("0", new() { Timeout = 30_000 });
+        if (!string.Equals(await artifactToggle.GetAttributeAsync("aria-expanded"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            await page.EvaluateAsync("() => document.querySelector('.qe-agent-artifact-toggle')?.click()");
+        }
+        await Expect(artifactToggle).ToHaveAttributeAsync("aria-expanded", "true", new() { Timeout = 30_000 });
+        await Expect(page.Locator(".qe-agent-artifact-drawer")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator(".qe-agent-artifact-drawer")).ToContainTextAsync("Payment confirmed", new() { Timeout = 30_000 });
+        await Expect(page.Locator(".qe-agent-artifact-drawer")).ToContainTextAsync(orderNumber, new() { Timeout = 30_000 });
+
         await using var intranetContext = await NewContextAsync();
         var intranetPage = await intranetContext.NewPageAsync();
         var intranetBase = GetEndpoint("IntranetBff");
