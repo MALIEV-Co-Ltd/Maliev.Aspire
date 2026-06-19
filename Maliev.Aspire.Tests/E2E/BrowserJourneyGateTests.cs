@@ -1374,12 +1374,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies the trusted Make Studio agent tool workflow can replace a DFM-blocked upload with a corrected
-    /// revision, create durable project/quote/order artifacts, capture checkout details, and initiate payment.
-    /// Covers the service-backed agent-tool portions of QUOTE-001, QUOTE-004, QUOTE-006, QUOTE-007, QUOTE-018, and QUOTE-025.
+    /// revision, create durable project/quote/order artifacts, capture checkout details, complete payment,
+    /// hand off to production, and surface customer-visible delivery completion.
+    /// Covers the service-backed agent-tool portions of QUOTE-001, QUOTE-004, QUOTE-006, QUOTE-007, QUOTE-018,
+    /// QUOTE-025, and INT-009.
     /// </summary>
     [Fact]
     [Trait("Tier", "E2E")]
-    [Trait("Stories", "QUOTE-001,QUOTE-004,QUOTE-006,QUOTE-007,QUOTE-018,QUOTE-025")]
+    [Trait("Stories", "QUOTE-001,QUOTE-004,QUOTE-006,QUOTE-007,QUOTE-018,QUOTE-025,INT-009")]
     public async Task QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob()
     {
         await using var context = await NewContextAsync();
@@ -1876,6 +1878,146 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 $"{ex.Message} Last Intranet project observation: {TruncateForAssertion(projectObservation)} Last Intranet jobs observation: {TruncateForAssertion(jobsObservation)} Direct OrderService items: {TruncateForAssertion(directOrderItemsObservation)} Direct JobService jobs: {TruncateForAssertion(directJobsObservation)}",
                 ex);
         }
+
+        var deliveryTrackingNumber = $"MS-E2E-{unique.ToUpperInvariant()}";
+        var deliveryReceiver = $"Make Studio Receiver {unique}";
+        var deliveryState = await intranetPage.EvaluateAsync<string>(
+            @"async args => {
+                const read = async r => `${r.status} ${await r.text()}`;
+                const create = await fetch('/api/v1/deliverynotes', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                        orderId: args.orderNumber,
+                        customerId: args.customerId,
+                        customerName: 'Make Studio E2E Buyer',
+                        deliveryDate: args.deliveryDate,
+                        trackingNumber: args.trackingNumber,
+                        carrierName: 'MALIEV Logistics',
+                        deliveryContactName: args.receiver,
+                        deliveryContactPhone: '+66810000003',
+                        deliveryContactEmail: 'receiving@example.test',
+                        shippingAddressLine1: '88 Rama IX Road',
+                        shippingAddressLine2: 'Make Studio receiving dock',
+                        shippingCity: 'Bangkok',
+                        shippingProvince: 'Bangkok',
+                        shippingPostalCode: '10310',
+                        shippingCountry: 'TH',
+                        shippingCost: 180.50,
+                        shippingCostCurrency: 'THB',
+                        deliveryInstructions: 'Capture receiver name and mark delivered.',
+                        items: [{
+                            orderId: args.orderNumber,
+                            productCode: `MS-${args.unique}`,
+                            productName: 'Make Studio corrected bracket',
+                            productDescription: 'Corrected DFM Make Studio production part',
+                            quantityOrdered: 12,
+                            quantityManufactured: 12,
+                            quantityDelivered: 12,
+                            unitOfMeasure: 'pcs',
+                            itemNotes: 'Delivered after paid Make Studio E2E production handoff.'
+                        }]
+                    })
+                });
+                const createText = await read(create);
+                if (!create.ok) return JSON.stringify({ create: createText });
+                const created = JSON.parse(createText.substring(4));
+                const id = created.deliveryNoteId ?? created.DeliveryNoteId ?? created.id ?? created.Id;
+                const inTransit = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/status`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ newStatus: 'InTransit' })
+                });
+                const inTransitText = await read(inTransit);
+                const delivered = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/status`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                        newStatus: 'Delivered',
+                        receivedByName: args.receiver,
+                        actualDeliveryTime: args.actualDeliveryTime
+                    })
+                });
+                const deliveredText = await read(delivered);
+                const detail = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}`, { credentials: 'include' });
+                const detailText = await read(detail);
+                return JSON.stringify({
+                    id,
+                    create: createText,
+                    inTransit: inTransitText,
+                    delivered: deliveredText,
+                    detail: detailText
+                });
+            }",
+            new
+            {
+                unique,
+                orderNumber,
+                customerId = customerId.ToString("D"),
+                deliveryDate = DateTime.UtcNow.AddDays(2).ToString("O"),
+                actualDeliveryTime = DateTime.UtcNow.AddDays(2).AddHours(3).ToString("O"),
+                trackingNumber = deliveryTrackingNumber,
+                receiver = deliveryReceiver
+            });
+        using (var deliveryDocument = JsonDocument.Parse(deliveryState))
+        {
+            var deliveryRoot = deliveryDocument.RootElement;
+            Assert.StartsWith("201 ", GetJsonString(deliveryRoot, "create"));
+            Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "inTransit"));
+            Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "delivered"));
+            Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "detail"));
+            Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "id")));
+        }
+
+        string deliveredOrderObservation = string.Empty;
+        try
+        {
+            _ = await TestHelpers.WaitForAsync(
+                async () =>
+                {
+                    using var response = await orderClient.GetAsync($"/order/v1/orders/{Uri.EscapeDataString(orderNumber)}");
+                    return $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}";
+                },
+                result =>
+                {
+                    deliveredOrderObservation = result;
+                    if (!result.StartsWith("200 ", StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+
+                    using var document = JsonDocument.Parse(result[4..]);
+                    return !string.IsNullOrWhiteSpace(GetJsonString(document.RootElement, "actualDeliveryDate", "ActualDeliveryDate"));
+                },
+                timeout: TimeSpan.FromSeconds(60),
+                interval: TimeSpan.FromSeconds(2),
+                message: $"Order {orderNumber} did not receive a delivery completion snapshot.");
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException(
+                $"Order {orderNumber} did not receive a delivery completion snapshot. Last OrderService observation: {TruncateForAssertion(deliveredOrderObservation)} DeliveryService responses: {TruncateForAssertion(deliveryState)}",
+                ex);
+        }
+
+        using var deliveredSummaryDocument = await InvokeQuoteAgentToolAsync(
+            page,
+            agentContextToken,
+            "quote_get_project_summary",
+            new { });
+        var deliveredSummaryRoot = deliveredSummaryDocument.RootElement;
+        Assert.Equal(200, GetJsonInt(deliveredSummaryRoot, "status"));
+        Assert.True(TryGetJsonProperty(deliveredSummaryRoot, out var deliveredSummary, "body"));
+        Assert.Equal("Delivery", GetJsonString(deliveredSummary, "currentOrderMilestoneLabel", "CurrentOrderMilestoneLabel"));
+        Assert.Equal("complete", GetJsonString(deliveredSummary, "currentOrderMilestoneState", "CurrentOrderMilestoneState"));
+        Assert.Equal(100, GetJsonInt(deliveredSummary, "currentOrderMilestonePercent", "CurrentOrderMilestonePercent"));
+
+        await GotoAppAsync(page, new Uri(quoteBase, $"/orders/{Uri.EscapeDataString(orderNumber)}").ToString());
+        await WaitForQuoteEngineReadyAsync(page);
+        await Expect(page.Locator("[data-order-section='delivery']")).ToContainTextAsync("Delivered", new() { Timeout = 30_000 });
     }
 
     /// <summary>
