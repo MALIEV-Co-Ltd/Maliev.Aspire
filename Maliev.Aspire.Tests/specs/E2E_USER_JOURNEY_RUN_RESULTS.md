@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Quote Version History Contract Gate
+
+### Scope
+
+- Extended QuoteEngine's customer quote summary contract so `/quote/v1/account/quotes` preserves QuotationService `versions[]` metadata instead of flattening each formal quote to only the first PDF URL.
+- The customer quote detail page now renders a `Quote revision history` section with version number, generated-by display name, created date, total/currency, change summary, and per-version PDF links when available.
+- The focused QuoteEngine endpoint test now models two versions for one customer quote and verifies both version summaries remain scoped to the owning customer quote response.
+- This covers the QuoteEngine customer boundary for `QUOTE-026`; a broader browser seed with real QuotationService multi-version data remains useful as a later release-gate proof.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Account_quote_and_order_history_is_scoped_to_signed_in_customer" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused endpoint test covering owner-scoped customer quote/order history plus two-version quote history mapping |
+
 ## 2026-06-20 Make Studio Multi-Part Project E2E Gate
 
 ### Scope
