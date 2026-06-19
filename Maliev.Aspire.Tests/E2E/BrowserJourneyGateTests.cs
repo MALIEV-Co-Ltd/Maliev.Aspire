@@ -2168,6 +2168,133 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies QuoteEngine customer documents are downloadable only by the owning customer account.
+    /// Covers the currently executable customer-document ownership portion of QUOTE-023 and SEC-001.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "QUOTE-023,SEC-001")]
+    public async Task QuoteEngine_CustomerDocuments_DownloadIsOwnerScoped()
+    {
+        await using var ownerContext = await NewContextAsync();
+        var ownerPage = await ownerContext.NewPageAsync();
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var ownerEmail = $"quote.documents.owner.{unique}@example.com";
+        var otherEmail = $"quote.documents.other.{unique}@example.com";
+        var orderNumber = $"ORD-DOC-{unique}";
+
+        await SignInToQuoteEngineAsync(ownerPage, quoteBase, ownerEmail, "/documents");
+        await WaitForQuoteEngineReadyAsync(ownerPage);
+
+        var ownerState = await ownerPage.EvaluateAsync<string>(
+            @"async args => {
+                const readBody = async response => {
+                    const text = await response.text();
+                    if (!text) return { text, json: null };
+                    try { return { text, json: JSON.parse(text) }; }
+                    catch { return { text, json: null }; }
+                };
+                const form = new FormData();
+                form.append('kind', 'Receipt');
+                form.append('orderNumber', args.orderNumber);
+                form.append(
+                    'file',
+                    new Blob([`MALIEV receipt evidence ${args.unique}`], { type: 'application/pdf' }),
+                    `receipt-${args.unique}.pdf`);
+                const upload = await fetch('/quote/v1/account/documents/upload', {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: form
+                });
+                const uploadBody = await readBody(upload);
+                const uploaded = uploadBody.json ?? {};
+                const documents = await fetch('/quote/v1/account/documents', { credentials: 'include' });
+                const documentsBody = await readBody(documents);
+                const download = await fetch(`/quote/v1/account/documents/${uploaded.documentId}/download`, { credentials: 'include' });
+                const downloadBody = await readBody(download);
+                return JSON.stringify({
+                    uploadStatus: upload.status,
+                    uploadBody: uploadBody.text,
+                    uploaded,
+                    documentsStatus: documents.status,
+                    documentsBody: documentsBody.text,
+                    documents: documentsBody.json ?? [],
+                    downloadStatus: download.status,
+                    downloadBody: downloadBody.text,
+                    download: downloadBody.json ?? {}
+                });
+            }",
+            new { unique, orderNumber });
+
+        using var ownerDocument = JsonDocument.Parse(ownerState);
+        var ownerRoot = ownerDocument.RootElement;
+        Assert.True(
+            GetJsonInt(ownerRoot, "uploadStatus") == 200,
+            $"Document upload failed: {GetJsonInt(ownerRoot, "uploadStatus")} {GetJsonString(ownerRoot, "uploadBody")}");
+        Assert.True(
+            GetJsonInt(ownerRoot, "documentsStatus") == 200,
+            $"Document list failed: {GetJsonInt(ownerRoot, "documentsStatus")} {GetJsonString(ownerRoot, "documentsBody")}");
+        Assert.True(
+            GetJsonInt(ownerRoot, "downloadStatus") == 200,
+            $"Document download failed: {GetJsonInt(ownerRoot, "downloadStatus")} {GetJsonString(ownerRoot, "downloadBody")}");
+        Assert.True(TryGetJsonProperty(ownerRoot, out var uploaded, "uploaded"));
+        var documentId = GetJsonString(uploaded, "documentId", "DocumentId");
+        var storagePath = GetJsonString(uploaded, "storagePath", "StoragePath");
+        Assert.False(string.IsNullOrWhiteSpace(documentId));
+        Assert.Equal(orderNumber, GetJsonString(uploaded, "orderNumber", "OrderNumber"));
+        Assert.StartsWith("customer-documents/", storagePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"receipt-{unique}.pdf", Uri.UnescapeDataString(storagePath), StringComparison.OrdinalIgnoreCase);
+        Assert.True(TryGetJsonProperty(ownerRoot, out var ownerDocuments, "documents"));
+        Assert.Contains(ownerDocuments.EnumerateArray(), document =>
+            string.Equals(documentId, GetJsonString(document, "documentId", "DocumentId"), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(orderNumber, GetJsonString(document, "orderNumber", "OrderNumber"), StringComparison.OrdinalIgnoreCase));
+        Assert.True(TryGetJsonProperty(ownerRoot, out var download, "download"));
+        Assert.Equal(documentId, GetJsonString(download, "documentId", "DocumentId"));
+        Assert.Equal($"receipt-{unique}.pdf", GetJsonString(download, "fileName", "FileName"));
+        Assert.Contains("/upload/v1/mock-storage/", GetJsonString(download, "downloadUrl", "DownloadUrl"));
+
+        await using var otherContext = await NewContextAsync();
+        var otherPage = await otherContext.NewPageAsync();
+        await SignInToQuoteEngineAsync(otherPage, quoteBase, otherEmail, "/documents");
+        await WaitForQuoteEngineReadyAsync(otherPage);
+
+        var otherState = await otherPage.EvaluateAsync<string>(
+            @"async documentId => {
+                const readBody = async response => {
+                    const text = await response.text();
+                    if (!text) return { text, json: null };
+                    try { return { text, json: JSON.parse(text) }; }
+                    catch { return { text, json: null }; }
+                };
+                const documents = await fetch('/quote/v1/account/documents', { credentials: 'include' });
+                const documentsBody = await readBody(documents);
+                const directDownload = await fetch(`/quote/v1/account/documents/${documentId}/download`, { credentials: 'include' });
+                const directDownloadBody = await readBody(directDownload);
+                return JSON.stringify({
+                    documentsStatus: documents.status,
+                    documentsBody: documentsBody.text,
+                    documents: documentsBody.json ?? [],
+                    directDownloadStatus: directDownload.status,
+                    directDownloadBody: directDownloadBody.text
+                });
+            }",
+            documentId);
+
+        using var otherDocument = JsonDocument.Parse(otherState);
+        var otherRoot = otherDocument.RootElement;
+        Assert.True(
+            GetJsonInt(otherRoot, "documentsStatus") == 200,
+            $"Other customer document list failed: {GetJsonInt(otherRoot, "documentsStatus")} {GetJsonString(otherRoot, "documentsBody")}");
+        Assert.True(TryGetJsonProperty(otherRoot, out var otherDocuments, "documents"));
+        Assert.DoesNotContain(otherDocuments.EnumerateArray(), document =>
+            string.Equals(documentId, GetJsonString(document, "documentId", "DocumentId"), StringComparison.OrdinalIgnoreCase));
+        Assert.True(
+            GetJsonInt(otherRoot, "directDownloadStatus") == 404,
+            $"Cross-customer document download should be 404 but was {GetJsonInt(otherRoot, "directDownloadStatus")}: {GetJsonString(otherRoot, "directDownloadBody")}");
+    }
+
+    /// <summary>
     /// Verifies Intranet protected routes enforce the employee authentication boundary.
     /// Covers INT-001, SEC-002, and SEC-003 anonymous portions.
     /// </summary>

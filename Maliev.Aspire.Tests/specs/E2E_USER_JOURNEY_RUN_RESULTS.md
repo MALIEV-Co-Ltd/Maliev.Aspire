@@ -4,6 +4,24 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-19 QuoteEngine Customer Document Ownership E2E Gate
+
+### Scope
+
+- Added `QuoteEngine_CustomerDocuments_DownloadIsOwnerScoped` to cover the executable customer-document portion of `QUOTE-023` and the document slice of `SEC-001`.
+- The test signs one QuoteEngine customer into Aspire, uploads a receipt through `/quote/v1/account/documents/upload`, verifies the BFF persists a `customer-documents/` artifact record, verifies owner download returns an UploadService mock-storage signed URL, signs in a second customer, and verifies the second customer cannot list or directly download the first customer's document.
+- The gate exposed and fixed two production-readiness defects: QuoteEngine was still calling the removed UploadService legacy `GET upload/v1/signed-url` route instead of `/upload/v1/files/by-path/signed-url`, and UploadService's QuoteEngine policy did not authorize `customer-documents/` paths or customer document MIME types.
+- Remaining `QUOTE-023` deployment gaps: generated formal quote, order, and manufacturing PDF artifacts still need service-backed fixtures and customer ownership checks.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~QuoteUploadServiceClientContractTests" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 test covering the UploadService by-path signed URL method, route, request body, and `signedUrl` response mapping |
+| `dotnet test Maliev.UploadService.Tests\Maliev.UploadService.Tests.csproj --filter "FullyQualifiedName~MigratedQuoteEnginePolicy_AllowsCustomerDocumentUploads" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 test covering migrated QuoteEngine policy access to `customer-documents/` paths and PDF content |
+| `dotnet build Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed with 0 warnings and 0 errors |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_CustomerDocuments_DownloadIsOwnerScoped" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 browser/API E2E test covering owner upload/download and cross-customer list/download isolation |
+
 ## 2026-06-19 Make Studio Agent Tools DFM To Payment E2E Gate
 
 ### Scope
