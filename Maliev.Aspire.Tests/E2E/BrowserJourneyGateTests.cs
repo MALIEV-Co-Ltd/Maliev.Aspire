@@ -2038,7 +2038,17 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var deliveryReceiver = $"Make Studio Receiver {unique}";
         var deliveryState = await intranetPage.EvaluateAsync<string>(
             @"async args => {
-                const read = async r => `${r.status} ${await r.text()}`;
+                const read = async r => {
+                    const text = await r.text();
+                    let json = null;
+                    try {
+                        json = text ? JSON.parse(text) : null;
+                    } catch {
+                        json = null;
+                    }
+
+                    return { status: `${r.status} ${text}`, json };
+                };
                 const create = await fetch('/api/v1/deliverynotes', {
                     method: 'POST',
                     credentials: 'include',
@@ -2075,9 +2085,9 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                         }]
                     })
                 });
-                const createText = await read(create);
-                if (!create.ok) return JSON.stringify({ create: createText });
-                const created = JSON.parse(createText.substring(4));
+                const createBody = await read(create);
+                if (!create.ok) return JSON.stringify({ create: createBody.status });
+                const created = createBody.json;
                 const id = created.deliveryNoteId ?? created.DeliveryNoteId ?? created.id ?? created.Id;
                 const inTransit = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/status`, {
                     method: 'PATCH',
@@ -2085,7 +2095,23 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     headers: { 'content-type': 'application/json' },
                     body: JSON.stringify({ newStatus: 'InTransit' })
                 });
-                const inTransitText = await read(inTransit);
+                const inTransitBody = await read(inTransit);
+                const proofForm = new FormData();
+                proofForm.append('fileType', 'Signature');
+                proofForm.append('description', `Make Studio delivery proof ${args.unique}`);
+                proofForm.append(
+                    'file',
+                    new Blob([Uint8Array.from([137,80,78,71,13,10,26,10,77,83])], { type: 'image/png' }),
+                    `make-studio-delivery-proof-${args.unique}.png`);
+                const proof = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/files`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: proofForm
+                });
+                const proofBody = await read(proof);
+                const proofFileId = proofBody.json?.fileId ?? proofBody.json?.FileId ?? '';
+                const proofFileType = proofBody.json?.fileType ?? proofBody.json?.FileType ?? '';
+                const proofOriginalFileName = proofBody.json?.originalFileName ?? proofBody.json?.OriginalFileName ?? '';
                 const delivered = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/status`, {
                     method: 'PATCH',
                     credentials: 'include',
@@ -2093,18 +2119,32 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     body: JSON.stringify({
                         newStatus: 'Delivered',
                         receivedByName: args.receiver,
+                        signatureFileId: proofFileId,
                         actualDeliveryTime: args.actualDeliveryTime
                     })
                 });
-                const deliveredText = await read(delivered);
+                const deliveredBody = await read(delivered);
                 const detail = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}`, { credentials: 'include' });
-                const detailText = await read(detail);
+                const detailBody = await read(detail);
+                const files = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/files`, { credentials: 'include' });
+                const filesBody = await read(files);
+                const proofRecord = Array.isArray(filesBody.json)
+                    ? filesBody.json.find(file => (file.fileId ?? file.FileId) === proofFileId)
+                    : null;
                 return JSON.stringify({
                     id,
-                    create: createText,
-                    inTransit: inTransitText,
-                    delivered: deliveredText,
-                    detail: detailText
+                    create: createBody.status,
+                    inTransit: inTransitBody.status,
+                    proof: proofBody.status,
+                    delivered: deliveredBody.status,
+                    detail: detailBody.status,
+                    files: filesBody.status,
+                    proofFileId,
+                    proofFileType,
+                    proofOriginalFileName,
+                    detailSignatureFileId: detailBody.json?.signatureFileId ?? detailBody.json?.SignatureFileId ?? '',
+                    filesContainsProof: proofRecord ? 'true' : 'false',
+                    proofStorageUrl: proofRecord?.storageUrl ?? proofRecord?.StorageUrl ?? ''
                 });
             }",
             new
@@ -2122,9 +2162,18 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             var deliveryRoot = deliveryDocument.RootElement;
             Assert.StartsWith("201 ", GetJsonString(deliveryRoot, "create"));
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "inTransit"));
+            Assert.StartsWith("201 ", GetJsonString(deliveryRoot, "proof"));
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "delivered"));
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "detail"));
+            Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "files"));
             Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "id")));
+            var proofFileId = GetJsonGuid(deliveryRoot, "proofFileId");
+            Assert.NotEqual(Guid.Empty, proofFileId);
+            Assert.Equal("Signature", GetJsonString(deliveryRoot, "proofFileType"));
+            Assert.Contains("make-studio-delivery-proof", GetJsonString(deliveryRoot, "proofOriginalFileName"), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(proofFileId, GetJsonGuid(deliveryRoot, "detailSignatureFileId"));
+            Assert.Equal("true", GetJsonString(deliveryRoot, "filesContainsProof"));
+            Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "proofStorageUrl")));
         }
 
         string deliveredOrderObservation = string.Empty;

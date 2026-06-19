@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Delivery Proof Evidence E2E Gate
+
+### Scope
+
+- Extended `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` to prove the paid Make Studio production handoff uploads proof-of-delivery evidence to the Intranet BFF/DeliveryService delivery-note files endpoint.
+- The gate verifies the proof upload returns a `Signature` file, marks the delivery `Delivered` with that proof file id as `signatureFileId`, reads the delivery detail back with the linked signature id, lists the delivery files, and confirms the proof record has a storage URL.
+- The gate also keeps the existing customer-facing QuoteEngine checks for delivered order milestone and order-detail delivery status.
+- Remaining `QUOTE-023` deployment gaps: generated order and manufacturing PDF artifacts still need service-backed fixtures and customer ownership checks.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 browser E2E test covering paid Make Studio delivery proof upload, `Signature` file response, delivered-status `signatureFileId` linking, delivery detail/files readback, proof storage URL, and existing customer-visible delivered order tracking |
+
 ## 2026-06-19 Make Studio Formal Quote Artifact Ownership E2E Gate
 
 ### Scope
