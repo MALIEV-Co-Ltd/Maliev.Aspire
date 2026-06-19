@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Multi-Part Project E2E Gate
+
+### Scope
+
+- Extended `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` from a single corrected CAD file to a corrected two-part Make Studio project.
+- The gate verifies a blocked revision A upload is superseded by corrected revision B while a second corrected CAD part is added, both returned `partId` values are configured through `quote_update_part_configuration`, and the resulting order workbench artifact metadata carries both corrected file names plus total quantity.
+- The downstream check now requires the paid Intranet project detail to link at least two Make Studio project parts to the OrderService order, OrderService items, and JobService production jobs.
+- This moves `QUOTE-016` from blocked to covered for the current service-backed Make Studio agent-tool path.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 browser E2E test covering corrected multi-part Make Studio upload replacement, explicit per-part configuration, two-part order metadata, and two-part ProjectService/OrderService/JobService production linkage |
+
 ## 2026-06-20 Make Studio Order Artifact Ownership E2E Gate
 
 ### Scope

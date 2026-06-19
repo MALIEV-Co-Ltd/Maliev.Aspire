@@ -1374,14 +1374,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies the trusted Make Studio agent tool workflow can replace a DFM-blocked upload with a corrected
-    /// revision, create durable project/quote/order artifacts, capture checkout details, complete payment,
-    /// hand off to production, and surface customer-visible delivery completion.
-    /// Covers the service-backed agent-tool portions of QUOTE-001, QUOTE-004, QUOTE-006, QUOTE-007, QUOTE-018,
-    /// QUOTE-025, and INT-009.
+    /// multi-part revision, create durable project/quote/order artifacts, capture checkout details, complete
+    /// payment, hand off to production, and surface customer-visible delivery completion.
+    /// Covers the service-backed agent-tool portions of QUOTE-001, QUOTE-004, QUOTE-006, QUOTE-007, QUOTE-016,
+    /// QUOTE-018, QUOTE-025, and INT-009.
     /// </summary>
     [Fact]
     [Trait("Tier", "E2E")]
-    [Trait("Stories", "QUOTE-001,QUOTE-004,QUOTE-006,QUOTE-007,QUOTE-018,QUOTE-025,INT-009")]
+    [Trait("Stories", "QUOTE-001,QUOTE-004,QUOTE-006,QUOTE-007,QUOTE-016,QUOTE-018,QUOTE-025,INT-009")]
     public async Task QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob()
     {
         await using var context = await NewContextAsync();
@@ -1408,6 +1408,12 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var agentContextToken = CreateQuoteAgentContextToken(sessionId, chatbotSessionId, customerId);
         var projectServiceProjectId = Guid.Empty;
         var orderId = Guid.Empty;
+        var bracketRevisionBUploadId = $"rev-b-{unique}";
+        var coverRevisionBUploadId = $"cover-rev-b-{unique}";
+        var bracketRevisionBFileName = $"bracket-{unique}-rev-b.step";
+        var coverRevisionBFileName = $"cover-{unique}-rev-b.step";
+        var bracketRevisionBPartId = Guid.Empty;
+        var coverRevisionBPartId = Guid.Empty;
 
         using var projectServiceClient = _fixture.CreateAuthenticatedClient("ProjectService");
         await WaitForServiceReadinessAsync(projectServiceClient, "/project/readiness", "ProjectService");
@@ -1452,13 +1458,23 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 {
                     new
                     {
-                        file_name = $"bracket-{unique}-rev-b.step",
+                        file_name = bracketRevisionBFileName,
                         content_type = "model/step",
                         file_size_bytes = 260_000,
                         kind = "cad",
-                        upload_id = $"rev-b-{unique}",
+                        upload_id = bracketRevisionBUploadId,
                         storage_path = $"quotes/temp/{unique}/rev-b.step",
                         supersedes_upload_id = $"rev-a-{unique}"
+                    },
+                    new
+                    {
+                        file_name = coverRevisionBFileName,
+                        content_type = "model/step",
+                        file_size_bytes = 180_000,
+                        kind = "cad",
+                        upload_id = coverRevisionBUploadId,
+                        storage_path = $"quotes/temp/{unique}/cover-rev-b.step",
+                        supersedes_upload_id = string.Empty
                     }
                 }
             }))
@@ -1471,6 +1487,16 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 GetJsonString(gate, "status", "Status") == "passed");
             Assert.DoesNotContain(body.GetProperty("parts").EnumerateArray(), part =>
                 GetJsonString(part, "uploadId", "UploadId") == $"rev-a-{unique}");
+            var correctedParts = body.GetProperty("parts").EnumerateArray().ToArray();
+            Assert.Equal(2, correctedParts.Length);
+            var bracketPart = correctedParts.Single(part =>
+                GetJsonString(part, "uploadId", "UploadId") == bracketRevisionBUploadId);
+            var coverPart = correctedParts.Single(part =>
+                GetJsonString(part, "uploadId", "UploadId") == coverRevisionBUploadId);
+            bracketRevisionBPartId = GetJsonGuid(bracketPart, "partId", "PartId");
+            coverRevisionBPartId = GetJsonGuid(coverPart, "partId", "PartId");
+            Assert.NotEqual(Guid.Empty, bracketRevisionBPartId);
+            Assert.NotEqual(Guid.Empty, coverRevisionBPartId);
         }
 
         using (var configurationDocument = await InvokeQuoteAgentToolAsync(
@@ -1479,6 +1505,23 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             "quote_update_part_configuration",
             new
             {
+                part_id = bracketRevisionBPartId,
+                process = "fdm",
+                material = "pla",
+                quantity = 12,
+                lead_time = "STANDARD"
+            }))
+        {
+            Assert.Equal(200, GetJsonInt(configurationDocument.RootElement, "status"));
+        }
+
+        using (var configurationDocument = await InvokeQuoteAgentToolAsync(
+            page,
+            agentContextToken,
+            "quote_update_part_configuration",
+            new
+            {
+                part_id = coverRevisionBPartId,
                 process = "fdm",
                 material = "pla",
                 quantity = 12,
@@ -1618,6 +1661,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.NotEqual(JsonValueKind.Undefined, orderArtifact.ValueKind);
             Assert.True(TryGetJsonProperty(orderArtifact, out var orderMetadata, "metadata", "Metadata"));
             orderId = Guid.Parse(GetJsonString(orderMetadata, "orderId", "OrderId"));
+            var orderPartsSummary = GetJsonString(orderMetadata, "parts", "Parts");
+            Assert.Contains(bracketRevisionBFileName, orderPartsSummary, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(coverRevisionBFileName, orderPartsSummary, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("24", GetJsonString(orderMetadata, "quantity", "Quantity"));
         }
 
         using (var checkoutDocument = await InvokeQuoteAgentToolAsync(
@@ -2180,16 +2227,21 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
                     using var document = JsonDocument.Parse(result[4..]);
                     var root = document.RootElement;
-                    return TryGetJsonProperty(root, out var parts, "parts", "Parts") &&
-                           parts.EnumerateArray().Any(part =>
-                               string.Equals(GetJsonString(part, "orderId", "OrderId"), orderId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
-                               !string.IsNullOrWhiteSpace(GetJsonString(part, "orderItemId", "OrderItemId")) &&
-                               Guid.TryParse(GetJsonString(part, "jobId", "JobId"), out var jobId) &&
-                               jobId != Guid.Empty);
+                    if (!TryGetJsonProperty(root, out var parts, "parts", "Parts"))
+                    {
+                        return false;
+                    }
+
+                    var linkedPartCount = parts.EnumerateArray().Count(part =>
+                        string.Equals(GetJsonString(part, "orderId", "OrderId"), orderId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrWhiteSpace(GetJsonString(part, "orderItemId", "OrderItemId")) &&
+                        Guid.TryParse(GetJsonString(part, "jobId", "JobId"), out var jobId) &&
+                        jobId != Guid.Empty);
+                    return linkedPartCount >= 2;
                 },
                 timeout: TimeSpan.FromSeconds(60),
                 interval: TimeSpan.FromSeconds(2),
-                message: $"Intranet project detail did not link Make Studio project {projectServiceProjectId:D} to order {orderId:D} and a production job.");
+                message: $"Intranet project detail did not link both Make Studio project parts for {projectServiceProjectId:D} to order {orderId:D} and production jobs.");
         }
         catch (TimeoutException ex)
         {
