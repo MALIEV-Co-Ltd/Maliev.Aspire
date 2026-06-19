@@ -1631,6 +1631,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         using var orderClient = _fixture.CreateAuthenticatedClient("OrderService");
         using var notificationClient = _fixture.CreateAuthenticatedClient("NotificationService");
         using var jobReadinessClient = _fixture.CreateAuthenticatedClient("JobService");
+        using var accountingClient = _fixture.CreateAuthenticatedClient("AccountingService");
         _ = await TestHelpers.WaitForAsync(
             async () =>
             {
@@ -1682,6 +1683,55 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.True(
                 string.Equals("completed", paymentStatus, StringComparison.OrdinalIgnoreCase),
                 $"Expected PaymentService transaction {transactionId:D} to be completed after webhook, but status was {paymentStatus}: {paymentStatusBody}");
+        }
+
+        string accountingObservation = string.Empty;
+        try
+        {
+            _ = await TestHelpers.WaitForAsync(
+                async () =>
+                {
+                    using var response = await accountingClient.GetAsync($"/accounting/v1/journal-entries?customerId={customerId:D}&status=Posted&pageSize=100");
+                    return $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}";
+                },
+                result =>
+                {
+                    accountingObservation = result;
+                    if (!result.StartsWith("200 ", StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+
+                    using var document = JsonDocument.Parse(result[4..]);
+                    if (document.RootElement.ValueKind != JsonValueKind.Array)
+                    {
+                        return false;
+                    }
+
+                    return document.RootElement.EnumerateArray().Any(entry =>
+                        string.Equals(GetJsonString(entry, "status", "Status"), "Posted", StringComparison.OrdinalIgnoreCase) &&
+                        TryGetJsonProperty(entry, out var lines, "lines", "Lines") &&
+                        lines.ValueKind == JsonValueKind.Array &&
+                        lines.EnumerateArray().Any(line =>
+                            string.Equals(GetJsonString(line, "accountNumber", "AccountNumber"), "1100", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(GetJsonString(line, "reference", "Reference"), transactionId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                            GetJsonDouble(line, "debitAmount", "DebitAmount") > 0 &&
+                            GetJsonDouble(line, "creditAmount", "CreditAmount") == 0) &&
+                        lines.EnumerateArray().Any(line =>
+                            string.Equals(GetJsonString(line, "accountNumber", "AccountNumber"), "1200", StringComparison.OrdinalIgnoreCase) &&
+                            string.Equals(GetJsonString(line, "reference", "Reference"), transactionId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                            GetJsonDouble(line, "creditAmount", "CreditAmount") > 0 &&
+                            GetJsonDouble(line, "debitAmount", "DebitAmount") == 0));
+                },
+                timeout: TimeSpan.FromSeconds(120),
+                interval: TimeSpan.FromSeconds(2),
+                message: $"AccountingService did not create a posted payment journal for transaction {transactionId:D}.");
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException(
+                $"AccountingService did not create a posted payment journal for transaction {transactionId:D}. Last observation: {TruncateForAssertion(accountingObservation)}",
+                ex);
         }
 
         try

@@ -39,6 +39,23 @@
 | `dotnet build Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed with 0 warnings and 0 errors |
 | `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 browser E2E test covering delivery note creation, `InTransit`/`Delivered` transitions, OrderService delivery snapshot, QuoteEngine agent delivery milestone, and customer order-detail delivered state after paid Make Studio production handoff |
 
+## 2026-06-19 Make Studio Accounting Side Effect E2E Gate
+
+### Scope
+
+- Extended `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` to prove the signed PaymentService webhook now produces an AccountingService posted payment journal for the Make Studio order.
+- The gate exposed and fixed a production-readiness defect: PaymentService completed transactions by publishing `PaymentCompletedEvent`, but AccountingService consumes the accounting-domain `PaymentRecordedEvent`, so Make Studio payments did not create the cash/AR journal side effect.
+- PaymentService now publishes `PaymentRecordedEvent` for completed webhook transactions, and the E2E verifies AccountingService records a posted journal with a cash debit (`1100`) and accounts-receivable credit (`1200`) whose lines reference the PaymentService transaction id.
+- Remaining Make Studio deployment gaps: receipt generation for payment completion, proof-of-delivery evidence artifact upload/download, and generated formal quote/order/manufacturing PDF ownership checks remain separate gates.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.PaymentService.Tests\Maliev.PaymentService.Tests.csproj --no-build --filter "FullyQualifiedName~WebhookProcessingServiceTests" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 40 tests covering webhook status transitions plus PaymentCompletedEvent and PaymentRecordedEvent publication |
+| `dotnet build Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed with 0 warnings and 0 errors |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 browser E2E test covering PaymentService webhook completion through AccountingService posted cash/AR journal verification |
+
 ## 2026-06-19 Make Studio Agent Tools DFM To Payment E2E Gate
 
 ### Scope
@@ -47,7 +64,7 @@
 - The test signs a customer into QuoteEngine, opens `/projects/new`, uses the trusted ChatbotService-to-QuoteEngine agent tool boundary, registers an initial blocked DFM revision, registers a corrected superseding revision, updates process/material/quantity, estimates, drafts a ProjectService-backed project, creates a formal quote, approves it, creates an OrderService-backed manufacturing order, records checkout context, starts a PaymentService-backed payment handoff artifact, processes the signed payment webhook, and verifies the restored customer-safe order tracking summary.
 - The gate exposed and fixed two production-readiness defects: QuoteEngine generated a PaymentService idempotency key longer than PaymentService's `varchar(100)` persistence contract, and PaymentService lacked deterministic Testing-environment provider responses for hosted checkout URLs.
 - QuoteEngine payment diagnostics now preserve downstream PaymentService response bodies during agent action confirmation, and PaymentService exposes Development/Testing-only exception detail for payment processing failures.
-- Remaining Make Studio deployment gaps: receipt/accounting side effects, proof-of-delivery evidence artifact upload/download, and generated formal quote/order/manufacturing PDF ownership checks remain separate gates.
+- Remaining Make Studio deployment gaps: receipt generation for payment completion, proof-of-delivery evidence artifact upload/download, and generated formal quote/order/manufacturing PDF ownership checks remain separate gates.
 
 ### Commands And Results
 
@@ -55,7 +72,7 @@
 |---------|--------|
 | `dotnet test Maliev.PaymentService.Tests\Maliev.PaymentService.Tests.csproj --filter "FullyQualifiedName~PaymentProviderHttpClientRegistrationTests|FullyQualifiedName~PaymentsControllerTests" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 24 tests covering Testing provider HTTP client registration and payment controller behavior |
 | `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~PaymentServiceClientContractTests|FullyQualifiedName~QuoteAgentEndpointTests|FullyQualifiedName~Payment_initiation" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 105 tests covering PaymentService response mapping, agent payment confirmation, HTTPS callback URLs, and bounded payment idempotency keys |
-| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test covering corrected DFM supersession, ProjectService draft, formal quote, approval, order creation, checkout context, PaymentService payment handoff and signed webhook completion, paid QuoteEngine order status, restored paid artifact drawer, restored order-tracking summary URL/current manufacturing milestone, Intranet paid-order visibility, ProjectService part linkage to OrderService item plus JobService production job, and customer-visible delivered status |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test covering corrected DFM supersession, ProjectService draft, formal quote, approval, order creation, checkout context, PaymentService payment handoff and signed webhook completion, AccountingService payment journal side effect, paid QuoteEngine order status, restored paid artifact drawer, restored order-tracking summary URL/current manufacturing milestone, Intranet paid-order visibility, ProjectService part linkage to OrderService item plus JobService production job, and customer-visible delivered status |
 
 ## 2026-06-19 Make Studio Agent Conversation Restore E2E Gate
 
