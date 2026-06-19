@@ -1628,6 +1628,17 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         using var authenticatedPaymentClient = _fixture.CreateAuthenticatedClient("PaymentService");
         using var orderClient = _fixture.CreateAuthenticatedClient("OrderService");
         using var notificationClient = _fixture.CreateAuthenticatedClient("NotificationService");
+        using var jobReadinessClient = _fixture.CreateAuthenticatedClient("JobService");
+        _ = await TestHelpers.WaitForAsync(
+            async () =>
+            {
+                using var response = await jobReadinessClient.GetAsync("/job/readiness");
+                return response.StatusCode;
+            },
+            status => status == HttpStatusCode.OK,
+            timeout: TimeSpan.FromSeconds(60),
+            interval: TimeSpan.FromSeconds(2),
+            message: "JobService readiness did not become healthy before Make Studio payment completion.");
         var webhookPayload = JsonSerializer.Serialize(new
         {
             id = $"evt_make_studio_{unique}",
@@ -1820,16 +1831,41 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     return TryGetJsonProperty(root, out var parts, "parts", "Parts") &&
                            parts.EnumerateArray().Any(part =>
                                string.Equals(GetJsonString(part, "orderId", "OrderId"), orderId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
-                               !string.IsNullOrWhiteSpace(GetJsonString(part, "orderItemId", "OrderItemId")));
+                               !string.IsNullOrWhiteSpace(GetJsonString(part, "orderItemId", "OrderItemId")) &&
+                               Guid.TryParse(GetJsonString(part, "jobId", "JobId"), out var jobId) &&
+                               jobId != Guid.Empty);
                 },
                 timeout: TimeSpan.FromSeconds(60),
                 interval: TimeSpan.FromSeconds(2),
-                message: $"Intranet project detail did not link Make Studio project {projectServiceProjectId:D} to order {orderId:D}.");
+                message: $"Intranet project detail did not link Make Studio project {projectServiceProjectId:D} to order {orderId:D} and a production job.");
         }
         catch (TimeoutException ex)
         {
+            var jobsObservation = await intranetPage.EvaluateAsync<string>(
+                @"async orderId => {
+                    const r = await fetch('/api/v1/jobs?page=1', { credentials: 'include' });
+                    const body = await r.text();
+                    if (!r.ok) return `${r.status} ${body}`;
+                    try {
+                        const root = JSON.parse(body);
+                        const items = root.items ?? root.Items ?? root.data ?? root.Data ?? [];
+                        const matches = items.filter(job =>
+                            String(job.orderId ?? job.OrderId ?? '').toLowerCase() === String(orderId).toLowerCase());
+                        return `${r.status} ${JSON.stringify({ total: root.total ?? root.Total ?? items.length, matches })}`;
+                    } catch {
+                        return `${r.status} ${body}`;
+                    }
+                }",
+                orderId.ToString("D"));
+            using var orderServiceClient = _fixture.CreateAuthenticatedClient("OrderService");
+            using var jobServiceClient = _fixture.CreateAuthenticatedClient("JobService");
+            using var orderItemsResponse = await orderServiceClient.GetAsync($"/order/v1/orders/{Uri.EscapeDataString(orderNumber)}/items");
+            using var directJobsResponse = await jobServiceClient.GetAsync("/job/v1/jobs?page=1&pageSize=100");
+            var directOrderItemsObservation = $"{(int)orderItemsResponse.StatusCode} {await orderItemsResponse.Content.ReadAsStringAsync()}";
+            var directJobsObservation = $"{(int)directJobsResponse.StatusCode} {await directJobsResponse.Content.ReadAsStringAsync()}";
+
             throw new TimeoutException(
-                $"{ex.Message} Last Intranet project observation: {TruncateForAssertion(projectObservation)}",
+                $"{ex.Message} Last Intranet project observation: {TruncateForAssertion(projectObservation)} Last Intranet jobs observation: {TruncateForAssertion(jobsObservation)} Direct OrderService items: {TruncateForAssertion(directOrderItemsObservation)} Direct JobService jobs: {TruncateForAssertion(directJobsObservation)}",
                 ex);
         }
     }
