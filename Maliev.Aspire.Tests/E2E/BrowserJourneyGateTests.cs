@@ -1565,6 +1565,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         var formalQuoteStoragePath = string.Empty;
         var formalQuotePdfUrl = string.Empty;
+        var formalQuoteId = Guid.Empty;
+        var formalQuoteNumber = string.Empty;
         var formalQuoteActionId = await PrepareActionAsync(
             page,
             agentContextToken,
@@ -1587,6 +1589,24 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             formalQuotePdfUrl = GetJsonString(formalQuoteMetadata, "pdfUrl", "PdfUrl");
             Assert.StartsWith("pdfs/quotation/", formalQuoteStoragePath, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("/upload/v1/mock-storage/", formalQuotePdfUrl, StringComparison.OrdinalIgnoreCase);
+            formalQuoteId = Guid.Parse(GetJsonString(formalQuoteMetadata, "quoteId", "QuoteId"));
+            formalQuoteNumber = GetJsonString(formalQuoteMetadata, "quoteNumber", "QuoteNumber");
+            Assert.NotEqual(Guid.Empty, formalQuoteId);
+            Assert.False(string.IsNullOrWhiteSpace(formalQuoteNumber));
+        }
+
+        var quoteDetailPage = await context.NewPageAsync();
+        try
+        {
+            await quoteDetailPage.GotoAsync(new Uri(quoteBase, $"/quotes/{formalQuoteId:D}").ToString());
+            await WaitForQuoteEngineReadyAsync(quoteDetailPage);
+            await Expect(quoteDetailPage.Locator("body")).ToContainTextAsync(formalQuoteNumber, new() { Timeout = 30_000 });
+            await Expect(quoteDetailPage.Locator("[data-quote-section='versions']")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+            await Expect(quoteDetailPage.Locator("[data-quote-section='versions']")).ToContainTextAsync("Version", new() { Timeout = 30_000 });
+        }
+        finally
+        {
+            await quoteDetailPage.CloseAsync();
         }
 
         var ownerFormalQuoteDownloadUrl = new Uri(
