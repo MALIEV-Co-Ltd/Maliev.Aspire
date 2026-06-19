@@ -1,7 +1,9 @@
 using Maliev.Aspire.Tests.Infrastructure;
 using Microsoft.Playwright;
 using System.IO.Compression;
+using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -1564,6 +1566,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             "quote_start_payment",
             new { currency = "THB" },
             "start_payment");
+        var transactionId = Guid.Empty;
+        var orderNumber = string.Empty;
         using (var paymentResult = await ConfirmAgentActionAsync(page, paymentActionId))
         {
             var state = GetConfirmedState(paymentResult.RootElement);
@@ -1576,7 +1580,113 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
                 !string.IsNullOrWhiteSpace(GetJsonString(metadata, "transactionId", "TransactionId")) &&
                 !string.IsNullOrWhiteSpace(GetJsonString(metadata, "orderNumber", "OrderNumber")));
+            var paymentArtifact = state.GetProperty("artifacts").EnumerateArray().First(artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "payment" &&
+                TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
+                Guid.TryParse(GetJsonString(metadata, "transactionId", "TransactionId"), out _) &&
+                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "orderNumber", "OrderNumber")));
+            var paymentMetadata = paymentArtifact.GetProperty("metadata");
+            transactionId = Guid.Parse(GetJsonString(paymentMetadata, "transactionId", "TransactionId"));
+            orderNumber = GetJsonString(paymentMetadata, "orderNumber", "OrderNumber");
         }
+
+        Assert.NotEqual(Guid.Empty, transactionId);
+        Assert.False(string.IsNullOrWhiteSpace(orderNumber));
+
+        using var paymentClient = _fixture.CreateClient("PaymentService");
+        using var authenticatedPaymentClient = _fixture.CreateAuthenticatedClient("PaymentService");
+        using var orderClient = _fixture.CreateAuthenticatedClient("OrderService");
+        using var notificationClient = _fixture.CreateAuthenticatedClient("NotificationService");
+        var webhookPayload = JsonSerializer.Serialize(new
+        {
+            id = $"evt_make_studio_{unique}",
+            type = "charge.update",
+            data = new
+            {
+                @object = new
+                {
+                    id = $"chrg_make_studio_{unique}",
+                    status = "successful",
+                    metadata = new
+                    {
+                        transactionId,
+                        orderNumber
+                    }
+                }
+            }
+        }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var webhookRequest = new HttpRequestMessage(HttpMethod.Post, "/payment/v1/webhooks/omise")
+        {
+            Content = new StringContent(webhookPayload, Encoding.UTF8, "application/json")
+        };
+        webhookRequest.Headers.TryAddWithoutValidation(
+            "Omise-Signature",
+            ComputeOmiseSignature(webhookPayload, "whsec_omise_development_secret"));
+
+        using var webhookResponse = await paymentClient.SendAsync(webhookRequest);
+        var webhookBody = await webhookResponse.Content.ReadAsStringAsync();
+        Assert.True(webhookResponse.IsSuccessStatusCode,
+            $"Payment webhook failed: {(int)webhookResponse.StatusCode} {webhookResponse.StatusCode}: {webhookBody}");
+
+        using (var paymentStatusResponse = await authenticatedPaymentClient.GetAsync($"/payment/v1/payments/{transactionId:D}"))
+        {
+            var paymentStatusBody = await paymentStatusResponse.Content.ReadAsStringAsync();
+            Assert.True(paymentStatusResponse.IsSuccessStatusCode,
+                $"Payment status lookup failed: {(int)paymentStatusResponse.StatusCode} {paymentStatusResponse.StatusCode}: {paymentStatusBody}");
+            using var paymentStatusDocument = JsonDocument.Parse(paymentStatusBody);
+            var paymentStatus = GetJsonString(paymentStatusDocument.RootElement, "status", "Status");
+            Assert.True(
+                string.Equals("completed", paymentStatus, StringComparison.OrdinalIgnoreCase),
+                $"Expected PaymentService transaction {transactionId:D} to be completed after webhook, but status was {paymentStatus}: {paymentStatusBody}");
+        }
+
+        try
+        {
+            _ = await TestHelpers.WaitForAsync(
+                async () =>
+                {
+                    using var response = await orderClient.GetAsync($"/order/v1/orders/{Uri.EscapeDataString(orderNumber)}");
+                    var content = await response.Content.ReadAsStringAsync();
+                    return (response.StatusCode, Content: content);
+                },
+                result =>
+                {
+                    if (result.StatusCode != HttpStatusCode.OK)
+                    {
+                        return false;
+                    }
+
+                    using var document = JsonDocument.Parse(result.Content);
+                    var root = document.RootElement;
+                    return string.Equals(GetJsonString(root, "currentStatus", "CurrentStatus"), "Paid", StringComparison.OrdinalIgnoreCase) &&
+                           string.Equals(GetJsonString(root, "paymentStatus", "PaymentStatus"), "Paid", StringComparison.OrdinalIgnoreCase);
+                },
+                timeout: TimeSpan.FromSeconds(120),
+                interval: TimeSpan.FromSeconds(2),
+                message: $"Order {orderNumber} did not reach Paid after payment completion webhook.");
+        }
+        catch (TimeoutException ex)
+        {
+            var finalObservation = await ReadOrderObservationAsync(
+                orderClient,
+                authenticatedPaymentClient,
+                notificationClient,
+                orderNumber,
+                transactionId);
+            throw new TimeoutException($"{ex.Message} Last observation: {finalObservation}", ex);
+        }
+
+        using var summaryDocument = await InvokeQuoteAgentToolAsync(
+            page,
+            agentContextToken,
+            "quote_get_project_summary",
+            new { });
+        var summaryRoot = summaryDocument.RootElement;
+        Assert.Equal(200, GetJsonInt(summaryRoot, "status"));
+        Assert.True(TryGetJsonProperty(summaryRoot, out var summary, "body"));
+        Assert.Equal(orderNumber, GetJsonString(summary, "currentOrderNumber", "CurrentOrderNumber"));
+        Assert.Equal("Paid", GetJsonString(summary, "currentOrderStatus", "CurrentOrderStatus"));
+        Assert.Equal("Paid", GetJsonString(summary, "currentPaymentStatus", "CurrentPaymentStatus"));
     }
 
     /// <summary>
@@ -5446,6 +5556,31 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
     private static async Task SignInToQuoteEngineAsync(IPage page, Uri quoteBase, string email, string returnUrl = "/quote/new")
     {
+        var authDiagnostics = new List<string>();
+        page.Request += (_, request) =>
+        {
+            if (request.Url.Contains("/auth/", StringComparison.OrdinalIgnoreCase) ||
+                request.Url.Contains("/quote/", StringComparison.OrdinalIgnoreCase) ||
+                request.Url.Contains("/customer/", StringComparison.OrdinalIgnoreCase))
+            {
+                authDiagnostics.Add($"request: {request.Method} {request.Url}");
+            }
+        };
+        page.Response += (_, response) =>
+        {
+            if (response.Url.Contains("/auth/", StringComparison.OrdinalIgnoreCase) ||
+                response.Url.Contains("/quote/", StringComparison.OrdinalIgnoreCase) ||
+                response.Url.Contains("/customer/", StringComparison.OrdinalIgnoreCase) ||
+                response.Status >= 400)
+            {
+                authDiagnostics.Add($"response: {response.Status} {response.Url}");
+            }
+        };
+        page.RequestFailed += (_, request) =>
+        {
+            authDiagnostics.Add($"request-failed: {request.Method} {request.Url} {request.Failure}");
+        };
+
         await page.GotoAsync(
             new Uri(quoteBase, $"/auth/sign-up?returnUrl={Uri.EscapeDataString(returnUrl)}").ToString(),
             new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
@@ -5454,10 +5589,13 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             "form.auth-form[action='/auth/sign-up/email'], form[data-auth-form='sign-up']",
             email);
         await SubmitEmailSignUpFormAsync(signUpForm, "Quote", "Customer", email, "PrototypeOnly123!");
-        await WaitForQuoteEngineReturnUrlAsync(page, returnUrl);
+        await WaitForQuoteEngineReturnUrlAsync(page, returnUrl, authDiagnostics);
     }
 
-    private static async Task WaitForQuoteEngineReturnUrlAsync(IPage page, string returnUrl)
+    private static async Task WaitForQuoteEngineReturnUrlAsync(
+        IPage page,
+        string returnUrl,
+        IReadOnlyCollection<string>? authDiagnostics = null)
     {
         try
         {
@@ -5474,7 +5612,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         {
             var body = await page.Locator("body").InnerTextAsync(new LocatorInnerTextOptions { Timeout = 2_000 });
             throw new TimeoutException(
-                $"QuoteEngine customer sign-up did not reach {returnUrl}. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_500)]}",
+                $"QuoteEngine customer sign-up did not reach {returnUrl}. Url: {page.Url}. Body: {body[..Math.Min(body.Length, 1_500)]}. Auth diagnostics:{Environment.NewLine}{string.Join(Environment.NewLine, authDiagnostics ?? [])}",
                 ex);
         }
     }
@@ -7928,6 +8066,31 @@ END-ISO-10303-21;`;
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
+    }
+
+    private static string ComputeOmiseSignature(string payload, string webhookSecret)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(webhookSecret));
+        return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
+    }
+
+    private static async Task<string> ReadOrderObservationAsync(
+        HttpClient orderClient,
+        HttpClient paymentClient,
+        HttpClient notificationClient,
+        string orderNumber,
+        Guid transactionId)
+    {
+        using var detailResponse = await orderClient.GetAsync($"/order/v1/orders/{Uri.EscapeDataString(orderNumber)}");
+        var detailContent = await detailResponse.Content.ReadAsStringAsync();
+        using var statusResponse = await orderClient.GetAsync($"/order/v1/orders/{Uri.EscapeDataString(orderNumber)}/statuses");
+        var statusContent = await statusResponse.Content.ReadAsStringAsync();
+        using var paymentResponse = await paymentClient.GetAsync($"/payment/v1/payments/{transactionId:D}");
+        var paymentContent = await paymentResponse.Content.ReadAsStringAsync();
+        using var notificationResponse = await notificationClient.GetAsync(
+            $"/notification/v1/delivery-logs?channelType=rabbitmq-event&pageSize=20");
+        var notificationContent = await notificationResponse.Content.ReadAsStringAsync();
+        return $"detail {(int)detailResponse.StatusCode} {detailResponse.StatusCode}: {detailContent}; statuses {(int)statusResponse.StatusCode} {statusResponse.StatusCode}: {statusContent}; payment {(int)paymentResponse.StatusCode} {paymentResponse.StatusCode}: {paymentContent}; notifications {(int)notificationResponse.StatusCode} {notificationResponse.StatusCode}: {notificationContent}";
     }
 
     private static string? FirstNonEmpty(params string?[] values) =>
