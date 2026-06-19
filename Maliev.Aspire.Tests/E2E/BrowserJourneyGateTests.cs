@@ -1353,6 +1353,233 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies the trusted Make Studio agent tool workflow can replace a DFM-blocked upload with a corrected
+    /// revision, create durable project/quote/order artifacts, capture checkout details, and initiate payment.
+    /// Covers the service-backed agent-tool portions of QUOTE-001, QUOTE-004, QUOTE-006, QUOTE-007, QUOTE-018, and QUOTE-025.
+    /// </summary>
+    [Fact]
+    [Trait("Tier", "E2E")]
+    [Trait("Stories", "QUOTE-001,QUOTE-004,QUOTE-006,QUOTE-007,QUOTE-018,QUOTE-025")]
+    public async Task QuoteEngine_MakeStudioAgentTools_CorrectsDfmAndStartsPayment()
+    {
+        await using var context = await NewContextAsync();
+        var page = await context.NewPageAsync();
+        var quoteBase = GetEndpoint("QuoteEngineBff");
+        var unique = Guid.NewGuid().ToString("N")[..8];
+
+        await SignInToQuoteEngineAsync(page, quoteBase, $"make.studio.tools.{unique}@example.com", "/projects/new");
+        await WaitForQuoteEngineReadyAsync(page);
+
+        using var profileDocument = JsonDocument.Parse(await page.EvaluateAsync<string>(
+            @"async () => {
+                const response = await fetch('/quote/v1/account/profile', { credentials: 'include' });
+                return JSON.stringify({ status: response.status, profile: await response.json() });
+            }"));
+        var profileRoot = profileDocument.RootElement;
+        Assert.Equal(200, GetJsonInt(profileRoot, "status"));
+        Assert.True(TryGetJsonProperty(profileRoot, out var profile, "profile"));
+        var customerId = GetJsonGuid(profile, "customerId", "CustomerId");
+        Assert.NotEqual(Guid.Empty, customerId);
+
+        var sessionId = Guid.NewGuid();
+        var chatbotSessionId = Guid.NewGuid();
+        var agentContextToken = CreateQuoteAgentContextToken(sessionId, chatbotSessionId, customerId);
+
+        using (var blockedDocument = await InvokeQuoteAgentToolAsync(
+            page,
+            agentContextToken,
+            "quote_register_uploads",
+            new
+            {
+                requirements = "Quote this STEP as 12 FDM PLA pieces. Local DFM found a thin wall risk.",
+                files = new[]
+                {
+                    new
+                    {
+                        file_name = $"bracket-{unique}-rev-a.step",
+                        content_type = "model/step",
+                        file_size_bytes = 240_000,
+                        kind = "cad",
+                        upload_id = $"rev-a-{unique}",
+                        storage_path = $"quotes/temp/{unique}/rev-a.step"
+                    }
+                }
+            }))
+        {
+            var root = blockedDocument.RootElement;
+            Assert.Equal(200, GetJsonInt(root, "status"));
+            Assert.True(TryGetJsonProperty(root, out var body, "body"));
+            Assert.Contains(body.GetProperty("gates").EnumerateArray(), gate =>
+                GetJsonString(gate, "code", "Code") == "dfm_reviewed" &&
+                GetJsonString(gate, "status", "Status") == "blocked");
+        }
+
+        using (var correctedDocument = await InvokeQuoteAgentToolAsync(
+            page,
+            agentContextToken,
+            "quote_register_uploads",
+            new
+            {
+                requirements = "Reuploaded corrected revision B with thicker walls. Quote 12 FDM PLA pieces.",
+                files = new[]
+                {
+                    new
+                    {
+                        file_name = $"bracket-{unique}-rev-b.step",
+                        content_type = "model/step",
+                        file_size_bytes = 260_000,
+                        kind = "cad",
+                        upload_id = $"rev-b-{unique}",
+                        storage_path = $"quotes/temp/{unique}/rev-b.step",
+                        supersedes_upload_id = $"rev-a-{unique}"
+                    }
+                }
+            }))
+        {
+            var root = correctedDocument.RootElement;
+            Assert.Equal(200, GetJsonInt(root, "status"));
+            Assert.True(TryGetJsonProperty(root, out var body, "body"));
+            Assert.Contains(body.GetProperty("gates").EnumerateArray(), gate =>
+                GetJsonString(gate, "code", "Code") == "dfm_reviewed" &&
+                GetJsonString(gate, "status", "Status") == "passed");
+            Assert.DoesNotContain(body.GetProperty("parts").EnumerateArray(), part =>
+                GetJsonString(part, "uploadId", "UploadId") == $"rev-a-{unique}");
+        }
+
+        using (var configurationDocument = await InvokeQuoteAgentToolAsync(
+            page,
+            agentContextToken,
+            "quote_update_part_configuration",
+            new
+            {
+                process = "fdm",
+                material = "pla",
+                quantity = 12,
+                lead_time = "STANDARD"
+            }))
+        {
+            Assert.Equal(200, GetJsonInt(configurationDocument.RootElement, "status"));
+        }
+
+        using (var estimateDocument = await InvokeQuoteAgentToolAsync(page, agentContextToken, "quote_calculate_estimate", new { }))
+        {
+            var root = estimateDocument.RootElement;
+            Assert.Equal(200, GetJsonInt(root, "status"));
+            Assert.True(TryGetJsonProperty(root, out var body, "body"));
+            Assert.True(TryGetJsonProperty(body, out _, "estimate", "Estimate"));
+            Assert.Contains(body.GetProperty("artifacts").EnumerateArray(), artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "pricing");
+        }
+
+        var draftActionId = await PrepareActionAsync(
+            page,
+            agentContextToken,
+            "quote_prepare_draft_project",
+            new
+            {
+                title = $"Make Studio E2E {unique}",
+                requirements = "Service-backed Make Studio E2E draft project."
+            },
+            "draft_project");
+        using (var draftResult = await ConfirmAgentActionAsync(page, draftActionId))
+        {
+            var state = GetConfirmedState(draftResult.RootElement);
+            Assert.Contains(state.GetProperty("artifacts").EnumerateArray(), artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "draft_project" &&
+                TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
+                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "projectServiceProjectId", "ProjectServiceProjectId")));
+        }
+
+        var formalQuoteActionId = await PrepareActionAsync(
+            page,
+            agentContextToken,
+            "quote_prepare_formal_quote",
+            new { requirements = "Generate the formal quote for the corrected Make Studio E2E part." },
+            "formal_quote");
+        using (var formalQuoteResult = await ConfirmAgentActionAsync(page, formalQuoteActionId))
+        {
+            var state = GetConfirmedState(formalQuoteResult.RootElement);
+            Assert.Contains(state.GetProperty("artifacts").EnumerateArray(), artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "formal_quote" &&
+                !string.IsNullOrWhiteSpace(GetJsonString(artifact, "title", "Title")));
+        }
+
+        var approvalActionId = await PrepareActionAsync(
+            page,
+            agentContextToken,
+            "quote_approve_quote",
+            new { note = "Customer approves the Make Studio E2E formal quote." },
+            "quote_approval");
+        using (var approvalResult = await ConfirmAgentActionAsync(page, approvalActionId))
+        {
+            var state = GetConfirmedState(approvalResult.RootElement);
+            Assert.Contains(state.GetProperty("gates").EnumerateArray(), gate =>
+                GetJsonString(gate, "code", "Code") == "quote_approved" &&
+                GetJsonString(gate, "status", "Status") == "passed");
+        }
+
+        var orderActionId = await PrepareActionAsync(
+            page,
+            agentContextToken,
+            "quote_create_order",
+            new { customer_po_number = $"PO-{unique}", requirements = "Create the manufacturing order for Make Studio E2E." },
+            "create_order");
+        using (var orderResult = await ConfirmAgentActionAsync(page, orderActionId))
+        {
+            var state = GetConfirmedState(orderResult.RootElement);
+            Assert.Contains(state.GetProperty("gates").EnumerateArray(), gate =>
+                GetJsonString(gate, "code", "Code") == "order_created" &&
+                GetJsonString(gate, "status", "Status") == "passed");
+            Assert.Contains(state.GetProperty("artifacts").EnumerateArray(), artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "order" &&
+                TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
+                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "orderId", "OrderId")) &&
+                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "orderNumber", "OrderNumber")));
+        }
+
+        using (var checkoutDocument = await InvokeQuoteAgentToolAsync(
+            page,
+            agentContextToken,
+            "quote_update_checkout_details",
+            new
+            {
+                billing_address_id = Guid.NewGuid(),
+                shipping_address_id = Guid.NewGuid(),
+                phone = "+66 2 555 0100",
+                company = "Make Studio E2E Buyer",
+                vat_number = "TH1234567890",
+                accepted_terms = true,
+                consent = true
+            }))
+        {
+            var state = checkoutDocument.RootElement.GetProperty("body");
+            Assert.Contains(state.GetProperty("gates").EnumerateArray(), gate =>
+                GetJsonString(gate, "code", "Code") == "checkout_ready" &&
+                GetJsonString(gate, "status", "Status") == "passed");
+        }
+
+        var paymentActionId = await PrepareActionAsync(
+            page,
+            agentContextToken,
+            "quote_start_payment",
+            new { currency = "THB" },
+            "start_payment");
+        using (var paymentResult = await ConfirmAgentActionAsync(page, paymentActionId))
+        {
+            var state = GetConfirmedState(paymentResult.RootElement);
+            Assert.Contains(state.GetProperty("gates").EnumerateArray(), gate =>
+                GetJsonString(gate, "code", "Code") == "payment_started_or_completed" &&
+                GetJsonString(gate, "status", "Status") == "passed");
+            Assert.Contains(state.GetProperty("artifacts").EnumerateArray(), artifact =>
+                GetJsonString(artifact, "artifactType", "ArtifactType") == "payment" &&
+                !string.IsNullOrWhiteSpace(GetJsonString(artifact, "url", "Url")) &&
+                TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
+                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "transactionId", "TransactionId")) &&
+                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "orderNumber", "OrderNumber")));
+        }
+    }
+
+    /// <summary>
     /// Verifies the prototype-backed signed customer path can upload, estimate, create a quote, create an order,
     /// and expose the resulting history through account APIs. This is intentionally partial until QuoteEngine is
     /// service-backed by ProjectService, UploadService, GeometryService, PricingService, QuotationService, and OrderService.
@@ -7582,6 +7809,125 @@ END-ISO-10303-21;`;
         }
 
         return string.Empty;
+    }
+
+    private static async Task<JsonDocument> InvokeQuoteAgentToolAsync(
+        IPage page,
+        string agentContextToken,
+        string toolName,
+        object arguments)
+    {
+        var json = await page.EvaluateAsync<string>(
+            @"async args => {
+                const response = await fetch(`/quote/v1/agent/tools/${args.toolName}`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'content-type': 'application/json',
+                        'X-Maliev-Agent-Context': args.agentContextToken
+                    },
+                    body: JSON.stringify({ arguments: args.arguments || {} })
+                });
+                const text = await response.text();
+                let body = {};
+                try {
+                    body = text ? JSON.parse(text) : {};
+                } catch {
+                    body = { raw: text };
+                }
+
+                return JSON.stringify({ status: response.status, body });
+            }",
+            new
+            {
+                agentContextToken,
+                toolName,
+                arguments
+            });
+
+        return JsonDocument.Parse(json);
+    }
+
+    private static async Task<Guid> PrepareActionAsync(
+        IPage page,
+        string agentContextToken,
+        string toolName,
+        object arguments,
+        string expectedActionType)
+    {
+        using var document = await InvokeQuoteAgentToolAsync(page, agentContextToken, toolName, arguments);
+        var root = document.RootElement;
+        Assert.Equal(200, GetJsonInt(root, "status"));
+        Assert.True(TryGetJsonProperty(root, out var body, "body"));
+        Assert.True(TryGetJsonProperty(body, out var actions, "proposedActions", "ProposedActions"));
+        var action = Assert.Single(actions.EnumerateArray(), item =>
+            string.Equals(GetJsonString(item, "actionType", "ActionType"), expectedActionType, StringComparison.OrdinalIgnoreCase));
+        var actionId = GetJsonGuid(action, "actionId", "ActionId");
+        Assert.NotEqual(Guid.Empty, actionId);
+        return actionId;
+    }
+
+    private static async Task<JsonDocument> ConfirmAgentActionAsync(IPage page, Guid actionId)
+    {
+        var json = await page.EvaluateAsync<string>(
+            @"async actionId => {
+                const response = await fetch(`/quote/v1/agent/actions/${actionId}/confirm`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const text = await response.text();
+                let body = {};
+                try {
+                    body = text ? JSON.parse(text) : {};
+                } catch {
+                    body = { raw: text };
+                }
+
+                return JSON.stringify({ status: response.status, body });
+            }",
+            actionId.ToString("D"));
+
+        return JsonDocument.Parse(json);
+    }
+
+    private static JsonElement GetConfirmedState(JsonElement confirmationRoot)
+    {
+        Assert.True(
+            GetJsonInt(confirmationRoot, "status") == 200,
+            $"Agent action confirmation failed. Response: {confirmationRoot.GetRawText()}");
+        Assert.True(TryGetJsonProperty(confirmationRoot, out var body, "body"));
+        Assert.True(TryGetJsonProperty(body, out var state, "state", "State"));
+        return state;
+    }
+
+    private static string CreateQuoteAgentContextToken(Guid quoteSessionId, Guid chatbotSessionId, Guid customerId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var payload = JsonSerializer.Serialize(
+            new
+            {
+                quoteSessionId,
+                chatbotSessionId,
+                customerId,
+                issuedAt = now,
+                expiresAt = now.AddMinutes(15)
+            },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var encodedPayload = Base64UrlEncode(Encoding.UTF8.GetBytes(payload));
+        using var hmac = new System.Security.Cryptography.HMACSHA256(
+            Encoding.UTF8.GetBytes("maliev-local-development-quote-agent-context-key"));
+        var signatureBytes = hmac.ComputeHash(Encoding.UTF8.GetBytes(encodedPayload));
+        return $"{encodedPayload}.{Base64UrlEncode(signatureBytes)}";
+    }
+
+    private static string Base64UrlEncode(byte[] bytes)
+    {
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
     }
 
     private static string? FirstNonEmpty(params string?[] values) =>

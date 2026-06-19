@@ -4,6 +4,24 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-19 Make Studio Agent Tools DFM To Payment E2E Gate
+
+### Scope
+
+- Added `QuoteEngine_MakeStudioAgentTools_CorrectsDfmAndStartsPayment` to cover the signed Make Studio agent tool path through the real Aspire service graph.
+- The test signs a customer into QuoteEngine, opens `/projects/new`, uses the trusted ChatbotService-to-QuoteEngine agent tool boundary, registers an initial blocked DFM revision, registers a corrected superseding revision, updates process/material/quantity, estimates, drafts a ProjectService-backed project, creates a formal quote, approves it, creates an OrderService-backed manufacturing order, records checkout context, and starts a PaymentService-backed payment handoff artifact.
+- The gate exposed and fixed two production-readiness defects: QuoteEngine generated a PaymentService idempotency key longer than PaymentService's `varchar(100)` persistence contract, and PaymentService lacked deterministic Testing-environment provider responses for hosted checkout URLs.
+- QuoteEngine payment diagnostics now preserve downstream PaymentService response bodies during agent action confirmation, and PaymentService exposes Development/Testing-only exception detail for payment processing failures.
+- Remaining Make Studio deployment gaps: payment completion/webhook return, receipt/accounting side effects, delivery/status tracking, and full customer-visible order status restoration are still separate gates.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.PaymentService.Tests\Maliev.PaymentService.Tests.csproj --filter "FullyQualifiedName~PaymentProviderHttpClientRegistrationTests|FullyQualifiedName~PaymentsControllerTests" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 24 tests covering Testing provider HTTP client registration and payment controller behavior |
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~PaymentServiceClientContractTests|FullyQualifiedName~QuoteAgentEndpointTests|FullyQualifiedName~Payment_initiation" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 105 tests covering PaymentService response mapping, agent payment confirmation, HTTPS callback URLs, and bounded payment idempotency keys |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmAndStartsPayment" -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal"` | Passed: 1 browser E2E test covering corrected DFM supersession, ProjectService draft, formal quote, approval, order creation, checkout context, and PaymentService payment handoff |
+
 ## 2026-06-19 Make Studio Agent Conversation Restore E2E Gate
 
 ### Scope
@@ -22,7 +40,7 @@
 
 ### Follow-Up
 
-- Add a second Make Studio E2E gate for uploaded CAD/DFM artifacts, corrected reupload supersession, action confirmation, payment return, and ProjectService/Intranet handoff once the flow can be kept deterministic in Aspire.
+- Add the next Make Studio E2E gate for payment completion/webhook return, receipt/accounting side effects, delivery/status tracking, and ProjectService/Intranet handoff visibility.
 
 ## 2026-06-05 Geometry Runtime Regression E2E Gate
 
