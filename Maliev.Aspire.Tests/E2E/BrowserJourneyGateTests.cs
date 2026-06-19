@@ -1404,6 +1404,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var sessionId = Guid.NewGuid();
         var chatbotSessionId = Guid.NewGuid();
         var agentContextToken = CreateQuoteAgentContextToken(sessionId, chatbotSessionId, customerId);
+        var projectServiceProjectId = Guid.Empty;
+        var orderId = Guid.Empty;
+
+        using var projectServiceClient = _fixture.CreateAuthenticatedClient("ProjectService");
+        await WaitForServiceReadinessAsync(projectServiceClient, "/project/readiness", "ProjectService");
 
         using (var blockedDocument = await InvokeQuoteAgentToolAsync(
             page,
@@ -1504,10 +1509,13 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         using (var draftResult = await ConfirmAgentActionAsync(page, draftActionId))
         {
             var state = GetConfirmedState(draftResult.RootElement);
-            Assert.Contains(state.GetProperty("artifacts").EnumerateArray(), artifact =>
+            var draftProjectArtifact = state.GetProperty("artifacts").EnumerateArray().FirstOrDefault(artifact =>
                 GetJsonString(artifact, "artifactType", "ArtifactType") == "draft_project" &&
                 TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
-                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "projectServiceProjectId", "ProjectServiceProjectId")));
+                Guid.TryParse(GetJsonString(metadata, "projectServiceProjectId", "ProjectServiceProjectId"), out _));
+            Assert.NotEqual(JsonValueKind.Undefined, draftProjectArtifact.ValueKind);
+            Assert.True(TryGetJsonProperty(draftProjectArtifact, out var draftMetadata, "metadata", "Metadata"));
+            projectServiceProjectId = Guid.Parse(GetJsonString(draftMetadata, "projectServiceProjectId", "ProjectServiceProjectId"));
         }
 
         var formalQuoteActionId = await PrepareActionAsync(
@@ -1550,11 +1558,14 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.Contains(state.GetProperty("gates").EnumerateArray(), gate =>
                 GetJsonString(gate, "code", "Code") == "order_created" &&
                 GetJsonString(gate, "status", "Status") == "passed");
-            Assert.Contains(state.GetProperty("artifacts").EnumerateArray(), artifact =>
+            var orderArtifact = state.GetProperty("artifacts").EnumerateArray().FirstOrDefault(artifact =>
                 GetJsonString(artifact, "artifactType", "ArtifactType") == "order" &&
                 TryGetJsonProperty(artifact, out var metadata, "metadata", "Metadata") &&
-                !string.IsNullOrWhiteSpace(GetJsonString(metadata, "orderId", "OrderId")) &&
+                Guid.TryParse(GetJsonString(metadata, "orderId", "OrderId"), out _) &&
                 !string.IsNullOrWhiteSpace(GetJsonString(metadata, "orderNumber", "OrderNumber")));
+            Assert.NotEqual(JsonValueKind.Undefined, orderArtifact.ValueKind);
+            Assert.True(TryGetJsonProperty(orderArtifact, out var orderMetadata, "metadata", "Metadata"));
+            orderId = Guid.Parse(GetJsonString(orderMetadata, "orderId", "OrderId"));
         }
 
         using (var checkoutDocument = await InvokeQuoteAgentToolAsync(
@@ -1610,6 +1621,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         Assert.NotEqual(Guid.Empty, transactionId);
         Assert.False(string.IsNullOrWhiteSpace(orderNumber));
+        Assert.NotEqual(Guid.Empty, projectServiceProjectId);
+        Assert.NotEqual(Guid.Empty, orderId);
 
         using var paymentClient = _fixture.CreateClient("PaymentService");
         using var authenticatedPaymentClient = _fixture.CreateAuthenticatedClient("PaymentService");
@@ -1778,6 +1791,45 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         {
             throw new TimeoutException(
                 $"{ex.Message} Last Intranet observation: {TruncateForAssertion(intranetObservation)}",
+                ex);
+        }
+
+        string projectObservation = string.Empty;
+        try
+        {
+            _ = await TestHelpers.WaitForAsync(
+                async () =>
+                {
+                    return await intranetPage.EvaluateAsync<string>(
+                        @"async projectId => {
+                            const r = await fetch(`/api/v1/projects/${projectId}`, { credentials: 'include' });
+                            return `${r.status} ${await r.text()}`;
+                        }",
+                        projectServiceProjectId.ToString("D"));
+                },
+                result =>
+                {
+                    projectObservation = result;
+                    if (!result.StartsWith("200 ", StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+
+                    using var document = JsonDocument.Parse(result[4..]);
+                    var root = document.RootElement;
+                    return TryGetJsonProperty(root, out var parts, "parts", "Parts") &&
+                           parts.EnumerateArray().Any(part =>
+                               string.Equals(GetJsonString(part, "orderId", "OrderId"), orderId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                               !string.IsNullOrWhiteSpace(GetJsonString(part, "orderItemId", "OrderItemId")));
+                },
+                timeout: TimeSpan.FromSeconds(60),
+                interval: TimeSpan.FromSeconds(2),
+                message: $"Intranet project detail did not link Make Studio project {projectServiceProjectId:D} to order {orderId:D}.");
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException(
+                $"{ex.Message} Last Intranet project observation: {TruncateForAssertion(projectObservation)}",
                 ex);
         }
     }
@@ -7862,6 +7914,39 @@ END-ISO-10303-21;`;
 
         Assert.Fail($"Notification delivery log for event {eventId} was not found. Last result: {logsResult[..Math.Min(logsResult.Length, 2_000)]}");
         return default;
+    }
+
+    private static async Task WaitForServiceReadinessAsync(HttpClient client, string readinessPath, string serviceName)
+    {
+        string lastResult = string.Empty;
+        _ = await TestHelpers.WaitForAsync(
+            async () =>
+            {
+                try
+                {
+                    using var response = await client.GetAsync(readinessPath);
+                    lastResult = $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}";
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    lastResult = ex.Message;
+                }
+
+                return lastResult;
+            },
+            result =>
+            {
+                if (!result.StartsWith("200 ", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                using var document = JsonDocument.Parse(result[4..]);
+                return string.Equals(GetJsonString(document.RootElement, "status"), "Healthy", StringComparison.OrdinalIgnoreCase);
+            },
+            timeout: TimeSpan.FromSeconds(90),
+            interval: TimeSpan.FromSeconds(2),
+            message: $"{serviceName} did not become ready at {readinessPath}. Last result: {TruncateForAssertion(lastResult)}");
     }
 
     private static async Task WaitForIntranetApiTextContainsAsync(IPage page, string path, string expectedText)
