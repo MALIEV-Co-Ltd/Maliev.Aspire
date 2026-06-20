@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Partial-Delivery Quantity Gate
+
+### Scope
+
+- Fixed DeliveryService persistence so multiple active delivery notes can exist for the same Make Studio order, removing the filtered unique `order_id` index that blocked partial shipments.
+- Strengthened cumulative delivered-quantity validation so existing deliveries are matched by `PurchaseOrderItemId` when available, falling back to `ProductCode` only for older payloads without line identity.
+- Added focused service tests proving a second valid partial delivery persists, cumulative over-delivery is rejected, and two order lines with the same product code can each be delivered without being incorrectly collapsed into one SKU total.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.DeliveryService.Tests\Maliev.DeliveryService.Tests.csproj --filter "FullyQualifiedName~CreateAsync_WithSecondPartialDeliveryWithinOrderedQuantity_PersistsDeliveryQuantity\|FullyQualifiedName~CreateAsync_WithCumulativeQuantityOverOrderedQuantity_ThrowsArgumentException\|FullyQualifiedName~CreateAsync_WithSameProductCodeOnDifferentPurchaseOrderItems_AllowsSeparateLineQuantities" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 3 focused tests covering accepted cumulative partial delivery, rejected over-delivery, and same-SKU separate order-line delivery |
+| `dotnet build Maliev.DeliveryService.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: DeliveryService solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Delivery Proof And PDF Download Gate
 
 ### Scope
