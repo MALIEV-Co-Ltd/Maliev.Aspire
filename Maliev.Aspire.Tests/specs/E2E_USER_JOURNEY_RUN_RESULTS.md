@@ -47,6 +47,19 @@
 |---------|--------|
 | `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~QuoteWorkspace_FilePickerOpenIsGuardedUntilRouteStateAndSinglePendingOpen|FullyQualifiedName~ReplicadWorker_validates_profile_shorthand_dimensions_before_face_creation|FullyQualifiedName~Payment_initiation_persists_checkout_shipping_snapshot_on_order" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 3 focused tests covering upload picker guards, generated-preview profile dimension validation, and payment snapshot test isolation |
 
+## 2026-06-20 Make Studio Real Record Isolation Gate
+
+### Scope
+
+- Strengthened `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` so the second signed customer must be denied direct access to the Make Studio project detail, scoped quote list/detail page, order detail, and generated order-file downloads created by the first customer.
+- This extends the existing artifact ownership proof from file-download endpoints to the real ProjectService/QuotationService/OrderService records that Make Studio creates during the service-backed quote-to-order path.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused browser E2E test covering Make Studio project, quote, order, and order-file cross-customer denial while preserving the paid production and delivery flow |
+
 ## 2026-06-20 Make Studio Login Restore E2E Gate
 
 ### Scope

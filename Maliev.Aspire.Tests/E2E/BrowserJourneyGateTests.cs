@@ -2196,6 +2196,47 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             var otherOrderArtifactPage = await otherOrderArtifactContext.NewPageAsync();
             await SignInToQuoteEngineAsync(otherOrderArtifactPage, quoteBase, $"make.studio.order.artifact.other.{unique}@example.com", "/projects/new");
             await WaitForQuoteEngineReadyAsync(otherOrderArtifactPage);
+            var otherDetailIsolation = await otherOrderArtifactPage.EvaluateAsync<string>(
+                @"async args => {
+                    const read = async response => `${response.status} ${await response.text()}`;
+                    const project = await fetch(`/quote/v1/projects/${args.projectId}`, { credentials: 'include' });
+                    const quoteList = await fetch('/quote/v1/account/quotes', { credentials: 'include' });
+                    const order = await fetch(`/quote/v1/account/orders/${encodeURIComponent(args.orderNumber)}`, { credentials: 'include' });
+                    let quoteListContainsOwnerQuote = false;
+                    if (quoteList.ok) {
+                        const quotes = await quoteList.json();
+                        quoteListContainsOwnerQuote = Array.isArray(quotes) && quotes.some(quote =>
+                            String(quote.quoteId ?? quote.QuoteId ?? '').toLowerCase() === String(args.quoteId).toLowerCase() ||
+                            String(quote.quoteNumber ?? quote.QuoteNumber ?? '').toLowerCase() === String(args.quoteNumber).toLowerCase());
+                    }
+
+                    return JSON.stringify({
+                        project: await read(project),
+                        quoteListStatus: quoteList.status,
+                        quoteListContainsOwnerQuote,
+                        order: await read(order)
+                    });
+                }",
+                new
+                {
+                    projectId = projectServiceProjectId.ToString("D"),
+                    quoteId = formalQuoteId.ToString("D"),
+                    quoteNumber = formalQuoteNumber,
+                    orderNumber
+                });
+            using (var otherDetailIsolationDocument = JsonDocument.Parse(otherDetailIsolation))
+            {
+                var otherDetailRoot = otherDetailIsolationDocument.RootElement;
+                Assert.StartsWith("404 ", GetJsonString(otherDetailRoot, "project"));
+                Assert.Equal(200, GetJsonInt(otherDetailRoot, "quoteListStatus"));
+                Assert.False(GetJsonBool(otherDetailRoot, "quoteListContainsOwnerQuote"));
+                Assert.StartsWith("404 ", GetJsonString(otherDetailRoot, "order"));
+            }
+
+            await GotoAppAsync(otherOrderArtifactPage, new Uri(quoteBase, $"/quotes/{formalQuoteId:D}").ToString());
+            await WaitForQuoteEngineReadyAsync(otherOrderArtifactPage);
+            await Expect(otherOrderArtifactPage.Locator("body")).ToContainTextAsync("Quote not found", new() { Timeout = 30_000 });
+
             var otherDownloadUrl = new Uri(
                 quoteBase,
                 $"/quote/v1/account/orders/{Uri.EscapeDataString(orderNumber)}/files/{manufacturingPacketFileId}/download").ToString();
