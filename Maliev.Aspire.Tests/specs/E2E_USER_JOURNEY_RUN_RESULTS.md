@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Project Route Production Fallback Gate
+
+### Scope
+
+- Restricted QuoteEngine customer project navigation, detail, duplicate, pin, unpin, archive, and achieve routes so `QuoteEnginePrototypeStore` fallback is available only in development/testing.
+- Production customer project routes now return the ProjectService result or a normal empty/not-found response instead of exposing prototype-store projects when ProjectService has no durable record.
+- Added focused endpoint coverage that seeds a prototype-only project, forces ProjectService to return no project detail, injects a production-named controller environment, and verifies the route returns 404 instead of prototype detail.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Project_detail_does_not_fall_back_to_prototype_store_in_production\|FullyQualifiedName~Project_navigation_lists_customer_projects_and_updates_pin_state\|FullyQualifiedName~Project_pin_rejects_project_owned_by_another_customer\|FullyQualifiedName~Project_archive_removes_project_from_navigation_and_rejects_other_customers\|FullyQualifiedName~Project_achieve_marks_project_complete_and_rejects_other_customers" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 5 focused tests covering production no-fallback detail behavior plus existing ProjectService-backed nav, pin, archive, and achieve behavior |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Agent Profile Update Persistence Gate
 
 ### Scope
