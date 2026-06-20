@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Agent Profile Update Persistence Gate
+
+### Scope
+
+- Updated the QuoteEngine Make Studio `quote_update_account_profile` confirmation action so supported profile fields persist through CustomerService instead of only updating `QuoteEnginePrototypeStore`.
+- Added a CustomerService client PATCH path using current customer `xmin`, profile name/phone/language/timezone fields, and company-link creation when company/VAT data is supplied.
+- Kept prototype profile update fallback limited to development/testing; production now fails the confirmation if CustomerService cannot persist the update.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Agent_update_account_profile_requires_confirmation_and_updates_customer_context" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: confirmed Make Studio profile update writes CustomerService-backed fields and the follow-up account context reflects the durable profile |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Durable Agent Project Identity Gate
 
 ### Scope
