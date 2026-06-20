@@ -4,6 +4,22 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Account Documents And NDA Persistence Gate
+
+### Scope
+
+- Moved QuoteEngine account document and NDA endpoints to CustomerService-backed records for signed Make Studio customers, replacing the previous prototype-store read/write path whenever the downstream service is available.
+- Kept prototype account fallback limited to development/testing; production now returns a 503 instead of acknowledging document metadata or NDA reads that cannot be durably served.
+- Preserved customer-owned document validation, multipart upload streaming through UploadService, signed document downloads, and cross-customer denial while adding focused NDA endpoint coverage.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Account_ndas_reads_customer_service_records\|FullyQualifiedName~Account_documents_allow_customer_scoped_purchase_order_uploads\|FullyQualifiedName~Account_documents_reject_unsafe_storage_paths_and_unknown_kinds\|FullyQualifiedName~Account_documents_download_returns_signed_url_for_owner_only\|FullyQualifiedName~Account_documents_upload_streams_file_bytes_to_upload_service" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 5 focused tests covering CustomerService-backed NDA reads, customer-scoped document create/list, invalid document rejection, owner-only signed downloads, and multipart upload streaming |
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~QuoteEngineSourceTests.Documents_page_supports_customer_purchase_order_invoice_receipt_uploads" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: source guard now requires the account controller to call `CreateCustomerDocumentAsync(customerId, ...)` rather than the prototype document store |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Partial-Delivery Quantity Gate
 
 ### Scope
