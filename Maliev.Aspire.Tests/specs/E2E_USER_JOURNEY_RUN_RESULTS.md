@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Payment Completion Order Tracking Gate
+
+### Scope
+
+- Updated `QuotePaymentCompletedConsumer` so PaymentService completion events append `Paid` status to OrderService before/alongside the customer SignalR notification.
+- Preserves customer realtime `PaymentCompleted` delivery even when the persisted OrderService status update fails, while logging the tracking failure for follow-up.
+- Closes a Make Studio handoff gap where the browser could see payment completion but customer/Intranet order tracking could remain at the previous status.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~PaymentNotificationConsumerTests\|FullyQualifiedName~Order_detail_tracks_paid_order_status\|FullyQualifiedName~Payment_initiation_persists_delivery_snapshot_and_payment_metadata" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 9 focused tests covering completed/pending/failed/cancelled/expired payment notification grouping, persisted Paid status update, and payment/order tracking metadata |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio PaymentService Failure Handling Gate
 
 ### Scope
