@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Reupload Commercial State Invalidation Gate
+
+### Scope
+
+- Updated Make Studio agent upload registration so any new geometry upload invalidates stale commercial state, not only uploads with explicit `supersedes_*` metadata.
+- New or corrected CAD after quote/payment progress now clears pending actions, pricing, formal quote, quote approval, order, payment, and their workbench artifacts before the customer can continue.
+- Preserves existing replacement behavior for DFM-blocked revisions while preventing stale quote/order/payment artifacts from surviving an added geometry file.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Agent_register_uploads_clears_commercial_state_after_new_geometry\|FullyQualifiedName~Agent_register_uploads_tool_supersedes_previous_dfm_blocked_geometry\|FullyQualifiedName~Agent_start_payment_rejects_mismatched_amount_before_confirmation" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 3 focused tests covering new-geometry commercial reset after payment, explicit DFM replacement, and payment amount verification |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Analysis Status Ownership Gate
 
 ### Scope
