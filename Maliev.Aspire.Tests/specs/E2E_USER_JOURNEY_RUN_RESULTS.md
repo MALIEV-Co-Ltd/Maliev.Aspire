@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Agent Document Search Persistence Gate
+
+### Scope
+
+- Updated the QuoteEngine Make Studio `quote_search_customer_data` tool so customer document results come from CustomerService-backed account documents instead of `QuoteEnginePrototypeStore` sample document rows.
+- Preserved durable ProjectService search ordering, session file/part search results, and artifact search results while filtering prototype document rows out of the assistant search surface.
+- Added focused endpoint coverage proving the agent finds a document created through the account document endpoint, marks it with `source=customer_service`, preserves order-number metadata, and does not return the legacy `manufacturing-requirements.pdf` prototype document.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Agent_search_customer_data_returns_customer_scoped_resources" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: agent customer-data search returns ProjectService project results plus CustomerService-backed document results and filters prototype documents |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Account Documents And NDA Persistence Gate
 
 ### Scope
