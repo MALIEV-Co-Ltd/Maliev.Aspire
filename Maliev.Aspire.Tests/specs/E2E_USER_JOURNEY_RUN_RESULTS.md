@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Durable Agent Project Identity Gate
+
+### Scope
+
+- Updated the QuoteEngine Make Studio draft-project workbench artifact so its primary `projectId` and `projectNumber` metadata are the ProjectService project identity instead of the prototype-store project identity.
+- Preserved `prototypeProjectId` and `prototypeProjectNumber` only as legacy metadata for development/testing fallback diagnostics.
+- Strengthened focused agent tests so duplicate, pin, unpin, archive, review, and achieve project tools follow the durable ProjectService ID by default.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Agent_duplicate_project_uses_confirmed_customer_draft_project\|FullyQualifiedName~Agent_project_management_tool_requires_confirmation_and_updates_customer_project" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 6 focused tests covering durable draft artifact identity, duplicate source IDs, and project management tools operating on ProjectService project IDs |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Agent Account Context Persistence Gate
 
 ### Scope
