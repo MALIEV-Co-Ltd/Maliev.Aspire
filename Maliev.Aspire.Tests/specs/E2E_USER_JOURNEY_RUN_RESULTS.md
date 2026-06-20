@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Analysis Status Ownership Gate
+
+### Scope
+
+- Enforced the same upload ownership boundary on QuoteEngine `/quote/v1/uploads/{uploadId}/analysis-status` that already protects resumable upload chunks and upload completion.
+- Prevents one signed-in customer from reading another customer's upload, viewer, geometry, and DFM analysis details by guessing or retaining an upload id.
+- Preserves temporary anonymous workspace uploads while requiring owner session access for customer-scoped uploads.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Analysis_status_rejects_upload_owned_by_another_customer\|FullyQualifiedName~GeometryRuntime_telemetry_when_accepted_metrics_hydrates_analysis_status\|FullyQualifiedName~ResumeUpload_validates_content_range_and_streams_chunk\|FullyQualifiedName~CompleteUpload_non_demo_file_returns_processing_status" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 4 focused tests covering cross-customer status denial, telemetry hydration, resumable upload streaming, and real-pipeline completion status |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Upload Production Fallback Gate
 
 ### Scope
