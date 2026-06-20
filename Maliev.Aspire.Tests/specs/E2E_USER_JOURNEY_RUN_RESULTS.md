@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Agent PricingService Estimate Gate
+
+### Scope
+
+- Updated the Make Studio `quote_calculate_estimate` tool so agent pricing uses the QuoteEngine PricingService client instead of directly calculating with `QuoteEnginePrototypeStore`.
+- Recalculated resumed-project pricing through the same PricingService-backed path before marking the workbench pricing artifact ready.
+- Kept prototype estimate fallback available only in development/testing; production now returns an explicit `pricing_available` blocker when PricingService cannot price the current configuration.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Agent_calculate_estimate_tool_reports_geometry_gate_before_pricing\|FullyQualifiedName~Agent_calculate_estimate_tool_prices_after_geometry_analysis_and_configuration\|FullyQualifiedName~Agent_estimate_does_not_fall_back_to_prototype_pricing_in_production\|FullyQualifiedName~Agent_dfm_issue_blocks_pricing_until_exact_issue_is_acknowledged" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 4 focused tests covering estimate gate order, PricingService-backed workbench pricing, production no-fallback behavior, and DFM acknowledgement gating |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Estimate Production Fallback Gate
 
 ### Scope
