@@ -4,6 +4,20 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Project Quote Versioning Contract Gate
+
+### Scope
+
+- Updated QuoteEngine's QuotationService client to create the first formal quote for a source ProjectService project and revise the existing project quotation on later quote generation.
+- Added project snapshot JSON/hash, source project id/number, and change summary fields to the QuoteEngine -> QuotationService create/update payloads.
+- Added a focused QuoteEngine endpoint regression proving two formal quote submissions for the same project keep the same quotation id while advancing from version 1 to version 2.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Formal_quote_for_same_project_creates_new_version_on_existing_quotation|FullyQualifiedName~Order_creation_sends_quote_total_to_order_service|FullyQualifiedName~Agent_payment_confirmation_after_order_sets_payment_gate_and_artifact" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 3 focused tests covering one-quotation-per-project versioning plus preserved order quote-version metadata |
+
 ## 2026-06-20 Make Studio Quote Version Order Linkage Gate
 
 ### Scope
