@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Upload Production Fallback Gate
+
+### Scope
+
+- Added focused production-mode coverage for QuoteEngine upload initiation when UploadService is unavailable.
+- Verified development/testing can still use the local prototype upload fallback, while production returns an explicit `502 Bad Gateway` problem response instead of creating a prototype-local upload session.
+- Covered the upload boundary before DFM analysis because a silent local upload fallback would make downstream analysis, pricing, finalization, and payment evidence non-production-like.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Upload_uses_local_prototype_fallback_when_upload_service_is_unavailable_in_testing\|FullyQualifiedName~Upload_does_not_use_local_prototype_fallback_when_upload_service_is_unavailable_in_production\|FullyQualifiedName~ResumeUpload_validates_content_range_and_streams_chunk\|FullyQualifiedName~CompleteUpload_non_demo_file_returns_processing_status" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 4 focused tests covering testing fallback, production no-fallback behavior, resumable chunk validation/streaming, and real-pipeline completion status |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Agent PricingService Estimate Gate
 
 ### Scope
