@@ -33,6 +33,20 @@
 |---------|--------|
 | `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused browser E2E test covering Make Studio payment-to-production-to-delivery plus customer-visible manufacturing progress, paid payment state, delivered handoff, and restored OrderService timeline entries |
 
+## 2026-06-20 Make Studio Upload And Preview Guard Gate
+
+### Scope
+
+- Hardened the QuoteEngine Make Studio upload entry point so the hidden file picker cannot open before the workspace route state is initialized and repeated upload button/dropzone events cannot trigger duplicate picker opens.
+- Hardened browser generated-preview profile shorthand handling so missing or invalid profile dimensions fail instead of silently falling back to default geometry.
+- Reset the fake payment client state in the checkout shipping snapshot endpoint test so payment assertions are isolated from prior initiations in the shared test collection.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~QuoteWorkspace_FilePickerOpenIsGuardedUntilRouteStateAndSinglePendingOpen|FullyQualifiedName~ReplicadWorker_validates_profile_shorthand_dimensions_before_face_creation|FullyQualifiedName~Payment_initiation_persists_checkout_shipping_snapshot_on_order" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 3 focused tests covering upload picker guards, generated-preview profile dimension validation, and payment snapshot test isolation |
+
 ## 2026-06-20 Make Studio Login Restore E2E Gate
 
 ### Scope
