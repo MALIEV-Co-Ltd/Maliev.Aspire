@@ -4,6 +4,22 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Quote Version Order Linkage Gate
+
+### Scope
+
+- Added nullable OrderService quote reference fields so a manufacturing order durably records the accepted formal quote id, quote number, immutable quote version id, and quote version number.
+- Updated QuoteEngine's QuotationService client, Make Studio formal-quote artifact metadata, OrderService create payload, order artifact metadata, and customer order-detail mapping to preserve the same version identity.
+- Strengthened the Make Studio browser E2E gate so the formal quote artifact, order artifact, paid OrderService order detail, and QuoteEngine customer order detail all agree on the exact accepted quote version.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.OrderService.Tests\Maliev.OrderService.Tests.csproj --filter "FullyQualifiedName~PostOrdersPersistsAcceptedQuoteVersionReference" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused contract test covering order create/detail persistence of quote id, quote number, quote version id, and quote version number |
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~CreateAsync_SendsOrderServiceWireContractWithQuoteTotal|FullyQualifiedName~Order_creation_sends_quote_total_to_order_service|FullyQualifiedName~Agent_payment_confirmation_after_order_sets_payment_gate_and_artifact" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 3 focused tests covering QuoteEngine OrderService wire JSON, self-service order version propagation, and Make Studio order artifact metadata |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused browser E2E test covering corrected reupload, formal quote version metadata, durable OrderService quote-version linkage, paid order detail restoration, customer order detail restoration, production job linkage, and delivery completion |
+
 ## 2026-06-20 Make Studio Prompt Context Contract Gate
 
 ### Scope

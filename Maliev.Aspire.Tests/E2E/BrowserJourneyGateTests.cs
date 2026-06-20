@@ -1,4 +1,5 @@
 using Maliev.Aspire.Tests.Infrastructure;
+using System.Globalization;
 using Microsoft.Playwright;
 using System.IO.Compression;
 using System.Net;
@@ -1646,6 +1647,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var formalQuotePdfUrl = string.Empty;
         var formalQuoteId = Guid.Empty;
         var formalQuoteNumber = string.Empty;
+        var formalQuoteVersionId = Guid.Empty;
+        var formalQuoteVersionNumber = 0;
         var formalQuoteActionId = await PrepareActionAsync(
             page,
             agentContextToken,
@@ -1670,8 +1673,12 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.Contains("/upload/v1/mock-storage/", formalQuotePdfUrl, StringComparison.OrdinalIgnoreCase);
             formalQuoteId = Guid.Parse(GetJsonString(formalQuoteMetadata, "quoteId", "QuoteId"));
             formalQuoteNumber = GetJsonString(formalQuoteMetadata, "quoteNumber", "QuoteNumber");
+            formalQuoteVersionId = Guid.Parse(GetJsonString(formalQuoteMetadata, "quoteVersionId", "QuoteVersionId"));
+            formalQuoteVersionNumber = int.Parse(GetJsonString(formalQuoteMetadata, "quoteVersionNumber", "QuoteVersionNumber"), CultureInfo.InvariantCulture);
             Assert.NotEqual(Guid.Empty, formalQuoteId);
             Assert.False(string.IsNullOrWhiteSpace(formalQuoteNumber));
+            Assert.NotEqual(Guid.Empty, formalQuoteVersionId);
+            Assert.True(formalQuoteVersionNumber > 0);
         }
 
         var quoteDetailPage = await context.NewPageAsync();
@@ -1761,6 +1768,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.NotEqual(JsonValueKind.Undefined, orderArtifact.ValueKind);
             Assert.True(TryGetJsonProperty(orderArtifact, out var orderMetadata, "metadata", "Metadata"));
             orderId = Guid.Parse(GetJsonString(orderMetadata, "orderId", "OrderId"));
+            Assert.Equal(formalQuoteId, Guid.Parse(GetJsonString(orderMetadata, "quoteId", "QuoteId")));
+            Assert.Equal(formalQuoteNumber, GetJsonString(orderMetadata, "quoteNumber", "QuoteNumber"));
+            Assert.Equal(formalQuoteVersionId, Guid.Parse(GetJsonString(orderMetadata, "quoteVersionId", "QuoteVersionId")));
+            Assert.Equal(formalQuoteVersionNumber.ToString(CultureInfo.InvariantCulture), GetJsonString(orderMetadata, "quoteVersionNumber", "QuoteVersionNumber"));
             var orderPartsSummary = GetJsonString(orderMetadata, "parts", "Parts");
             Assert.Contains(bracketRevisionBFileName, orderPartsSummary, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(coverRevisionBFileName, orderPartsSummary, StringComparison.OrdinalIgnoreCase);
@@ -2006,7 +2017,11 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     var root = document.RootElement;
                     return string.Equals(GetJsonString(root, "currentStatus", "CurrentStatus"), "Paid", StringComparison.OrdinalIgnoreCase) &&
                            string.Equals(GetJsonString(root, "paymentStatus", "PaymentStatus"), "Paid", StringComparison.OrdinalIgnoreCase) &&
-                           string.Equals(GetJsonString(root, "customerPoNumber", "CustomerPoNumber"), customerPoNumber, StringComparison.Ordinal);
+                           string.Equals(GetJsonString(root, "customerPoNumber", "CustomerPoNumber"), customerPoNumber, StringComparison.Ordinal) &&
+                           string.Equals(GetJsonString(root, "quoteId", "QuoteId"), formalQuoteId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                           string.Equals(GetJsonString(root, "quoteNumber", "QuoteNumber"), formalQuoteNumber, StringComparison.Ordinal) &&
+                           string.Equals(GetJsonString(root, "quoteVersionId", "QuoteVersionId"), formalQuoteVersionId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                           GetJsonInt(root, "quoteVersionNumber", "QuoteVersionNumber") == formalQuoteVersionNumber;
                 },
                 timeout: TimeSpan.FromSeconds(120),
                 interval: TimeSpan.FromSeconds(2),
@@ -2089,6 +2104,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     detailStatus: detailResponse.status,
                     orderNumber: detail?.orderNumber ?? detail?.OrderNumber ?? '',
                     customerPoNumber: detail?.customerPoNumber ?? detail?.CustomerPoNumber ?? '',
+                    quoteId: detail?.quoteId ?? detail?.QuoteId ?? '',
+                    quoteNumber: detail?.quoteNumber ?? detail?.QuoteNumber ?? '',
+                    quoteVersionId: detail?.quoteVersionId ?? detail?.QuoteVersionId ?? '',
+                    quoteVersionNumber: `${detail?.quoteVersionNumber ?? detail?.QuoteVersionNumber ?? ''}`,
                     currentStatus: detail?.currentStatus ?? detail?.CurrentStatus ?? '',
                     paymentStatus: detail?.paymentStatus ?? detail?.PaymentStatus ?? '',
                     packetFileId: packet?.fileId ?? packet?.FileId ?? 0,
@@ -2118,6 +2137,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Equal(200, GetJsonInt(ownerOrderArtifactRoot, "detailStatus"));
         Assert.Equal(orderNumber, GetJsonString(ownerOrderArtifactRoot, "orderNumber"));
         Assert.Equal(customerPoNumber, GetJsonString(ownerOrderArtifactRoot, "customerPoNumber"));
+        Assert.Equal(formalQuoteId.ToString("D"), GetJsonString(ownerOrderArtifactRoot, "quoteId"));
+        Assert.Equal(formalQuoteNumber, GetJsonString(ownerOrderArtifactRoot, "quoteNumber"));
+        Assert.Equal(formalQuoteVersionId.ToString("D"), GetJsonString(ownerOrderArtifactRoot, "quoteVersionId"));
+        Assert.Equal(formalQuoteVersionNumber.ToString(CultureInfo.InvariantCulture), GetJsonString(ownerOrderArtifactRoot, "quoteVersionNumber"));
         Assert.Equal("Paid", GetJsonString(ownerOrderArtifactRoot, "currentStatus"));
         Assert.Equal("Paid", GetJsonString(ownerOrderArtifactRoot, "paymentStatus"));
         var orderConfirmationFileId = GetJsonInt(ownerOrderArtifactRoot, "orderDocumentFileId");
