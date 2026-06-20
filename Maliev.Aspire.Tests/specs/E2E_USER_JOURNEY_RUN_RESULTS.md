@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Estimate Production Fallback Gate
+
+### Scope
+
+- Restricted the public QuoteEngine `/quote/v1/estimate` route so local `QuoteEnginePrototypeStore` pricing fallback is available only in development/testing.
+- Production estimate requests now return `503 Service Unavailable` with a problem response when PricingService cannot produce a price, instead of returning locally fabricated prototype pricing.
+- Reused the controller's prototype fallback environment gate for estimate, project-route, and upload fallback checks to keep production gating consistent.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Estimate_uses_part_geometry_and_requires_sign_in_for_formal_quote\|FullyQualifiedName~Estimate_does_not_fall_back_to_prototype_pricing_in_production\|FullyQualifiedName~Reference_data_and_estimate_support_projectnew_customer_configuration" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 3 focused tests covering PricingService-backed estimates, Project New configuration pricing adjustments, and production no-fallback behavior when PricingService returns no price |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Project Route Production Fallback Gate
 
 ### Scope
