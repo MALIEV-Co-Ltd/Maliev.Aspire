@@ -2536,10 +2536,26 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     })
                 });
                 const deliveredBody = await read(delivered);
+                const pdf = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/pdf`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                const pdfBody = await read(pdf);
                 const detail = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}`, { credentials: 'include' });
                 const detailBody = await read(detail);
-                const files = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/files`, { credentials: 'include' });
-                const filesBody = await read(files);
+                let files = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/files`, { credentials: 'include' });
+                let filesBody = await read(files);
+                let pdfRecord = Array.isArray(filesBody.json)
+                    ? filesBody.json.find(file => String(file.fileType ?? file.FileType ?? '').toLowerCase() === 'deliverynotepdf')
+                    : null;
+                for (let attempt = 0; !pdfRecord && attempt < 45; attempt++) {
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    files = await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/files`, { credentials: 'include' });
+                    filesBody = await read(files);
+                    pdfRecord = Array.isArray(filesBody.json)
+                        ? filesBody.json.find(file => String(file.fileType ?? file.FileType ?? '').toLowerCase() === 'deliverynotepdf')
+                        : null;
+                }
                 const proofRecord = Array.isArray(filesBody.json)
                     ? filesBody.json.find(file => (file.fileId ?? file.FileId) === proofFileId)
                     : null;
@@ -2547,24 +2563,39 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     ? await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/files/${encodeURIComponent(proofFileId)}/download`, { credentials: 'include' })
                     : null;
                 const proofDownloadBytes = proofDownload ? new Uint8Array(await proofDownload.arrayBuffer()) : new Uint8Array();
+                const pdfFileId = pdfRecord?.fileId ?? pdfRecord?.FileId ?? '';
+                const pdfDownload = pdfFileId
+                    ? await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/files/${encodeURIComponent(pdfFileId)}/download`, { credentials: 'include' })
+                    : null;
+                const pdfDownloadBytes = pdfDownload ? new Uint8Array(await pdfDownload.arrayBuffer()) : new Uint8Array();
                 return JSON.stringify({
                     id,
                     create: createBody.status,
                     inTransit: inTransitBody.status,
                     proof: proofBody.status,
                     delivered: deliveredBody.status,
+                    pdf: pdfBody.status,
                     detail: detailBody.status,
                     files: filesBody.status,
                     proofDownload: proofDownload?.status ?? 0,
                     proofDownloadContentType: proofDownload?.headers.get('content-type') ?? '',
                     proofDownloadByteLength: proofDownloadBytes.length,
                     proofDownloadHead: Array.from(proofDownloadBytes.slice(0, 10)).join(','),
+                    pdfDownload: pdfDownload?.status ?? 0,
+                    pdfDownloadContentType: pdfDownload?.headers.get('content-type') ?? '',
+                    pdfDownloadByteLength: pdfDownloadBytes.length,
+                    pdfDownloadHead: Array.from(pdfDownloadBytes.slice(0, 4)).join(','),
+                    pdfFileId,
+                    pdfFileType: pdfRecord?.fileType ?? pdfRecord?.FileType ?? '',
+                    pdfOriginalFileName: pdfRecord?.originalFileName ?? pdfRecord?.OriginalFileName ?? '',
                     proofFileId,
                     proofFileType,
                     proofOriginalFileName,
                     detailSignatureFileId: detailBody.json?.signatureFileId ?? detailBody.json?.SignatureFileId ?? '',
                     filesContainsProof: proofRecord ? 'true' : 'false',
-                    proofStorageUrl: proofRecord?.storageUrl ?? proofRecord?.StorageUrl ?? ''
+                    filesContainsPdf: pdfRecord ? 'true' : 'false',
+                    proofStorageUrl: proofRecord?.storageUrl ?? proofRecord?.StorageUrl ?? '',
+                    pdfStorageUrl: pdfRecord?.storageUrl ?? pdfRecord?.StorageUrl ?? ''
                 });
             }",
             new
@@ -2584,20 +2615,33 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "inTransit"));
             Assert.StartsWith("201 ", GetJsonString(deliveryRoot, "proof"));
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "delivered"));
+            Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "pdf"));
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "detail"));
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "files"));
             Assert.Equal(200, GetJsonInt(deliveryRoot, "proofDownload"));
             Assert.Contains("image/png", GetJsonString(deliveryRoot, "proofDownloadContentType"), StringComparison.OrdinalIgnoreCase);
             Assert.Equal(10, GetJsonInt(deliveryRoot, "proofDownloadByteLength"));
             Assert.Equal("137,80,78,71,13,10,26,10,77,83", GetJsonString(deliveryRoot, "proofDownloadHead"));
+            Assert.True(
+                GetJsonInt(deliveryRoot, "pdfDownload") == 200,
+                $"Generated delivery-note PDF download should return 200. Delivery state: {deliveryState}");
+            Assert.Contains("application/pdf", GetJsonString(deliveryRoot, "pdfDownloadContentType"), StringComparison.OrdinalIgnoreCase);
+            Assert.True(GetJsonInt(deliveryRoot, "pdfDownloadByteLength") > 4);
+            Assert.Equal("37,80,68,70", GetJsonString(deliveryRoot, "pdfDownloadHead"));
             Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "id")));
             var proofFileId = GetJsonGuid(deliveryRoot, "proofFileId");
             Assert.NotEqual(Guid.Empty, proofFileId);
+            var pdfFileId = GetJsonGuid(deliveryRoot, "pdfFileId");
+            Assert.NotEqual(Guid.Empty, pdfFileId);
             Assert.Equal("Signature", GetJsonString(deliveryRoot, "proofFileType"));
+            Assert.Equal("DeliveryNotePdf", GetJsonString(deliveryRoot, "pdfFileType"));
             Assert.Contains("make-studio-delivery-proof", GetJsonString(deliveryRoot, "proofOriginalFileName"), StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("delivery-note", GetJsonString(deliveryRoot, "pdfOriginalFileName"), StringComparison.OrdinalIgnoreCase);
             Assert.Equal(proofFileId, GetJsonGuid(deliveryRoot, "detailSignatureFileId"));
             Assert.Equal("true", GetJsonString(deliveryRoot, "filesContainsProof"));
+            Assert.Equal("true", GetJsonString(deliveryRoot, "filesContainsPdf"));
             Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "proofStorageUrl")));
+            Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "pdfStorageUrl")));
         }
 
         string deliveredOrderObservation = string.Empty;

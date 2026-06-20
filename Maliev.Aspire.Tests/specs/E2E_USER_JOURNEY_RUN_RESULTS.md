@@ -4,23 +4,26 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
-## 2026-06-20 Make Studio Delivery Proof Download Gate
+## 2026-06-20 Make Studio Delivery Proof And PDF Download Gate
 
 ### Scope
 
 - Added a DeliveryService file-download contract for delivery-note attachments that enforces the delivery note/customer boundary and streams stored proof bytes from the configured file storage provider.
 - Added an Intranet BFF proxy route for authenticated delivery-note file downloads so employee delivery workflows do not expose downstream service URLs or storage internals.
-- Strengthened `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` so the paid Make Studio production handoff uploads proof-of-delivery evidence, lists the DeliveryService file record, downloads it through Intranet, and verifies the original PNG bytes.
+- Fixed generated delivery-note PDFs so DeliveryService publishes PDF requests outside the EF outbox-only entity mutation path, PdfService fetches delivery-note data with an authenticated service client, and DeliveryService can download PdfService/UploadService signed URL bytes.
+- Strengthened `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` so the paid Make Studio production handoff uploads proof-of-delivery evidence, requests the delivery-note PDF, lists both DeliveryService file records, downloads both artifacts through Intranet, and verifies the original PNG bytes plus `%PDF` bytes.
 
 ### Commands And Results
 
 | Command | Result |
 |---------|--------|
-| `dotnet test Maliev.DeliveryService.Tests\Maliev.DeliveryService.Tests.csproj --filter "FullyQualifiedName~DownloadFileAsync_WithUploadedFile_ReturnsOriginalBytes|FullyQualifiedName~DownloadFile_Found_ReturnsFileContent" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 2 focused tests covering storage byte retrieval, service download metadata, and DeliveryService controller file streaming |
+| `dotnet test Maliev.DeliveryService.Tests\Maliev.DeliveryService.Tests.csproj --filter "FullyQualifiedName~RequestPdfGenerationAsync_WithExistingDeliveryNote_PublishesPdfRequest\|FullyQualifiedName~DownloadFileAsync_WithGeneratedPdfUrl_ReturnsSignedUrlBytes\|FullyQualifiedName~GeneratePdf_Success_ReturnsAccepted\|FullyQualifiedName~ServiceAccountPrincipal_ReturnsTrueWithoutIamCall" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 5 focused tests covering direct delivery PDF request publishing, generated signed-URL byte downloads, controller request handoff, and service-account delivery-note reads |
+| `dotnet build Maliev.DeliveryService.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: DeliveryService solution compiled with 0 warnings and 0 errors |
+| `dotnet build Maliev.PdfService.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: PdfService solution compiled with 0 warnings and 0 errors |
 | `dotnet test Maliev.Intranet.Tests\Maliev.Intranet.Tests.csproj --filter "FullyQualifiedName~DownloadFileAsync_CallsDeliveryServiceDownloadRoute" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused test covering the Intranet DeliveryService client download route and byte response |
 | `dotnet build Maliev.Intranet.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: Intranet shared/client/BFF/tests compiled with 0 warnings and 0 errors |
 | `dotnet build Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-restore --verbosity quiet -p:UseSharedCompilation=false -m:1 /nr:false /clp:ErrorsOnly` | Passed: Aspire E2E test project compiled with 0 warnings and 0 errors |
-| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal` | Passed: 1 focused browser E2E test covering Make Studio payment-to-delivery handoff plus proof-of-delivery upload, list, and byte download through Intranet |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --no-build --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal` | Passed: 1 focused browser E2E test covering Make Studio payment-to-delivery handoff plus proof-of-delivery upload/download and generated delivery-note PDF request, attachment, download, and byte validation through Intranet |
 
 ## 2026-06-20 Make Studio Current-Version Acceptance Gate
 
