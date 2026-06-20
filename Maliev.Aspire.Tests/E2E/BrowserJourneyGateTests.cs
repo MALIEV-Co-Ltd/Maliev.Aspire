@@ -5600,17 +5600,28 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         Assert.Equal(2, GetJsonInt(quotation, "currentVersionNumber", "CurrentVersionNumber"));
         Assert.True(TryGetJsonProperty(quotation, out var versions, "versions", "Versions"));
         Assert.True(versions.GetArrayLength() >= 2);
-        Assert.Contains(versions.EnumerateArray(), version =>
+        var versionItems = versions.EnumerateArray().Select(version => version.Clone()).ToArray();
+        Assert.Contains(versionItems, version =>
             GetJsonInt(version, "versionNumber", "VersionNumber") == 2 &&
             GetJsonString(version, "changeSummary", "ChangeSummary").Contains(secondChangeSummary, StringComparison.Ordinal));
-        Assert.All(versions.EnumerateArray(), version =>
+        Assert.All(versionItems, version =>
         {
             Assert.False(string.IsNullOrWhiteSpace(GetJsonString(version, "projectSnapshotJson", "ProjectSnapshotJson")));
             Assert.False(string.IsNullOrWhiteSpace(GetJsonString(version, "projectSnapshotHash", "ProjectSnapshotHash")));
         });
 
+        var firstVersion = versionItems.Single(version => GetJsonInt(version, "versionNumber", "VersionNumber") == 1);
+        var secondVersion = versionItems.Single(version => GetJsonInt(version, "versionNumber", "VersionNumber") == 2);
+        await AssertQuotationVersionPdfContentAsync(page, firstVersion, expectedVersionNumber: 1);
+        await AssertQuotationVersionPdfContentAsync(page, secondVersion, expectedVersionNumber: 2);
+        Assert.NotEqual(
+            GetJsonString(firstVersion, "pdfArtifactStoragePath", "PdfArtifactStoragePath"),
+            GetJsonString(secondVersion, "pdfArtifactStoragePath", "PdfArtifactStoragePath"));
+
         var latestPdf = await GetLatestQuotationPdfAsync(page, quotationId);
         Assert.False(string.IsNullOrWhiteSpace(latestPdf));
+        var latestPdfState = await FetchPdfArtifactAsync(page, latestPdf);
+        AssertPdfArtifactContent(latestPdfState, expectedVersionNumber: 2);
 
         await page.GotoAsync(new Uri(intranetBase, $"/sales/projects/{project.ProjectId}?tab=quote").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
         await Expect(page.Locator("body")).ToContainTextAsync("Quote document", new() { Timeout = 30_000 });
@@ -8855,6 +8866,44 @@ END-ISO-10303-21;`;
         using var document = JsonDocument.Parse(result[4..]);
         return GetJsonString(document.RootElement, "storageUrl", "StorageUrl", "url", "Url");
     }
+
+    private static async Task AssertQuotationVersionPdfContentAsync(IPage page, JsonElement version, int expectedVersionNumber)
+    {
+        var pdfUrl = GetJsonString(version, "pdfArtifactUrl", "PdfArtifactUrl");
+        var pdfStoragePath = GetJsonString(version, "pdfArtifactStoragePath", "PdfArtifactStoragePath");
+        Assert.False(string.IsNullOrWhiteSpace(pdfUrl));
+        Assert.StartsWith("pdfs/quotation/", pdfStoragePath, StringComparison.OrdinalIgnoreCase);
+
+        var pdfState = await FetchPdfArtifactAsync(page, pdfUrl);
+        AssertPdfArtifactContent(pdfState, expectedVersionNumber);
+    }
+
+    private static async Task<PdfArtifactState> FetchPdfArtifactAsync(IPage page, string url)
+    {
+        var artifactUrl = Uri.TryCreate(url, UriKind.Absolute, out var absoluteUrl)
+            ? absoluteUrl.ToString()
+            : new Uri(new Uri(page.Url), url).ToString();
+        var response = await page.Context.APIRequest.GetAsync(artifactUrl);
+        var body = await response.BodyAsync();
+        var text = Encoding.Latin1.GetString(body);
+
+        return new PdfArtifactState(
+            response.Status,
+            response.Headers.TryGetValue("content-type", out var contentType) ? contentType : string.Empty,
+            body.Length,
+            text[..Math.Min(text.Length, 16)],
+            text[Math.Max(0, text.Length - 512)..]);
+    }
+
+    private static void AssertPdfArtifactContent(PdfArtifactState pdfState, int expectedVersionNumber)
+    {
+        Assert.Equal(200, pdfState.Status);
+        Assert.True(pdfState.ByteLength > 1_000, $"Quotation version {expectedVersionNumber} PDF was too small: {pdfState}");
+        Assert.Contains("%PDF-", pdfState.Head, StringComparison.Ordinal);
+        Assert.Contains("%%EOF", pdfState.Tail, StringComparison.Ordinal);
+    }
+
+    private sealed record PdfArtifactState(int Status, string ContentType, int ByteLength, string Head, string Tail);
 
     private static async Task<JsonElement> DuplicateIntranetProjectAsync(IPage page, Guid projectId, string title)
     {
