@@ -2569,7 +2569,13 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
 
         await GotoAppAsync(page, new Uri(quoteBase, $"/orders/{Uri.EscapeDataString(orderNumber)}").ToString());
         await WaitForQuoteEngineReadyAsync(page);
+        await Expect(page.Locator("[data-order-section='manufacturing-progress']")).ToBeVisibleAsync(new() { Timeout = 30_000 });
+        await Expect(page.Locator("[data-order-section='manufacturing-progress']")).ToContainTextAsync("Delivery", new() { Timeout = 30_000 });
+        await Expect(page.Locator("[data-order-section='manufacturing-progress']")).ToContainTextAsync("100%", new() { Timeout = 30_000 });
+        await Expect(page.Locator("[data-order-section='payment']")).ToContainTextAsync("Paid", new() { Timeout = 30_000 });
         await Expect(page.Locator("[data-order-section='delivery']")).ToContainTextAsync("Delivered", new() { Timeout = 30_000 });
+        await Expect(page.Locator("[data-order-section='timeline']")).ToContainTextAsync("Accepted", new() { Timeout = 30_000 });
+        await Expect(page.Locator("[data-order-section='timeline']")).ToContainTextAsync("Paid", new() { Timeout = 30_000 });
     }
 
     /// <summary>

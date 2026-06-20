@@ -20,6 +20,19 @@
 | `dotnet test Maliev.ChatbotService.Tests\Maliev.ChatbotService.Tests.csproj --filter "FullyQualifiedName~MessagePipelinePolicyTests|FullyQualifiedName~SystemInstructionDefaultPromptTests" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 25 focused tests covering message length policy and Make Studio system instruction content |
 | `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Generate_3d_preview_tool_rejects_invalid_profile_plane_before_creating_ready_artifact|FullyQualifiedName~Agent_message_stream_with_uploaded_sketch_prefers_signed_storage_url_over_inline_preview" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 2 focused tests covering generated-preview validation and keeping streamed Make Studio messages under the downstream ChatbotService limit with signed sketch attachments |
 
+## 2026-06-20 Make Studio Customer Order Tracking Gate
+
+### Scope
+
+- Strengthened `QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob` so the final customer-visible order detail route must restore the manufacturing progress section, completed delivery milestone, paid payment state, delivered handoff, and OrderService lifecycle timeline entries.
+- This keeps the Make Studio payment-to-production-to-delivery path from passing only on downstream service records while the customer order page fails to show the restored status tracking.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused browser E2E test covering Make Studio payment-to-production-to-delivery plus customer-visible manufacturing progress, paid payment state, delivered handoff, and restored OrderService timeline entries |
+
 ## 2026-06-20 Make Studio Login Restore E2E Gate
 
 ### Scope
