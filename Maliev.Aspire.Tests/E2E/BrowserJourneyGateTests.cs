@@ -2608,6 +2608,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 trackingNumber = deliveryTrackingNumber,
                 receiver = deliveryReceiver
             });
+        var deliveryNoteId = string.Empty;
         using (var deliveryDocument = JsonDocument.Parse(deliveryState))
         {
             var deliveryRoot = deliveryDocument.RootElement;
@@ -2628,7 +2629,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.Contains("application/pdf", GetJsonString(deliveryRoot, "pdfDownloadContentType"), StringComparison.OrdinalIgnoreCase);
             Assert.True(GetJsonInt(deliveryRoot, "pdfDownloadByteLength") > 4);
             Assert.Equal("37,80,68,70", GetJsonString(deliveryRoot, "pdfDownloadHead"));
-            Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "id")));
+            deliveryNoteId = GetJsonString(deliveryRoot, "id");
+            Assert.False(string.IsNullOrWhiteSpace(deliveryNoteId));
             var proofFileId = GetJsonGuid(deliveryRoot, "proofFileId");
             Assert.NotEqual(Guid.Empty, proofFileId);
             var pdfFileId = GetJsonGuid(deliveryRoot, "pdfFileId");
@@ -2642,6 +2644,49 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.Equal("true", GetJsonString(deliveryRoot, "filesContainsPdf"));
             Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "proofStorageUrl")));
             Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "pdfStorageUrl")));
+        }
+
+        string deliveryNotificationObservation = string.Empty;
+        try
+        {
+            _ = await TestHelpers.WaitForAsync(
+                async () =>
+                {
+                    using var response = await notificationClient.GetAsync(
+                        $"/notification/v1/delivery-logs?userId={customerId:D}&channelType=rabbitmq-event&status=received&pageSize=100");
+                    return $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}";
+                },
+                result =>
+                {
+                    deliveryNotificationObservation = result;
+                    if (!result.StartsWith("200 ", StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+
+                    using var document = JsonDocument.Parse(result[4..]);
+                    if (!TryGetJsonProperty(document.RootElement, out var logs, "items", "Items", "data", "Data") ||
+                        logs.ValueKind != JsonValueKind.Array)
+                    {
+                        return false;
+                    }
+
+                    return logs.EnumerateArray().Any(log =>
+                        string.Equals(GetJsonString(log, "userId", "UserId"), customerId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(GetJsonString(log, "channelType", "ChannelType"), "rabbitmq-event", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(GetJsonString(log, "status", "Status"), "received", StringComparison.OrdinalIgnoreCase) &&
+                        GetJsonString(log, "messageContent", "MessageContent").Contains(deliveryNoteId, StringComparison.OrdinalIgnoreCase) &&
+                        GetJsonString(log, "messageContent", "MessageContent").Contains(orderNumber, StringComparison.OrdinalIgnoreCase));
+                },
+                timeout: TimeSpan.FromSeconds(120),
+                interval: TimeSpan.FromSeconds(2),
+                message: $"NotificationService did not record a delivery-completed notification log for Make Studio delivery {deliveryNoteId} and order {orderNumber}.");
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException(
+                $"NotificationService did not record a delivery-completed notification log for Make Studio delivery {deliveryNoteId} and order {orderNumber}. Last observation: {TruncateForAssertion(deliveryNotificationObservation)}",
+                ex);
         }
 
         string deliveredOrderObservation = string.Empty;
