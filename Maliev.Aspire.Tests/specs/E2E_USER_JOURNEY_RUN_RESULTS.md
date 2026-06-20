@@ -60,6 +60,19 @@
 |---------|--------|
 | `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused browser E2E test covering Make Studio project, quote, order, and order-file cross-customer denial while preserving the paid production and delivery flow |
 
+## 2026-06-20 Make Studio Preview Transform Guard Gate
+
+### Scope
+
+- Hardened the browser Replicad worker used by Make Studio generated previews so translate vectors and rotate axis/angle values are validated before calling CAD operations.
+- This prevents malformed BFF/tool-generated transform commands from falling through to unsafe default geometry behavior in the customer workbench preview.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~ReplicadWorker_validates_transform_params_before_cad_calls" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 1 focused source test covering generated-preview translate and rotate transform validation |
+
 ## 2026-06-20 Make Studio Login Restore E2E Gate
 
 ### Scope
