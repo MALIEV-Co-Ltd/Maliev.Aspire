@@ -4,6 +4,22 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Prompt Context Contract Gate
+
+### Scope
+
+- Strengthened ChatbotService's QuoteEngine assistant prompt with explicit manufacturing process defaults, DFM interpretation guidance, Thai/English identity, and compact table guidance for comparable assumptions.
+- Aligned `SendMessageRequest.Content` validation with `MessagePipelinePolicy.MaxContentCharacters` so QuoteEngine can send the full Make Studio turn up to the downstream 8000-character contract instead of the previous 4000-character request annotation.
+- Updated QuoteEngine BFF prompt composition so durable manufacturing guidance is kept before dynamic state when content must be trimmed, preserving behavioral instructions while recoverable project state can be re-read through tools.
+- Added/validated generated-preview input safety around invalid profile planes and preserved signed-upload replacement for large inline sketch previews.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.ChatbotService.Tests\Maliev.ChatbotService.Tests.csproj --filter "FullyQualifiedName~MessagePipelinePolicyTests|FullyQualifiedName~SystemInstructionDefaultPromptTests" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 25 focused tests covering message length policy and Make Studio system instruction content |
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Generate_3d_preview_tool_rejects_invalid_profile_plane_before_creating_ready_artifact|FullyQualifiedName~Agent_message_stream_with_uploaded_sketch_prefers_signed_storage_url_over_inline_preview" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 2 focused tests covering generated-preview validation and keeping streamed Make Studio messages under the downstream ChatbotService limit with signed sketch attachments |
+
 ## 2026-06-20 Make Studio Login Restore E2E Gate
 
 ### Scope
