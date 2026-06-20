@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio Agent Account Context Persistence Gate
+
+### Scope
+
+- Updated the QuoteEngine Make Studio `quote_get_account_context` tool so signed-in profile and default checkout addresses come from CustomerService instead of `QuoteEnginePrototypeStore`.
+- Kept prototype account-context fallback limited to development/testing; production now returns an explicit `account_context_available` gate when CustomerService account context cannot be served.
+- Strengthened endpoint coverage so the signed-in account context must expose CustomerService-backed company, VAT, billing address, and shipping address values.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~Agent_account_context_returns_auth_handoff_without_customer_defaults_when_anonymous\|FullyQualifiedName~Agent_account_context_returns_signed_in_profile_and_default_checkout_addresses" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: anonymous context stays auth-only, while signed-in Make Studio account context uses CustomerService-backed profile and default checkout addresses |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Agent Document Search Persistence Gate
 
 ### Scope
