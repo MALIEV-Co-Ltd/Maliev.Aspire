@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-20 Make Studio PaymentService Failure Handling Gate
+
+### Scope
+
+- Aligned `PaymentServiceClient.InitiateAsync` with the `IPaymentServiceClient` contract: PaymentService non-success responses now return `null` instead of throwing an unhandled `InvalidOperationException`.
+- Preserves the existing QuoteEngine controller/agent payment handling path, which converts a null payment initiation result into a controlled payment-unavailable response or action failure.
+- Covered this before broader order-tracking E2E because payment provider failures must not bypass the customer-facing checkout error boundary.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.QuoteEngine.Tests\Maliev.QuoteEngine.Tests.csproj --filter "FullyQualifiedName~PaymentServiceClientContractTests\|FullyQualifiedName~Payment_initiation_blocks_when_order_cannot_be_accepted_before_checkout\|FullyQualifiedName~Payment_initiation_uses_checkout_attempt_id_in_idempotency_key\|FullyQualifiedName~Agent_start_payment_blocks_until_checkout_details_are_collected" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: 5 focused tests covering PaymentService success/non-success wire behavior, payment idempotency, order-acceptance blocking, and agent checkout gating |
+| `dotnet build Maliev.QuoteEngine.slnx --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false` | Passed: QuoteEngine solution compiled with 0 warnings and 0 errors |
+
 ## 2026-06-20 Make Studio Reupload Commercial State Invalidation Gate
 
 ### Scope
