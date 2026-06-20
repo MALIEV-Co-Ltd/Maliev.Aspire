@@ -5623,6 +5623,30 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var latestPdfState = await FetchPdfArtifactAsync(page, latestPdf);
         AssertPdfArtifactContent(latestPdfState, expectedVersionNumber: 2);
 
+        var staleAcceptStatus = await page.EvaluateAsync<int>(
+            @"async args => {
+                const response = await fetch(`/api/v1/projects/${args.projectId}/accept-quotation`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                        expectedQuotationVersionId: args.expectedQuotationVersionId,
+                        expectedQuotationVersionNumber: args.expectedQuotationVersionNumber
+                    })
+                });
+                return response.status;
+            }",
+            new
+            {
+                projectId = project.ProjectId,
+                expectedQuotationVersionId = GetJsonGuid(firstVersion, "id", "Id"),
+                expectedQuotationVersionNumber = 1
+            });
+        Assert.Equal(409, staleAcceptStatus);
+        var projectAfterStaleAccept = await GetIntranetProjectAsync(page, project.ProjectId);
+        Assert.Equal("QuotationGenerated", GetJsonString(projectAfterStaleAccept, "status", "Status"));
+        Assert.Equal(2, GetJsonInt(projectAfterStaleAccept, "currentQuotationVersionNumber", "CurrentQuotationVersionNumber"));
+
         await page.GotoAsync(new Uri(intranetBase, $"/sales/projects/{project.ProjectId}?tab=quote").ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.NetworkIdle });
         await Expect(page.Locator("body")).ToContainTextAsync("Quote document", new() { Timeout = 30_000 });
         await Expect(page.Locator("body")).ToContainTextAsync("Quote revision history", new() { Timeout = 30_000 });
