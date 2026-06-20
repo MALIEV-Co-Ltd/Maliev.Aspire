@@ -227,6 +227,7 @@ public class AspireTestFixture : IAsyncLifetime
         {
             "GeometryService" => TimeSpan.FromMinutes(8),
             "PaymentService" => TimeSpan.FromMinutes(6),
+            "QuoteEngineBff" => TimeSpan.FromMinutes(6),
             _ => TimeSpan.FromMinutes(3)
         };
         var deadline = DateTime.UtcNow.Add(timeout);
@@ -261,12 +262,32 @@ public class AspireTestFixture : IAsyncLifetime
             Thread.Sleep(TimeSpan.FromSeconds(1));
         }
 
-        var detail = lastException is not null
-            ? lastException.Message
-            : $"last status {(int?)lastStatus} {lastStatus}: {lastContent}";
+        var detail = string.Join(
+            "; ",
+            new[]
+            {
+                $"base address {client.BaseAddress}",
+                $"attempts {attempts}",
+                lastStatus is not null
+                    ? $"last status {(int)lastStatus.Value} {lastStatus}: {Truncate(lastContent, 1_000)}"
+                    : "last status <none>",
+                lastException is not null
+                    ? $"last exception {lastException.GetType().Name}: {lastException.Message}"
+                    : "last exception <none>"
+            });
 
         throw new TimeoutException(
             $"{projectName} did not become live at {livenessPath} within {timeout.TotalSeconds:N0}s; {detail}");
+    }
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= maxLength ? value : value[..maxLength];
     }
 
     /// <summary>

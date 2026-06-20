@@ -1854,6 +1854,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         using var jobReadinessClient = _fixture.CreateAuthenticatedClient("JobService");
         using var accountingClient = _fixture.CreateAuthenticatedClient("AccountingService");
         using var receiptClient = _fixture.CreateAuthenticatedClient("ReceiptService");
+        using var deliveryClient = _fixture.CreateClient("DeliveryService");
+        using var pdfClient = _fixture.CreateClient("PdfService");
+        _ = deliveryClient.BaseAddress;
+        _ = pdfClient.BaseAddress;
         _ = await TestHelpers.WaitForAsync(
             async () =>
             {
@@ -9550,21 +9554,37 @@ END-ISO-10303-21;`;
     {
         var json = await page.EvaluateAsync<string>(
             @"async actionId => {
-                const response = await fetch(`/quote/v1/agent/actions/${actionId}/confirm`, {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({})
-                });
-                const text = await response.text();
-                let body = {};
                 try {
-                    body = text ? JSON.parse(text) : {};
-                } catch {
-                    body = { raw: text };
-                }
+                    const response = await fetch(`/quote/v1/agent/actions/${actionId}/confirm`, {
+                        method: 'POST',
+                        credentials: 'include',
+                        redirect: 'manual',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({})
+                    });
+                    const text = response.type === 'opaqueredirect' ? '' : await response.text();
+                    let body = {};
+                    try {
+                        body = text ? JSON.parse(text) : {};
+                    } catch {
+                        body = { raw: text };
+                    }
 
-                return JSON.stringify({ status: response.status, body });
+                    return JSON.stringify({
+                        status: response.status,
+                        responseType: response.type,
+                        redirected: response.redirected,
+                        url: response.url,
+                        body
+                    });
+                } catch (error) {
+                    return JSON.stringify({
+                        status: 0,
+                        error: error && error.message ? error.message : String(error),
+                        pageUrl: window.location.href,
+                        bodyClass: document.body ? document.body.className : ''
+                    });
+                }
             }",
             actionId.ToString("D"));
 

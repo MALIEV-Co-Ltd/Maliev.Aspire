@@ -74,6 +74,22 @@ public class ServiceDiscoveryTests
     }
 
     /// <summary>
+    /// Verifies the customer QuoteEngine BFF starts and responds to its liveness endpoint.
+    /// </summary>
+    [Fact]
+    public async Task QuoteEngineBff_StartsAndRespondsToLivenessCheck()
+    {
+        _output.WriteLine("Checking QuoteEngineBff liveness...");
+
+        var client = _fixture.CreateClient("QuoteEngineBff");
+
+        var response = await client.GetAsync("/quote/aspire-liveness");
+
+        _output.WriteLine($"  QuoteEngineBff: {response.StatusCode}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    /// <summary>
     /// Verifies the BFF system health endpoint reports all downstream services as reachable.
     /// </summary>
     [Fact]
@@ -315,6 +331,7 @@ public class ServiceDiscoveryTests
         { "PurchaseOrderService", "/purchase-order/aspire-liveness" },
         { "ReceiptService", "/receipt/aspire-liveness" },
         { "GeometryService", "/geometry/aspire-liveness" },
+        { "QuoteEngineBff", "/quote/aspire-liveness" },
     };
 
     /// <summary>
