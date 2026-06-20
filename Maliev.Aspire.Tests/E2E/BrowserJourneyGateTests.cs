@@ -2543,6 +2543,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 const proofRecord = Array.isArray(filesBody.json)
                     ? filesBody.json.find(file => (file.fileId ?? file.FileId) === proofFileId)
                     : null;
+                const proofDownload = proofFileId
+                    ? await fetch(`/api/v1/deliverynotes/${encodeURIComponent(id)}/files/${encodeURIComponent(proofFileId)}/download`, { credentials: 'include' })
+                    : null;
+                const proofDownloadBytes = proofDownload ? new Uint8Array(await proofDownload.arrayBuffer()) : new Uint8Array();
                 return JSON.stringify({
                     id,
                     create: createBody.status,
@@ -2551,6 +2555,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                     delivered: deliveredBody.status,
                     detail: detailBody.status,
                     files: filesBody.status,
+                    proofDownload: proofDownload?.status ?? 0,
+                    proofDownloadContentType: proofDownload?.headers.get('content-type') ?? '',
+                    proofDownloadByteLength: proofDownloadBytes.length,
+                    proofDownloadHead: Array.from(proofDownloadBytes.slice(0, 10)).join(','),
                     proofFileId,
                     proofFileType,
                     proofOriginalFileName,
@@ -2578,6 +2586,10 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "delivered"));
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "detail"));
             Assert.StartsWith("200 ", GetJsonString(deliveryRoot, "files"));
+            Assert.Equal(200, GetJsonInt(deliveryRoot, "proofDownload"));
+            Assert.Contains("image/png", GetJsonString(deliveryRoot, "proofDownloadContentType"), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(10, GetJsonInt(deliveryRoot, "proofDownloadByteLength"));
+            Assert.Equal("137,80,78,71,13,10,26,10,77,83", GetJsonString(deliveryRoot, "proofDownloadHead"));
             Assert.False(string.IsNullOrWhiteSpace(GetJsonString(deliveryRoot, "id")));
             var proofFileId = GetJsonGuid(deliveryRoot, "proofFileId");
             Assert.NotEqual(Guid.Empty, proofFileId);
