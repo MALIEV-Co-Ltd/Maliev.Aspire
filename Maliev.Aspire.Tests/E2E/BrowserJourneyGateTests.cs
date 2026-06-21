@@ -1852,6 +1852,7 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         using var orderClient = _fixture.CreateAuthenticatedClient("OrderService");
         using var notificationClient = _fixture.CreateAuthenticatedClient("NotificationService");
         using var jobReadinessClient = _fixture.CreateAuthenticatedClient("JobService");
+        using var jobClient = _fixture.CreateAuthenticatedClient("JobService");
         using var accountingClient = _fixture.CreateAuthenticatedClient("AccountingService");
         using var receiptClient = _fixture.CreateAuthenticatedClient("ReceiptService");
         using var deliveryClient = _fixture.CreateClient("DeliveryService");
@@ -2040,6 +2041,55 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
                 orderNumber,
                 transactionId);
             throw new TimeoutException($"{ex.Message} Last observation: {finalObservation}", ex);
+        }
+
+        string jobObservation = string.Empty;
+        try
+        {
+            _ = await TestHelpers.WaitForAsync(
+                async () =>
+                {
+                    using var response = await jobClient.GetAsync($"/job/v1/jobs/by-order/{orderId:D}");
+                    return $"{(int)response.StatusCode} {await response.Content.ReadAsStringAsync()}";
+                },
+                result =>
+                {
+                    jobObservation = result;
+                    if (!result.StartsWith("200 ", StringComparison.Ordinal))
+                    {
+                        return false;
+                    }
+
+                    using var document = JsonDocument.Parse(result[4..]);
+                    if (document.RootElement.ValueKind != JsonValueKind.Array)
+                    {
+                        return false;
+                    }
+
+                    var jobs = document.RootElement.EnumerateArray().ToArray();
+                    return jobs.Length >= 2 &&
+                           jobs.All(job =>
+                               string.Equals(GetJsonString(job, "orderId", "OrderId"), orderId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                               Guid.TryParse(GetJsonString(job, "jobId", "JobId"), out var jobId) &&
+                               jobId != Guid.Empty &&
+                               Guid.TryParse(GetJsonString(job, "orderItemId", "OrderItemId"), out var orderItemId) &&
+                               orderItemId != Guid.Empty &&
+                               string.Equals(GetJsonString(job, "sourceProjectId", "SourceProjectId"), projectServiceProjectId.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                               !string.IsNullOrWhiteSpace(GetJsonString(job, "sourceProjectPartId", "SourceProjectPartId")) &&
+                               !string.IsNullOrWhiteSpace(GetJsonString(job, "technology", "Technology")) &&
+                               !string.IsNullOrWhiteSpace(GetJsonString(job, "status", "Status")));
+                },
+                timeout: TimeSpan.FromSeconds(120),
+                interval: TimeSpan.FromSeconds(2),
+                message: $"JobService did not create production jobs for paid Make Studio order {orderNumber} ({orderId:D}).");
+        }
+        catch (TimeoutException ex)
+        {
+            using var orderItemsResponse = await orderClient.GetAsync($"/order/v1/orders/{Uri.EscapeDataString(orderNumber)}/items");
+            var directOrderItemsObservation = $"{(int)orderItemsResponse.StatusCode} {await orderItemsResponse.Content.ReadAsStringAsync()}";
+            throw new TimeoutException(
+                $"{ex.Message} Last JobService observation: {TruncateForAssertion(jobObservation)} Direct OrderService items: {TruncateForAssertion(directOrderItemsObservation)}",
+                ex);
         }
 
         var manufacturingPacketName = $"make-studio-manufacturing-packet-{unique}.pdf";
