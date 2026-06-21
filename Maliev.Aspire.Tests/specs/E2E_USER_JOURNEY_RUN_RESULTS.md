@@ -4,6 +4,21 @@
 > Keep the stable story definitions in [E2E_USER_JOURNEY_STORIES.md](./E2E_USER_JOURNEY_STORIES.md); use this file for run results, blockers, and fixes.
 > Latest sections appear first. Older manual sections are retained as historical evidence and may include blockers that later automated runs resolved.
 
+## 2026-06-21 Make Studio Full Paid-Order Production Linkage Gate
+
+### Scope
+
+- Ran the focused Aspire browser journey for Make Studio agent tools from DFM-blocked upload through corrected reupload, pricing, formal quote, quote approval, order creation, checkout, PaymentService handoff/confirmation, workbench restore, QuoteEngine order tracking, Intranet order visibility, and ProjectService part linkage to production jobs.
+- Fixed the E2E setup to create real customer-owned billing and shipping addresses in CustomerService and verify QuoteEngine `/quote/v1/account/addresses` can read those IDs before `quote_update_checkout_details` and `quote_start_payment`.
+- The first durable run exposed a valid readiness gap in the test data: `quote_start_payment` refused to propose `start_payment` when checkout used random address IDs that did not belong to the signed-in customer.
+
+### Commands And Results
+
+| Command | Result |
+|---------|--------|
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal" --logger "trx;LogFileName=make-studio-e2e-20260621.trx"` | Failed at `PrepareActionAsync` for `quote_start_payment`: HTTP body existed but no `proposedActions` because the test had passed random checkout address IDs. TRX: `Maliev.Aspire.Tests\TestResults\make-studio-e2e-20260621.trx` |
+| `dotnet test Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj --filter "FullyQualifiedName~QuoteEngine_MakeStudioAgentTools_CorrectsDfmCompletesPaymentAndLinksProductionJob" --verbosity minimal -p:UseSharedCompilation=false -m:1 /nr:false --logger "console;verbosity=minimal" --logger "trx;LogFileName=make-studio-e2e-20260621-addresses.trx"` | Passed: 1 focused browser E2E test, 0 failures, duration 2 m 13 s. TRX: `Maliev.Aspire.Tests\TestResults\make-studio-e2e-20260621-addresses.trx` |
+
 ## 2026-06-20 Make Studio Payment Completion Order Tracking Gate
 
 ### Scope

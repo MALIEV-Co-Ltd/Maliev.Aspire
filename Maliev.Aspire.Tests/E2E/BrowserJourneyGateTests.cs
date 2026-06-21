@@ -1483,6 +1483,24 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         var customerId = GetJsonGuid(profile, "customerId", "CustomerId");
         Assert.NotEqual(Guid.Empty, customerId);
 
+        var checkoutAddresses = await CreateCustomerCheckoutAddressesAsync(customerId, unique);
+        using (var addressesDocument = JsonDocument.Parse(await page.EvaluateAsync<string>(
+            @"async () => {
+                const response = await fetch('/quote/v1/account/addresses', { credentials: 'include' });
+                return JSON.stringify({ status: response.status, addresses: await response.json() });
+            }")))
+        {
+            var addressesRoot = addressesDocument.RootElement;
+            Assert.Equal(200, GetJsonInt(addressesRoot, "status"));
+            Assert.True(TryGetJsonProperty(addressesRoot, out var addresses, "addresses"));
+            Assert.Contains(addresses.EnumerateArray(), address =>
+                GetJsonGuid(address, "id", "Id") == checkoutAddresses.BillingAddressId &&
+                GetJsonString(address, "type", "Type").Equals("Billing", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(addresses.EnumerateArray(), address =>
+                GetJsonGuid(address, "id", "Id") == checkoutAddresses.ShippingAddressId &&
+                GetJsonString(address, "type", "Type").Equals("Shipping", StringComparison.OrdinalIgnoreCase));
+        }
+
         var sessionId = Guid.NewGuid();
         var chatbotSessionId = Guid.NewGuid();
         var agentContextToken = CreateQuoteAgentContextToken(sessionId, chatbotSessionId, customerId);
@@ -1784,8 +1802,8 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
             "quote_update_checkout_details",
             new
             {
-                billing_address_id = Guid.NewGuid(),
-                shipping_address_id = Guid.NewGuid(),
+                billing_address_id = checkoutAddresses.BillingAddressId,
+                shipping_address_id = checkoutAddresses.ShippingAddressId,
                 phone = "+66 2 555 0100",
                 company = "Make Studio E2E Buyer",
                 vat_number = "TH1234567890",
@@ -7105,6 +7123,97 @@ public sealed class BrowserJourneyGateTests : IAsyncLifetime
         await SubmitEmailSignUpFormAsync(signUpForm, "Quote", "Customer", email, "PrototypeOnly123!");
         await WaitForQuoteEngineReturnUrlAsync(page, returnUrl, authDiagnostics);
     }
+
+    private async Task<CustomerCheckoutAddresses> CreateCustomerCheckoutAddressesAsync(Guid customerId, string unique)
+    {
+        var countryId = await GetThailandCountryIdAsync();
+        using var customerClient = _fixture.CreateAuthenticatedClient("CustomerService");
+
+        async Task<Guid> CreateAddressAsync(string type, string addressLine1, string recipientName, string recipientPhone)
+        {
+            using var response = await customerClient.PostAsJsonAsync("/customer/v1/addresses", new
+            {
+                ownerType = "Customer",
+                ownerId = customerId,
+                type,
+                isDefault = true,
+                addressLine1,
+                addressLine2 = "Unit E2E",
+                district = type.Equals("Billing", StringComparison.OrdinalIgnoreCase) ? "Bang Rak" : "Khlong Toei",
+                city = "Bangkok",
+                stateProvince = "Bangkok",
+                postalCode = type.Equals("Billing", StringComparison.OrdinalIgnoreCase) ? "10500" : "10110",
+                countryId,
+                recipientName,
+                recipientPhone,
+                addressSource = "Manual",
+                formattedAddress = $"{addressLine1}, Bangkok"
+            });
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.True(
+                response.IsSuccessStatusCode,
+                $"CustomerService address create failed for {type} with HTTP {(int)response.StatusCode}: {body}");
+
+            using var document = JsonDocument.Parse(body);
+            var addressId = GetJsonGuid(document.RootElement, "id", "Id");
+            Assert.NotEqual(Guid.Empty, addressId);
+            return addressId;
+        }
+
+        var billingAddressId = await CreateAddressAsync(
+            "Billing",
+            $"12 Make Studio Billing Road {unique}",
+            "Make Studio Billing",
+            "+66810000001");
+        var shippingAddressId = await CreateAddressAsync(
+            "Shipping",
+            $"34 Make Studio Shipping Road {unique}",
+            "Make Studio Receiving",
+            "+66810000002");
+
+        return new CustomerCheckoutAddresses(billingAddressId, shippingAddressId);
+    }
+
+    private async Task<Guid> GetThailandCountryIdAsync()
+    {
+        using var countryClient = _fixture.CreateAuthenticatedClient("CountryService");
+        using var response = await countryClient.GetAsync("/country/v1/countries?pageSize=1000");
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.True(response.IsSuccessStatusCode, $"CountryService countries lookup failed with HTTP {(int)response.StatusCode}: {body}");
+
+        using var document = JsonDocument.Parse(body);
+        var countries = EnumerateCollection(document.RootElement).ToArray();
+        var thailand = countries.FirstOrDefault(country =>
+        {
+            var code = GetJsonString(country, "iso2", "Iso2", "code", "Code");
+            var name = GetJsonString(country, "name", "Name");
+            return code.Equals("TH", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("Thailand", StringComparison.OrdinalIgnoreCase);
+        });
+
+        Assert.NotEqual(JsonValueKind.Undefined, thailand.ValueKind);
+        var countryId = GetJsonGuid(thailand, "id", "Id");
+        Assert.NotEqual(Guid.Empty, countryId);
+        return countryId;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateCollection(JsonElement root)
+    {
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            return root.EnumerateArray();
+        }
+
+        if (TryGetJsonProperty(root, out var items, "items", "Items", "data", "Data") &&
+            items.ValueKind == JsonValueKind.Array)
+        {
+            return items.EnumerateArray();
+        }
+
+        return [];
+    }
+
+    private sealed record CustomerCheckoutAddresses(Guid BillingAddressId, Guid ShippingAddressId);
 
     private static async Task WaitForQuoteEngineReturnUrlAsync(
         IPage page,
