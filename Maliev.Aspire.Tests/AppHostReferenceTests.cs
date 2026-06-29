@@ -401,8 +401,8 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".WithEnvironment(\"QuoteEngine__BaseUrl\", quoteEngineBff.GetEndpoint(\"https\"))", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WaitFor(authService)", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WaitFor(customerService)", webBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientId\", config.WebGoogleClientId)", webBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientSecret\", config.WebGoogleClientSecret)", webBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientId\", config.GoogleClientId)", webBlock, StringComparison.Ordinal);
+        Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientSecret\", config.GoogleClientSecret)", webBlock, StringComparison.Ordinal);
         // The /web/aspire-liveness health check lives on the top-of-file WebBff declaration.
         Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/web/aspire-liveness\")", appHostSource, StringComparison.Ordinal);
     }
@@ -417,8 +417,6 @@ public sealed class AppHostReferenceTests
 
         Assert.Contains("Authentication:Google:Web:ClientId", appHostSource, StringComparison.Ordinal);
         Assert.Contains("Authentication:Google:Web:ClientSecret", appHostSource, StringComparison.Ordinal);
-        Assert.Contains("WebGoogleClientId: webGoogleClientId", appHostSource, StringComparison.Ordinal);
-        Assert.Contains("WebGoogleClientSecret: webGoogleClientSecret", appHostSource, StringComparison.Ordinal);
     }
 
     /// <summary>

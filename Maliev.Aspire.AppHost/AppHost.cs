@@ -113,16 +113,6 @@ static partial class Program
 
         var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId", secret: true);
         var googleClientSecret = builder.AddParameterFromConfig("GoogleClientSecret", "Authentication:Google:ClientSecret", secret: true);
-        var webGoogleClientId = builder.AddParameterFromConfig(
-            "WebGoogleClientId",
-            "Authentication:Google:Web:ClientId",
-            secret: true,
-            defaultValue: builder.Configuration["Authentication:Google:ClientId"]);
-        var webGoogleClientSecret = builder.AddParameterFromConfig(
-            "WebGoogleClientSecret",
-            "Authentication:Google:Web:ClientSecret",
-            secret: true,
-            defaultValue: builder.Configuration["Authentication:Google:ClientSecret"]);
 
         var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
         builder.Configuration["Parameters:AspireTestAdminEnabled"] =
@@ -165,8 +155,6 @@ static partial class Program
             JwtAudience: jwtAudience,
             GoogleClientId: googleClientId,
             GoogleClientSecret: googleClientSecret,
-            WebGoogleClientId: webGoogleClientId,
-            WebGoogleClientSecret: webGoogleClientSecret,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
             AspireTestAdminPassword: aspireTestAdminPassword,
             CorsAllowedOrigins: corsAllowedOrigins,
@@ -397,23 +385,31 @@ static partial class Program
             otelCollector,
             environmentName);
 
+        var uploadServiceProject = builder.AddProject<Projects.Maliev_UploadService_Api>("UploadService")
+            .WithReference(databases.Upload, "UploadDbContext")
+            .WaitFor(databases.Upload)
+            .WithReference(infrastructure.RabbitMQ)
+            .WaitFor(infrastructure.RabbitMQ)
+            .WithReference(infrastructure.Redis)
+            .WithReference(iamService)
+            .WaitFor(iamService)
+            .WithTestingSafeHttpHealthCheck("/upload/aspire-liveness");
+
         var uploadService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_UploadService_Api>("UploadService")
-                .WithReference(databases.Upload, "UploadDbContext")
-                .WaitFor(databases.Upload)
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis)
-                .WithReference(iamService)
-                .WaitFor(iamService)
-                .WithTestingSafeHttpHealthCheck("/upload/aspire-liveness"),
+            uploadServiceProject,
             config,
             grafana,
             otelCollector,
             environmentName)
             .WithEnvironment("GoogleCloud__Enabled", "false")
             .WithEnvironment("GCP__ProjectId", config.GcpProjectId)
-            .WithEnvironment("GCP__ServiceAccountKeyBase64", config.GcpServiceAccountKeyBase64);
+            .WithEnvironment("GCP__ServiceAccountKeyBase64", config.GcpServiceAccountKeyBase64)
+            // MockStorageService (used when GoogleCloud is disabled) signs URLs that the
+            // browser loads directly. Point it at UploadService's own externally-reachable
+            // endpoint instead of letting it infer the host from whichever caller (e.g. the
+            // BFF, via service discovery) happened to request the signed URL — that caller's
+            // resolved address isn't guaranteed to be reachable from the browser.
+            .WithEnvironment("MockStorage__PublicBaseUrl", uploadServiceProject.GetEndpoint("https"));
 
         var customerService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CustomerService_Api>("CustomerService")
@@ -1045,7 +1041,6 @@ static partial class Program
             .WithEnvironment("GEOMETRY_FILE_INGEST_CONCURRENCY", "1")
             .WithEnvironment("GEOMETRY_ARTIFACT_CONCURRENCY", "1")
             .WithEnvironment("GEOMETRY_RABBITMQ_PREFETCH", "1")
-            .WithExternalHttpEndpoints()
             .WithHttpEndpoint(targetPort: 8081, env: "PORT")
             .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Geometry Scalar"; })
             .WithTestingSafeHttpHealthCheck("/geometry/aspire-liveness")
@@ -1171,8 +1166,8 @@ static partial class Program
             .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey);
         webBff = WithSharedSecrets(webBff, config, grafana, otelCollector, environmentName)
             .WithEnvironment("QuoteEngine__BaseUrl", quoteEngineBff.GetEndpoint("https"))
-            .WithEnvironment("Authentication__Google__ClientId", config.WebGoogleClientId)
-            .WithEnvironment("Authentication__Google__ClientSecret", config.WebGoogleClientSecret)
+            .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
+            .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey)
             .WithEnvironment("BusinessRegistry__DdbApiKey", config.BusinessRegistryDdbApiKey);
     }
