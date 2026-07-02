@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Microsoft.Extensions.Hosting;
@@ -48,6 +49,16 @@ public static class IdentityCookieExtensions
 
         var cookieDomain = builder.Configuration["Auth:CookieDomain"];
 
+        // The __Secure- prefix requires the Secure attribute on every Set-Cookie,
+        // including the expired cookie written by sign-out. SameAsRequest omits it
+        // over http (browsers then reject the deletion and the session survives
+        // log out — observed on http://localhost). Browsers accept Secure cookies
+        // from localhost, so Always is safe for dev; the in-process test host has
+        // no TLS and no prefix enforcement, so tests keep SameAsRequest.
+        var securePolicy = builder.Environment.IsEnvironment("Testing")
+            ? CookieSecurePolicy.SameAsRequest
+            : CookieSecurePolicy.Always;
+
         return builder.Services
             .AddAuthentication(options =>
             {
@@ -57,6 +68,7 @@ public static class IdentityCookieExtensions
             .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
             {
                 options.Cookie.Name = IdentityCookieName;
+                options.Cookie.SecurePolicy = securePolicy;
                 if (!string.IsNullOrWhiteSpace(cookieDomain))
                 {
                     options.Cookie.Domain = cookieDomain;
@@ -71,6 +83,7 @@ public static class IdentityCookieExtensions
             .AddCookie(ExternalSchemeName, options =>
             {
                 options.Cookie.Name = "__Secure-Maliev.Identity.External";
+                options.Cookie.SecurePolicy = securePolicy;
                 if (!string.IsNullOrWhiteSpace(cookieDomain))
                 {
                     options.Cookie.Domain = cookieDomain;
