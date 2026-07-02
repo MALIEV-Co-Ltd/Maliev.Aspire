@@ -48,6 +48,16 @@ var prometheus = ConfigurePrometheus(builder);
 var grafana = ConfigureGrafana(builder, prometheus);
 var otelCollector = ConfigureOpenTelemetry(builder, prometheus);
 
+// Local-dev memory optimization: Prometheus + Grafana are observability dashboards, not
+// services under test. In Development they are deferred to explicit (one-click) start from
+// the Aspire dashboard instead of auto-starting, freeing ~640 MB of always-on container RAM.
+// The OpenTelemetry collector is intentionally NOT deferred — GeometryService WaitFor()s it.
+if (builder.Environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase))
+{
+    prometheus.WithExplicitStart();
+    grafana.WithExplicitStart();
+}
+
 // ──────────────────────────────────────────────
 // 4. Services + wire frontends internally
 // ──────────────────────────────────────────────
@@ -111,8 +121,20 @@ static partial class Program
         var jwtIssuer = builder.AddParameterFromConfig("JwtIssuer", "Jwt:Issuer");
         var jwtAudience = builder.AddParameterFromConfig("JwtAudience", "Jwt:Audience");
 
+        // Maliev.Web and Maliev.Intranet sign in against a single shared Google OAuth client
+        // ("MALIEV Sign-In — Shared"). WithSharedSecrets injects these values into every
+        // service; the customer Web BFF re-applies them explicitly (see webBff wiring) so its
+        // Google client is self-documenting. QuoteEngine uses the same shared sign-in client
+        // for its own in-studio Google OAuth flow, plus Drive-scoped credentials (below).
         var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId", secret: true);
         var googleClientSecret = builder.AddParameterFromConfig("GoogleClientSecret", "Authentication:Google:ClientSecret", secret: true);
+
+        // QuoteEngine's Google Drive connector uses its own dedicated OAuth client
+        // ("MALIEV QuoteEngine — Google Drive Connector", scope: drive.file only) so a leaked
+        // Drive credential can't be used to impersonate sign-in on Web/Intranet, and vice versa.
+        // GoogleDriveOAuthConfiguration falls back to Authentication:Google:* if these are unset.
+        var googleDriveClientId = builder.AddParameterFromConfig("GoogleDriveClientId", "GoogleDrive:ClientId", secret: true);
+        var googleDriveClientSecret = builder.AddParameterFromConfig("GoogleDriveClientSecret", "GoogleDrive:ClientSecret", secret: true);
 
         var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
         builder.Configuration["Parameters:AspireTestAdminEnabled"] =
@@ -155,6 +177,8 @@ static partial class Program
             JwtAudience: jwtAudience,
             GoogleClientId: googleClientId,
             GoogleClientSecret: googleClientSecret,
+            GoogleDriveClientId: googleDriveClientId,
+            GoogleDriveClientSecret: googleDriveClientSecret,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
             AspireTestAdminPassword: aspireTestAdminPassword,
             CorsAllowedOrigins: corsAllowedOrigins,
@@ -207,6 +231,13 @@ static partial class Program
                 insight.WithVolume("redisinsight-data", "/data")
                     .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard")
                     .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
+
+                // RedisInsight is a cache-inspection UI, not a service under test. Defer to
+                // explicit (one-click) start in local dev to save ~256 MB of always-on RAM.
+                if (builder.Environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                {
+                    insight.WithExplicitStart();
+                }
             });
 
             return redis;
@@ -230,6 +261,13 @@ static partial class Program
                         .WithEnvironment("PYTHONWARNINGS", "ignore") // Suppress SyntaxWarnings from sshtunnel in Python 3.14+
                         .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard")
                         .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
+
+                    // pgAdmin is a DB-inspection UI, not a service under test. Defer to
+                    // explicit (one-click) start in local dev to save ~256 MB of always-on RAM.
+                    if (builder.Environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                    {
+                        option.WithExplicitStart();
+                    }
                 });
         }
     }
@@ -1163,9 +1201,18 @@ static partial class Program
             .WithEnvironment("Web__BaseUrl", webBff.GetEndpoint("https"))
             .WithEnvironment("QuoteAgent__EnableThinkingCallbacks", "true")
             .WithEnvironment("QuoteAgent__ThinkingCallbackBaseUrl", quoteEngineBff.GetEndpoint("https"))
-            .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey);
+            .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey)
+            // Make Studio runs customer sign-in itself (Google OAuth completes against
+            // AuthService in the QuoteEngine BFF), so it needs the shared sign-in client.
+            .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
+            .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
+            // Dedicated Drive-only OAuth client — GoogleDriveOAuthConfiguration prefers these
+            // over the shared Authentication__Google__* values injected by WithSharedSecrets.
+            .WithEnvironment("GoogleDrive__ClientId", config.GoogleDriveClientId)
+            .WithEnvironment("GoogleDrive__ClientSecret", config.GoogleDriveClientSecret);
         webBff = WithSharedSecrets(webBff, config, grafana, otelCollector, environmentName)
             .WithEnvironment("QuoteEngine__BaseUrl", quoteEngineBff.GetEndpoint("https"))
+            // Customer Web uses the same shared Google OAuth client as Intranet and QuoteEngine.
             .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
             .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey)
@@ -1288,8 +1335,8 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtAudience,
     IResourceBuilder<ParameterResource> GoogleClientId,
     IResourceBuilder<ParameterResource> GoogleClientSecret,
-    IResourceBuilder<ParameterResource> WebGoogleClientId,
-    IResourceBuilder<ParameterResource> WebGoogleClientSecret,
+    IResourceBuilder<ParameterResource> GoogleDriveClientId,
+    IResourceBuilder<ParameterResource> GoogleDriveClientSecret,
     IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
     IResourceBuilder<ParameterResource> AspireTestAdminPassword,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,
