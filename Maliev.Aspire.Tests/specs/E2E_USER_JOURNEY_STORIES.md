@@ -66,7 +66,7 @@ This catalog now assumes the following production contract:
 The following customer- and employee-facing surfaces were added or substantially expanded after the initial catalog was published. Each has its own dated story (WEB-014, COM-005, MFG-006, INT-029, HR-007, FIN-003, OPS-004) and must be covered by an automated browser journey or an explicitly accepted product-gap failure before production sign-off:
 
 - Web customer chatbot persona ("Mali") wired through `Maliev.Web.Bff` to `Maliev.ChatbotService` for anonymous and signed-in visitors.
-- Customer Web `Authentication:Google:Web:*` OAuth client is now distinct from the employee Intranet OAuth client; the WEB-006 Google sign-in story must run against the dedicated Web client.
+- Customer Web, employee Intranet, and QuoteEngine share a single Google OAuth client (`Authentication:Google:*`); the same client also backs QuoteEngine Google Drive access. The WEB-006 Google sign-in story runs against that shared client.
 - Commerce product Bill of Materials (BOM) editor in the Intranet catalog, BOM persistence in `CommerceService`, and dedicated commerce BOM PDF generation in `PdfService`.
 - Production schedule operational view in `Maliev.Intranet`: current-time marker, queue zoom, maintenance overlay, move-conflict handling, scheduled-slot detail panel, and machine-locked move flow.
 - Intranet chatbot/sidekick administration: assistant instructions editor, sidekick conversation history picker, per-employee persisted intranet chat history.

@@ -11,7 +11,8 @@
         "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://host.docker.internal:18889",
         "ASPIRE_DASHBOARD_MCP_ENDPOINT_URL": "https://localhost:23116",
         "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://localhost:22160",
-        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true"
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
+        "DOTNET_gcServer": "0"
       }
     },
     "http": {
@@ -24,7 +25,8 @@
         "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://host.docker.internal:18889",
         "ASPIRE_DASHBOARD_MCP_ENDPOINT_URL": "http://localhost:18062",
         "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "http://localhost:20058",
-        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true"
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
+        "DOTNET_gcServer": "0"
       }
     }
   }

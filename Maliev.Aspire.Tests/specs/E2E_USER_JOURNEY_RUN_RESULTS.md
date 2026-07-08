@@ -756,7 +756,7 @@ Seven new browser-level E2E tests were added to `BrowserJourneyGateTests.cs`. Ea
 
 - The seven new tests above are API-driven through the real BFF; richer UI-click coverage for each story (BOM editor field-by-field, accounting journal entry form, customer email template selection, schedule slot drag-and-drop, preferences editor save/apply UI) is the recommended next slice once the corresponding UI surfaces stabilize for 48 hours.
 - `WEB-014` now has both the user-added shared-session/QuoteEngine handoff coverage and the API-driven anonymous Web chatbot reply test.
-- The dedicated Web Google OAuth client (`4960167 fix: use dedicated web google oauth client`) is already covered by `AppHostReferenceTests.AppHost_WebBff_LoadsDedicatedGoogleOAuthConfiguration`. The customer-facing browser sign-in flow (`WEB-006`) remains a partial pending a deterministic test OAuth identity.
+- The earlier dedicated Web Google OAuth client (`4960167 fix: use dedicated web google oauth client`) was reverted: Maliev.Web, Maliev.Intranet, and Maliev.QuoteEngine share one Google OAuth client (the same client also backs QuoteEngine Google Drive). `AppHostReferenceTests.AppHost_WebBff_UsesSharedGoogleOAuthClient` guards that the shared client is wired and that no Web-specific OAuth scaffolding remains. The customer-facing browser sign-in flow (`WEB-006`) remains a partial pending a deterministic test OAuth identity.
 - Aspire monitoring container changes (`f139d29 Avoid Aspire monitoring bind mounts`) are covered by `AppHostReferenceTests.AppHost_MonitoringContainers_AvoidHostBindMounts` and `AppHostReferenceTests.AppHost_OpenTelemetryCollector_UsesContainerFileConfig`.
 
 ### Story Coverage Status After This Slice

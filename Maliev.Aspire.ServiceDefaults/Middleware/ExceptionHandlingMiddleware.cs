@@ -58,6 +58,13 @@ public class ExceptionHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
+        if (context.Response.HasStarted)
+        {
+            _logger.LogWarning("Response has already started; cannot write JSON error response for {ExceptionType}: {Message}",
+                exception.GetType().Name, exception.Message);
+            return;
+        }
+
         var (statusCode, message) = MapExceptionToResponse(exception);
 
         var response = new

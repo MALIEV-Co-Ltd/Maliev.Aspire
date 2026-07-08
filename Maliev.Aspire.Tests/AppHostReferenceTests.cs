@@ -408,15 +408,19 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
-    /// Customer Web BFF should use its own Google OAuth client instead of the employee Intranet client.
+    /// Maliev.Web, Maliev.Intranet, and Maliev.QuoteEngine share a single Google OAuth client
+    /// (the same client also backs QuoteEngine Google Drive access). The earlier dedicated
+    /// customer-facing Web client (WEB-006) was dropped, so no Web-specific OAuth scaffolding
+    /// should remain in the AppHost.
     /// </summary>
     [Fact]
-    public void AppHost_WebBff_LoadsDedicatedGoogleOAuthConfiguration()
+    public void AppHost_WebBff_UsesSharedGoogleOAuthClient()
     {
         var appHostSource = File.ReadAllText(FindAppHostSource());
 
-        Assert.Contains("Authentication:Google:Web:ClientId", appHostSource, StringComparison.Ordinal);
-        Assert.Contains("Authentication:Google:Web:ClientSecret", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("\"GoogleClientId\", \"Authentication:Google:ClientId\"", appHostSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("Authentication:Google:Web", appHostSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("WebGoogleClientId", appHostSource, StringComparison.Ordinal);
     }
 
     /// <summary>
