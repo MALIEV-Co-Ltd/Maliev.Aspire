@@ -317,6 +317,8 @@ public sealed class AppHostReferenceTests
             "paymentService",
             "deliveryService",
             "chatbotService",
+            "receiptService",
+            "searchService",
             "currencyService"
         })
         {
