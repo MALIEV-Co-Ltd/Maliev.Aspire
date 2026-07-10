@@ -121,13 +121,10 @@ static partial class Program
         var jwtIssuer = builder.AddParameterFromConfig("JwtIssuer", "Jwt:Issuer");
         var jwtAudience = builder.AddParameterFromConfig("JwtAudience", "Jwt:Audience");
 
-        // Maliev.Web and Maliev.Intranet sign in against a single shared Google OAuth client
-        // ("MALIEV Sign-In — Shared"). WithSharedSecrets injects these values into every
-        // service; the customer Web BFF re-applies them explicitly (see webBff wiring) so its
-        // Google client is self-documenting. QuoteEngine uses the same shared sign-in client
-        // for its own in-studio Google OAuth flow, plus Drive-scoped credentials (below).
+        // Web, Intranet, and QuoteEngine render Google's official GIS button with one public
+        // client ID. AuthService receives the same ID as three exact application audiences;
+        // no sign-in client secret is distributed to the browser-facing services.
         var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId", secret: true);
-        var googleClientSecret = builder.AddParameterFromConfig("GoogleClientSecret", "Authentication:Google:ClientSecret", secret: true);
 
         // QuoteEngine's Google Drive connector uses its own dedicated OAuth client
         // ("MALIEV QuoteEngine — Google Drive Connector", scope: drive.file only) so a leaked
@@ -176,7 +173,6 @@ static partial class Program
             JwtIssuer: jwtIssuer,
             JwtAudience: jwtAudience,
             GoogleClientId: googleClientId,
-            GoogleClientSecret: googleClientSecret,
             GoogleDriveClientId: googleDriveClientId,
             GoogleDriveClientSecret: googleDriveClientSecret,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
@@ -502,6 +498,9 @@ static partial class Program
             grafana,
             otelCollector,
             environmentName)
+            .WithEnvironment("GoogleIdentity__Employee__Audiences__intranet__0", config.GoogleClientId)
+            .WithEnvironment("GoogleIdentity__Customer__Audiences__web__0", config.GoogleClientId)
+            .WithEnvironment("GoogleIdentity__Customer__Audiences__quote-engine__0", config.GoogleClientId)
             .WithEnvironment("WebAuthn__RPId", "localhost")
             .WithEnvironment("WebAuthn__AllowedOrigins", "https://localhost:56139");
 
@@ -1202,19 +1201,15 @@ static partial class Program
             .WithEnvironment("QuoteAgent__EnableThinkingCallbacks", "true")
             .WithEnvironment("QuoteAgent__ThinkingCallbackBaseUrl", quoteEngineBff.GetEndpoint("https"))
             .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey)
-            // Make Studio runs customer sign-in itself (Google OAuth completes against
-            // AuthService in the QuoteEngine BFF), so it needs the shared sign-in client.
+            // Make Studio renders GIS and forwards the nonce-bound credential to AuthService.
             .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
-            .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
-            // Dedicated Drive-only OAuth client — GoogleDriveOAuthConfiguration prefers these
-            // over the shared Authentication__Google__* values injected by WithSharedSecrets.
+            // Dedicated Drive-only OAuth client. Its secret is never used for sign-in.
             .WithEnvironment("GoogleDrive__ClientId", config.GoogleDriveClientId)
             .WithEnvironment("GoogleDrive__ClientSecret", config.GoogleDriveClientSecret);
         webBff = WithSharedSecrets(webBff, config, grafana, otelCollector, environmentName)
             .WithEnvironment("QuoteEngine__BaseUrl", quoteEngineBff.GetEndpoint("https"))
-            // Customer Web uses the same shared Google OAuth client as Intranet and QuoteEngine.
+            // Customer Web uses the shared public GIS client ID; sign-in has no client secret.
             .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
-            .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey)
             .WithEnvironment("BusinessRegistry__DdbApiKey", config.BusinessRegistryDdbApiKey);
     }
@@ -1239,7 +1234,6 @@ static partial class Program
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
             .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
-            .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins)
             .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http"))
             .WithEnvironment("Observability__TracingEnabled", "false")
@@ -1334,7 +1328,6 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> JwtIssuer,
     IResourceBuilder<ParameterResource> JwtAudience,
     IResourceBuilder<ParameterResource> GoogleClientId,
-    IResourceBuilder<ParameterResource> GoogleClientSecret,
     IResourceBuilder<ParameterResource> GoogleDriveClientId,
     IResourceBuilder<ParameterResource> GoogleDriveClientSecret,
     IResourceBuilder<ParameterResource> AspireTestAdminEnabled,

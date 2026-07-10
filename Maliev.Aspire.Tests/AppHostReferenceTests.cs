@@ -227,6 +227,39 @@ public sealed class AppHostReferenceTests
     }
 
     /// <summary>
+    /// AuthService must receive the shared browser GIS client as the exact audience for each
+    /// application/caller binding accepted by its employee and customer Google exchanges.
+    /// </summary>
+    [Fact]
+    public void AppHost_AuthService_MapsSharedGoogleIdentityClientToExactApplicationAudiences()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+        var authBlockStart = appHostSource.IndexOf(
+            "var authService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+        var accountingBlockStart = appHostSource.IndexOf(
+            "var accountingService = WithSharedSecrets(",
+            StringComparison.Ordinal);
+
+        Assert.True(authBlockStart >= 0, "AuthService resource declaration was not found.");
+        Assert.True(accountingBlockStart > authBlockStart, "AccountingService resource declaration was not found after AuthService.");
+
+        var authBlock = appHostSource[authBlockStart..accountingBlockStart];
+        Assert.Contains(
+            ".WithEnvironment(\"GoogleIdentity__Employee__Audiences__intranet__0\", config.GoogleClientId)",
+            authBlock,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".WithEnvironment(\"GoogleIdentity__Customer__Audiences__web__0\", config.GoogleClientId)",
+            authBlock,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".WithEnvironment(\"GoogleIdentity__Customer__Audiences__quote-engine__0\", config.GoogleClientId)",
+            authBlock,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// QuoteEngine BFF must be part of the Aspire AppHost project graph.
     /// </summary>
     [Fact]
@@ -402,7 +435,7 @@ public sealed class AppHostReferenceTests
         Assert.Contains(".WaitFor(authService)", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WaitFor(customerService)", webBlock, StringComparison.Ordinal);
         Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientId\", config.GoogleClientId)", webBlock, StringComparison.Ordinal);
-        Assert.Contains(".WithEnvironment(\"Authentication__Google__ClientSecret\", config.GoogleClientSecret)", webBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("Authentication__Google__ClientSecret", appHostSource, StringComparison.Ordinal);
         // The /web/aspire-liveness health check lives on the top-of-file WebBff declaration.
         Assert.Contains(".WithTestingSafeHttpHealthCheck(\"/web/aspire-liveness\")", appHostSource, StringComparison.Ordinal);
     }

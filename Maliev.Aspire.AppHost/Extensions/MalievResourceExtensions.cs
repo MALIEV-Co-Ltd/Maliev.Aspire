@@ -47,7 +47,6 @@ public static class MalievResourceExtensions
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
             .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
-            .WithEnvironment("Authentication__Google__ClientSecret", config.GoogleClientSecret)
             .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins)
             .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http"))
             .WithEnvironment("NPGSQL_GSSAPI_AUTHENTICATION", "false")
