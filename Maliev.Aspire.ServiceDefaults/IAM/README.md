@@ -20,6 +20,10 @@ public IActionResult Create() => Ok();
 ### 2. IAMRegistrationService
 Base class for services to register permissions and roles with IAM on startup.
 
+Startup registration is infrastructure work and publishes through MassTransit's singleton `IBus`. It intentionally
+bypasses a service's scoped EF Bus Outbox because there is no business `DbContext` transaction to commit during host
+startup. Business messages published through scoped `IPublishEndpoint` continue to use the configured outbox.
+
 ```csharp
 public class MyServiceRegistration : IAMRegistrationService
 {

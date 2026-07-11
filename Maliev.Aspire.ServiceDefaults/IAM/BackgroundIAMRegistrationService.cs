@@ -9,7 +9,9 @@ namespace Maliev.Aspire.ServiceDefaults.IAM;
 
 /// <summary>
 /// Background service that handles IAM registration via RabbitMQ.
-/// Publishes a PermissionRegistrationRequest message to RabbitMQ queue, which is consumed by the IAM service.
+/// Publishes a PermissionRegistrationRequest through the raw singleton bus, which is consumed by the IAM service.
+/// This infrastructure message deliberately bypasses any scoped transactional outbox because startup registration
+/// has no business database unit of work to commit.
 /// This is non-blocking, allowing services to start immediately without waiting for IAM response.
 /// </summary>
 public class BackgroundIAMRegistrationService : BackgroundService
@@ -24,7 +26,7 @@ public class BackgroundIAMRegistrationService : BackgroundService
     /// Initializes a new instance of the BackgroundIAMRegistrationService.
     /// </summary>
     /// <param name="registrationServices">The collection of service-specific IAM registration implementations.</param>
-    /// <param name="serviceProvider">Service provider to create scopes for scoped services.</param>
+    /// <param name="serviceProvider">Root service provider used to resolve the singleton MassTransit bus.</param>
     /// <param name="logger">Logger instance.</param>
     /// <param name="statusTracker">Tracks registration status for health checks.</param>
     /// <param name="applicationLifetime">Host application lifetime for waiting until app is started.</param>
@@ -154,11 +156,11 @@ public class BackgroundIAMRegistrationService : BackgroundService
         {
             try
             {
-                await using (var scope = _serviceProvider.CreateAsyncScope())
-                {
-                    var publishEndpoint = scope.ServiceProvider.GetRequiredService<IPublishEndpoint>();
-                    await publishEndpoint.Publish(request, stoppingToken);
-                }
+                // Do not resolve scoped IPublishEndpoint here. Services that enable UseBusOutbox replace that
+                // endpoint with an EF-backed publisher which requires DbContext.SaveChangesAsync. IAM registration
+                // is startup infrastructure with no business transaction, so it must use the raw transport bus.
+                var bus = _serviceProvider.GetRequiredService<IBus>();
+                await bus.Publish(request, stoppingToken);
 
                 _logger.LogInformation(
                     "Published IAM registration request for {ServiceName}: {PermissionCount} permissions, {RoleCount} roles",
