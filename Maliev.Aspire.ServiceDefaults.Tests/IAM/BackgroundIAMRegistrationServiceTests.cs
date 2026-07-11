@@ -1,5 +1,4 @@
 using Maliev.Aspire.ServiceDefaults.IAM;
-using Maliev.Aspire.Tests.Infrastructure;
 using Maliev.MessagingContracts.Contracts.Iam;
 using MassTransit;
 using Microsoft.Extensions.Configuration;
@@ -8,7 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
 
-namespace Maliev.Aspire.Tests.IAM;
+namespace Maliev.Aspire.ServiceDefaults.Tests.IAM;
 
 /// <summary>
 /// Test implementation of IAM registration service.
@@ -129,12 +128,7 @@ public class BackgroundIAMRegistrationServiceTests
         // Act
         await backgroundService.StartAsync(CancellationToken.None);
 
-        await TestHelpers.WaitForAsync(
-            () => Task.FromResult(_statusTracker.Status),
-            status => status is RegistrationStatus.Registered or RegistrationStatus.PartiallyRegistered,
-            timeout: TimeSpan.FromSeconds(2),
-            interval: TimeSpan.FromMilliseconds(10),
-            message: "IAM registration did not complete within the expected time.");
+        await WaitForRegistrationCompletionAsync();
 
         await backgroundService.StopAsync(CancellationToken.None);
 
@@ -179,8 +173,7 @@ public class BackgroundIAMRegistrationServiceTests
         // Act
         await backgroundService.StartAsync(CancellationToken.None);
 
-        // Allow some time for the background task to execute
-        await Task.Delay(500);
+        await WaitForRegistrationCompletionAsync();
 
         await backgroundService.StopAsync(CancellationToken.None);
 
@@ -223,11 +216,32 @@ public class BackgroundIAMRegistrationServiceTests
 
         // Act
         await backgroundService.StartAsync(CancellationToken.None);
-        await Task.Delay(100);
+        await WaitForRegistrationCompletionAsync();
         await backgroundService.StopAsync(CancellationToken.None);
 
         // Assert
         Assert.True(_statusTracker.IsRegistered);
         _busMock.Verify(x => x.Publish(It.IsAny<object>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private async Task WaitForRegistrationCompletionAsync()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(10));
+
+        while (_statusTracker.Status is RegistrationStatus.Pending or RegistrationStatus.Attempting)
+        {
+            try
+            {
+                if (!await timer.WaitForNextTickAsync(timeout.Token))
+                {
+                    break;
+                }
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                throw new TimeoutException("IAM registration did not complete within the expected time.");
+            }
+        }
     }
 }
