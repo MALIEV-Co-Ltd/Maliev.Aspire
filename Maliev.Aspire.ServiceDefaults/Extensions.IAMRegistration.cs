@@ -13,7 +13,7 @@ public static class IAMRegistrationExtensions
     /// Adds IAM registration with background RabbitMQ publishing and health check integration.
     /// Registration publishes a message to RabbitMQ for the IAM service to consume.
     /// This is non-blocking and allows services to start immediately.
-    /// IMPORTANT: Call this AFTER AddMassTransitWithRabbitMq() to ensure IPublishEndpoint is available.
+    /// IMPORTANT: Call this AFTER AddMassTransitWithRabbitMq() to ensure the singleton IBus is available.
     /// </summary>
     /// <typeparam name="TService">The service-specific IAM registration implementation.</typeparam>
     /// <param name="services">The service collection.</param>

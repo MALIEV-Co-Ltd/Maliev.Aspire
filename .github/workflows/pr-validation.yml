@@ -8,6 +8,7 @@ on:
       - develop
     paths:
       - 'Maliev.Aspire.ServiceDefaults/**'
+      - 'Maliev.Aspire.ServiceDefaults.Tests/**'
       - 'Maliev.Aspire.AppHost/**'
       - 'Maliev.Aspire.Tests/**'
       - '.github/workflows/**'
@@ -16,6 +17,7 @@ on:
 env:
   DOTNET_VERSION: '10.0.x'
   SERVICE_DEFAULTS_PATH: 'Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj'
+  SERVICE_DEFAULTS_TESTS_PATH: 'Maliev.Aspire.ServiceDefaults.Tests/Maliev.Aspire.ServiceDefaults.Tests.csproj'
   NUGET_USERNAME: ${{ github.actor }}
   NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
 
@@ -57,8 +59,9 @@ jobs:
       - name: Build ServiceDefaults
         run: dotnet build ${{ env.SERVICE_DEFAULTS_PATH }} --configuration Release --no-restore /p:TreatWarningsAsErrors=true /p:SharedLibraryVersion=${{ needs.prep.outputs.version_format }}
 
-  system-integration-tests:
-    name: System Integration Tests
+  # Full Maliev.Aspire.Tests execution requires the sibling service fleet and remains a local-only system gate.
+  service-defaults-tests:
+    name: ServiceDefaults Unit Tests
     needs: [prep, build-and-test]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -72,42 +75,11 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Create test secrets
+      - name: Run ServiceDefaults Unit Tests
         run: |
-          cat > sharedsecrets.json << 'SECRETS_EOF'
-          {
-            "Jwt": {
-              "SecurityKey": "test-secret-key-at-least-32-characters-long-for-ci",
-              "PrivateKey": "",
-              "PublicKey": "",
-              "Issuer": "test-issuer",
-              "Audience": "test-audience"
-            },
-            "RabbitMQ": {
-              "Username": "guest",
-              "Password": "guest",
-              "ErlangCookie": "test-cookie"
-            },
-            "Authentication": {
-              "Google": {
-                "ClientId": "test-google-id",
-                "ClientSecret": "test-google-secret"
-              }
-            },
-            "CORS": {
-              "AllowedOrigins": ["http://localhost"]
-            },
-            "GCP": {
-              "ProjectId": "test-project",
-              "ServiceAccountKeyBase64": ""
-            }
-          }
-          SECRETS_EOF
-
-      - name: Run System Integration Tests
-        run: |
-          dotnet test Maliev.Aspire.Tests/Maliev.Aspire.Tests.csproj \
+          dotnet test ${{ env.SERVICE_DEFAULTS_TESTS_PATH }} \
             --configuration Release \
+            -p:SharedLibraryVersion=${{ needs.prep.outputs.version_format }} \
             --logger "trx;LogFileName=test-results.trx" \
             --results-directory ./TestResults \
             --collect:"XPlat Code Coverage"

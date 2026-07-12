@@ -233,5 +233,6 @@
   <Project Path="Maliev.Aspire.AppHost\Maliev.Aspire.AppHost.csproj" />
   <Project Path="Maliev.Aspire.DatabaseSeeder\Maliev.Aspire.DatabaseSeeder.csproj" />
   <Project Path="Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" />
+  <Project Path="Maliev.Aspire.ServiceDefaults.Tests\Maliev.Aspire.ServiceDefaults.Tests.csproj" />
   <Project Path="Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj" />
 </Solution>

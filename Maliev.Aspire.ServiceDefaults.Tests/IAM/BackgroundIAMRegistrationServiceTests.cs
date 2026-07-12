@@ -7,7 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
 
-namespace Maliev.Aspire.Tests.IAM;
+namespace Maliev.Aspire.ServiceDefaults.Tests.IAM;
 
 /// <summary>
 /// Test implementation of IAM registration service.
@@ -60,6 +60,7 @@ public class BackgroundIAMRegistrationServiceTests
     private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly Mock<IServiceScopeFactory> _serviceScopeFactoryMock;
     private readonly Mock<IServiceScope> _serviceScopeMock;
+    private readonly Mock<IBus> _busMock;
     private readonly Mock<IPublishEndpoint> _publishEndpointMock;
     private readonly Mock<ILogger<BackgroundIAMRegistrationService>> _loggerMock;
     private readonly Mock<ILogger> _serviceLoggerMock;
@@ -75,6 +76,7 @@ public class BackgroundIAMRegistrationServiceTests
         _serviceProviderMock = new Mock<IServiceProvider>();
         _serviceScopeFactoryMock = new Mock<IServiceScopeFactory>();
         _serviceScopeMock = new Mock<IServiceScope>();
+        _busMock = new Mock<IBus>();
         _publishEndpointMock = new Mock<IPublishEndpoint>();
         _loggerMock = new Mock<ILogger<BackgroundIAMRegistrationService>>();
         _serviceLoggerMock = new Mock<ILogger>();
@@ -95,22 +97,21 @@ public class BackgroundIAMRegistrationServiceTests
         _serviceProviderMock
             .Setup(x => x.GetService(typeof(IPublishEndpoint)))
             .Returns(_publishEndpointMock.Object);
+        _serviceProviderMock
+            .Setup(x => x.GetService(typeof(IBus)))
+            .Returns(_busMock.Object);
 
-        // Setup ApplicationLifetime to simulate "Started" state
-        var startedToken = new CancellationToken(canceled: true); // Already canceled means "signaled" for wait handles usually, but CancellationTokenSource.Cancel() makes IsCancellationRequested true.
-        // Wait, IsCancellationRequested being true means the event happened? 
-        // ApplicationStarted is a CancellationToken. When it is "cancelled", it means the event fired.
-        // So we pass a cancelled token to simulate "Started".
+        // ApplicationStarted is signaled by cancelling its token.
         var cts = new CancellationTokenSource();
         cts.Cancel();
         _lifetimeMock.Setup(x => x.ApplicationStarted).Returns(cts.Token);
     }
 
     /// <summary>
-    /// Tests that the background service publishes a registration event.
+    /// Tests that infrastructure registration bypasses the scoped transactional outbox.
     /// </summary>
     [Fact]
-    public async Task ExecuteAsync_PublishesRegistrationEvent()
+    public async Task ExecuteAsync_UsesRawBusInsteadOfScopedPublishEndpoint()
     {
         // Arrange
         var registrationService = new TestIAMRegistrationService(_configMock.Object, _serviceLoggerMock.Object);
@@ -127,13 +128,12 @@ public class BackgroundIAMRegistrationServiceTests
         // Act
         await backgroundService.StartAsync(CancellationToken.None);
 
-        // Allow some time for the background task to execute
-        await Task.Delay(500);
+        await WaitForRegistrationCompletionAsync();
 
         await backgroundService.StopAsync(CancellationToken.None);
 
         // Assert
-        _publishEndpointMock.Verify(
+        _busMock.Verify(
             x => x.Publish(
                 It.Is<PermissionRegistrationRequest>(req =>
                     req.ServiceName == "TestService" &&
@@ -144,6 +144,10 @@ public class BackgroundIAMRegistrationServiceTests
             ),
             Times.Once
         );
+        _publishEndpointMock.Verify(
+            x => x.Publish(It.IsAny<PermissionRegistrationRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _serviceScopeFactoryMock.Verify(x => x.CreateScope(), Times.Never);
 
         Assert.True(_statusTracker.IsRegistered);
     }
@@ -169,14 +173,13 @@ public class BackgroundIAMRegistrationServiceTests
         // Act
         await backgroundService.StartAsync(CancellationToken.None);
 
-        // Allow some time for the background task to execute
-        await Task.Delay(500);
+        await WaitForRegistrationCompletionAsync();
 
         await backgroundService.StopAsync(CancellationToken.None);
 
         // Assert
         // Should NOT publish
-        _publishEndpointMock.Verify(
+        _busMock.Verify(
             x => x.Publish(It.IsAny<PermissionRegistrationRequest>(), It.IsAny<CancellationToken>()),
             Times.Never
         );
@@ -213,11 +216,32 @@ public class BackgroundIAMRegistrationServiceTests
 
         // Act
         await backgroundService.StartAsync(CancellationToken.None);
-        await Task.Delay(100);
+        await WaitForRegistrationCompletionAsync();
         await backgroundService.StopAsync(CancellationToken.None);
 
         // Assert
         Assert.True(_statusTracker.IsRegistered);
-        _publishEndpointMock.Verify(x => x.Publish(It.IsAny<object>(), It.IsAny<CancellationToken>()), Times.Never);
+        _busMock.Verify(x => x.Publish(It.IsAny<object>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private async Task WaitForRegistrationCompletionAsync()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(10));
+
+        while (_statusTracker.Status is RegistrationStatus.Pending or RegistrationStatus.Attempting)
+        {
+            try
+            {
+                if (!await timer.WaitForNextTickAsync(timeout.Token))
+                {
+                    break;
+                }
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                throw new TimeoutException("IAM registration did not complete within the expected time.");
+            }
+        }
     }
 }

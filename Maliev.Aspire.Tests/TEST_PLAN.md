@@ -273,8 +273,8 @@ var response = await TestHelpers.WaitForSuccessAsync(
 ```
 PR Validation Pipeline:
 ┌──────────────┐     ┌─────────────────────────┐     ┌──────────────┐
-│  Build &     │ ──→ │  System Integration     │ ──→ │  Coverage    │
-│  NuGet Pack  │     │  Tests (Aspire AppHost)  │     │  Report      │
+│  Build &     │ ──→ │  ServiceDefaults Unit   │ ──→ │  Coverage    │
+│  NuGet Pack  │     │  Tests                   │     │  Report      │
 └──────────────┘     └─────────────────────────┘     └──────────────┘
 
 Per-Service Pipeline (each service repo):
@@ -290,9 +290,16 @@ Nightly (future):
 └──────────────────┘
 ```
 
+`Maliev.Aspire.Tests` is the local-only system orchestration gate. It depends on the sibling MALIEV service
+repositories and must not be reconstructed by cloning the service fleet in standalone `Maliev.Aspire` PR CI.
+Repository PR validation runs the lightweight `Maliev.Aspire.ServiceDefaults.Tests` project instead.
+
 ### 4.2 Test Execution Commands
 
 ```bash
+# Run repository-local ServiceDefaults unit tests
+dotnet test Maliev.Aspire.ServiceDefaults.Tests/ -v n
+
 # Run all Aspire system integration tests
 dotnet test Maliev.Aspire.Tests/ -v n
 
@@ -326,7 +333,7 @@ dotnet test Maliev.OrderService.Tests/ -v n
 
 | Gap | Impact | Action |
 |-----|--------|--------|
-| No CI/CD test execution | Tests never catch regressions | Add test job to `pr-validation.yml` |
+| ~~DONE~~ No repository-local ServiceDefaults CI tests | Shared infrastructure regressions were not executable without the service fleet | `Maliev.Aspire.ServiceDefaults.Tests` runs in `pr-validation.yml`; full Aspire system tests remain local-only |
 | ~~DONE~~ No event chain tests | Cross-service messaging now verified | `EventChainTests.cs` — 4 tests |
 | ~~DONE~~ No cross-service workflow tests | Business flows now verified | `Domain/Workflows/` — 3 files |
 | No coverage reporting | Coverage unknown | Configure coverlet + ReportGenerator |

@@ -1,4 +1,4 @@
-﻿version: 2
+version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -11,6 +11,7 @@ updates:
       - "/Maliev.Aspire.AppHost"
       - "/Maliev.Aspire.DatabaseSeeder"
       - "/Maliev.Aspire.ServiceDefaults"
+      - "/Maliev.Aspire.ServiceDefaults.Tests"
       - "/Maliev.Aspire.Tests"
     schedule:
       interval: "weekly"

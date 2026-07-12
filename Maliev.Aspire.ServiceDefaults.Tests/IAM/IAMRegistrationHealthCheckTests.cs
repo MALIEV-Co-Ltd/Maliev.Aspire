@@ -1,7 +1,7 @@
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
-namespace Maliev.Aspire.Tests.IAM;
+namespace Maliev.Aspire.ServiceDefaults.Tests.IAM;
 
 /// <summary>
 /// Unit tests for IAM registration health check classification.
