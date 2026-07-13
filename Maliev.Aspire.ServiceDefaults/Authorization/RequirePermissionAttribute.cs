@@ -90,6 +90,11 @@ public class RequirePermissionAttribute : AuthorizeAttribute
 
         if (_preValidateModel) sb.Append(":validate_model");
         if (_isCritical) sb.Append(":critical");
+        if (!string.IsNullOrWhiteSpace(_resourcePathTemplate))
+        {
+            sb.Append(":resource_").Append(Uri.EscapeDataString(_resourcePathTemplate));
+        }
+        if (_requireLiveCheck) sb.Append(":live_check");
         if (!string.IsNullOrEmpty(_auditPurpose))
         {
             // Sanitize audit purpose for policy name compatibility

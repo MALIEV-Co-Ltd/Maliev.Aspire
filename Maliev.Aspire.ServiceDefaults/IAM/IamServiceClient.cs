@@ -98,7 +98,13 @@ public partial class IamServiceClient : IIamServiceClient
         }
 
         var lazyCheck = new Lazy<Task<bool>>(
-            () => FetchAndCachePermissionAsync(principalId, permissionId, resourcePath, cacheKey),
+            () => FetchAndCachePermissionAsync(
+                principalId,
+                permissionId,
+                resourcePath,
+                cacheKey,
+                bypassCache: false,
+                CancellationToken.None),
             LazyThreadSafetyMode.ExecutionAndPublication);
         var activeCheck = _inFlightPermissionChecks.GetOrAdd(cacheKey, lazyCheck);
 
@@ -116,19 +122,44 @@ public partial class IamServiceClient : IIamServiceClient
         }
     }
 
+    /// <inheritdoc />
+    public Task<bool> CheckPermissionLiveAsync(
+        string principalId,
+        string permissionId,
+        string? resourcePath = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (IsAspireTestAdmin(principalId))
+        {
+            return Task.FromResult(true);
+        }
+
+        var cacheKey = $"{principalId}|{permissionId}|{resourcePath ?? "global"}";
+        return FetchAndCachePermissionAsync(
+            principalId,
+            permissionId,
+            resourcePath,
+            cacheKey,
+            bypassCache: true,
+            cancellationToken);
+    }
+
     private async Task<bool> FetchAndCachePermissionAsync(
         string principalId,
         string permissionId,
         string? resourcePath,
-        string cacheKey)
+        string cacheKey,
+        bool bypassCache,
+        CancellationToken cancellationToken)
     {
         try
         {
-            var request = new CheckPermissionRequest(principalId, permissionId, resourcePath);
+            var request = new CheckPermissionRequest(principalId, permissionId, resourcePath, bypassCache);
 
             var response = await GetHttpClient().PostAsJsonAsync(
                 "/iam/v1/auth/check-permission",
-                request);
+                request,
+                cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -137,7 +168,7 @@ public partial class IamServiceClient : IIamServiceClient
                 return false;
             }
 
-            var result = await response.Content.ReadFromJsonAsync<CheckPermissionResponse>();
+            var result = await response.Content.ReadFromJsonAsync<CheckPermissionResponse>(cancellationToken: cancellationToken);
             var allowed = result?.Allowed ?? false;
             CachePermissionResult(cacheKey, allowed);
             return allowed;
@@ -268,7 +299,8 @@ public partial class IamServiceClient : IIamServiceClient
     private sealed record CheckPermissionRequest(
         string PrincipalId,
         string PermissionId,
-        string? ResourcePath);
+        string? ResourcePath,
+        bool BypassCache);
 
     private sealed record CheckPermissionResponse(
         string PrincipalId,

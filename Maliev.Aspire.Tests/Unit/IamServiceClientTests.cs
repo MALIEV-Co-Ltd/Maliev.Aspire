@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace Maliev.Aspire.Tests.Unit;
 
@@ -57,6 +58,37 @@ public sealed class IamServiceClientTests
         Assert.Equal(1, handler.RequestCount);
     }
 
+    /// <summary>
+    /// Forced-live checks must bypass a previously cached standard result and request an authoritative IAM read.
+    /// </summary>
+    [Fact]
+    public async Task CheckPermissionLiveAsync_CachedStandardResult_SendsBypassRequest()
+    {
+        var handler = new LivePermissionHandler();
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://iam.test")
+        };
+        var client = new IamServiceClient(
+            new StaticHttpClientFactory(httpClient),
+            NullLogger<IamServiceClient>.Instance,
+            new TestHostEnvironment());
+        var principalId = $"user-{Guid.NewGuid():N}";
+
+        var standardResult = await client.CheckPermissionAsync(
+            principalId,
+            "project.projects.read",
+            "projects/project-123");
+        var liveResult = await client.CheckPermissionLiveAsync(
+            principalId,
+            "project.projects.read",
+            "projects/project-123");
+
+        Assert.True(standardResult);
+        Assert.False(liveResult);
+        Assert.Equal([false, true], handler.BypassCacheValues);
+    }
+
     private sealed class CountingPermissionHandler : HttpMessageHandler
     {
         private int _requestCount;
@@ -76,6 +108,33 @@ public sealed class IamServiceClientTests
                     PermissionId = "material.materials.read",
                     Allowed = true,
                     ResourcePath = "global",
+                    FromCache = false,
+                    LatencyMs = 1
+                })
+            };
+        }
+    }
+
+    private sealed class LivePermissionHandler : HttpMessageHandler
+    {
+        public List<bool> BypassCacheValues { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var payload = await request.Content!.ReadFromJsonAsync<JsonElement>(cancellationToken);
+            var bypassCache = payload.TryGetProperty("bypassCache", out var value) && value.GetBoolean();
+            BypassCacheValues.Add(bypassCache);
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    PrincipalId = "user-123",
+                    PermissionId = "project.projects.read",
+                    Allowed = !bypassCache,
+                    ResourcePath = "projects/project-123",
                     FromCache = false,
                     LatencyMs = 1
                 })

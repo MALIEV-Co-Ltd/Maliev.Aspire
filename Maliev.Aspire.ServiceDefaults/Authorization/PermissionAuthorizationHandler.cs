@@ -77,9 +77,17 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             if (resourceScopedEnabled)
             {
                 resourcePath = ResolveResourcePath(requirement.ResourcePathTemplate, httpContext?.GetRouteData().Values ?? new RouteValueDictionary());
+                if (resourcePath.Contains('{', StringComparison.Ordinal) || resourcePath.Contains('}', StringComparison.Ordinal))
+                {
+                    _logger.LogWarning(
+                        "Resource path template {ResourcePathTemplate} contains unresolved route values",
+                        requirement.ResourcePathTemplate);
+                    return;
+                }
             }
         }
-        var cacheKey = $"perm:{principalId}:{requirement.Permission}:{resourcePath}";
+        var enforcementMode = requirement.RequireLiveCheck ? "live" : "standard";
+        var cacheKey = $"perm:{principalId}:{requirement.Permission}:{resourcePath}:{enforcementMode}";
 
         if (httpContext != null && !string.IsNullOrEmpty(principalId))
         {
@@ -95,7 +103,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
 
         // Serialize concurrent calls for the same (principal, permission, resource) so that
         // only one IAM HTTP request is made and subsequent callers reuse the result.
-        var semKey = $"{principalId}:{requirement.Permission}:{resourcePath}";
+        var semKey = $"{principalId}:{requirement.Permission}:{resourcePath}:{enforcementMode}";
         var sem = _permissionSemaphores.GetOrAdd(semKey, _ => new SemaphoreSlim(1, 1));
 
         await sem.WaitAsync();
@@ -116,6 +124,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
                 context,
                 requirement.Permission,
                 resourcePath,
+                requirement.RequireLiveCheck,
                 requirement.AuditPurpose))
             {
                 context.Succeed(requirement);
@@ -135,6 +144,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         AuthorizationHandlerContext context,
         string permission,
         string resourcePath,
+        bool requireLiveCheck,
         string? auditPurpose)
     {
         var httpContext = _httpContextAccessor.HttpContext;
@@ -159,7 +169,9 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         {
             try
             {
-                hasPermission = await _iamClient.CheckPermissionAsync(principalId, permission, resourcePath);
+                hasPermission = requireLiveCheck
+                    ? await _iamClient.CheckPermissionLiveAsync(principalId, permission, resourcePath)
+                    : await _iamClient.CheckPermissionAsync(principalId, permission, resourcePath);
             }
             catch (Exception ex)
             {
@@ -172,8 +184,9 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             }
         }
 
-        // Fallback to JWT claims if IAM check failed or client not available
-        if (!hasPermission)
+        // Standard checks may fall back to token claims. Forced-live checks fail closed
+        // when IAM is unavailable or denies the permission.
+        if (!hasPermission && !requireLiveCheck)
         {
             var userPermissions = user.Claims
                 .Where(c => c.Type == "permissions" || c.Type == "permission" || c.Type == "role" || c.Type == "roles" || c.Type == "http://schemas.microsoft.com/ws/2008/06/identity/claims/role")
@@ -208,10 +221,18 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
                 hasPermission = true;
             }
         }
+        else if (!hasPermission)
+        {
+            _logger.LogWarning(
+                "Live IAM check did not grant permission {Permission} for Principal {PrincipalId}",
+                permission,
+                principalId);
+        }
 
         // Cache result for the remainder of this request to prevent double evaluation.
         // Use the same cache key format as HandleRequirementAsync for consistency.
-        var cacheKey = $"perm:{principalId}:{permission}:{resourcePath}";
+        var enforcementMode = requireLiveCheck ? "live" : "standard";
+        var cacheKey = $"perm:{principalId}:{permission}:{resourcePath}:{enforcementMode}";
         httpContext.Items[cacheKey] = hasPermission;
 
         if (hasPermission)
