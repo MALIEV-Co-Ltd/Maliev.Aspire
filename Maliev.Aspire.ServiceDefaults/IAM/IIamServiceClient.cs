@@ -32,6 +32,24 @@ public interface IIamServiceClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Checks a permission against authoritative IAM bindings, bypassing client and IAM caches.
+    /// </summary>
+    /// <param name="principalId">The principal ID (user or service account).</param>
+    /// <param name="permissionId">The permission to check.</param>
+    /// <param name="resourcePath">Optional hierarchical resource path.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// True only when the authoritative IAM check grants the permission. The default implementation
+    /// denies access so existing custom clients fail closed until they implement authoritative checks.
+    /// </returns>
+    Task<bool> CheckPermissionLiveAsync(
+        string principalId,
+        string permissionId,
+        string? resourcePath = null,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+
+    /// <summary>
     /// Checks multiple permissions in a single call for better performance.
     /// Useful for complex authorization scenarios requiring multiple permission checks.
     /// </summary>
