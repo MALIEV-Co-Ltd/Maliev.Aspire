@@ -57,7 +57,8 @@ public static class IAMExtensions
 
             client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);
             client.Timeout = TimeSpan.FromSeconds(30);
-        });
+        })
+        .RedactLoggedHeaders(["X-Maliev-IAM-Live-Check-Key"]);
 
         // Add the authentication handler only once
         httpClientBuilder.AddHttpMessageHandler<ServiceAccountAuthenticationHandler>();

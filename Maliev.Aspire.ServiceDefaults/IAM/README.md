@@ -42,6 +42,14 @@ The client attaches a service-account bearer token for trusted service-to-servic
 Outside Development and Testing, service-account tokens require `Jwt:PrivateKey` and are signed with RS256.
 The legacy `Jwt:SecurityKey` HS256 path is a local fallback only and is not accepted by production JWT validation.
 
+Endpoints marked `RequireLiveCheck` use `IIamServiceClient.CheckPermissionLiveAsync` to bypass IAM's
+permission-result cache. These authoritative checks require a second, per-service credential configured at
+`IAM:LivePermissionChecks:Credential`. The client sends it only on the live-check request in the
+`X-Maliev-IAM-Live-Check-Key` header, and HttpClient logging redacts that header. If the credential is absent,
+the client fails closed without calling IAM. Ordinary cached permission checks never send this header.
+IAM stores only the Base64-encoded SHA-256 verifier for each authorized caller; the raw credential must remain
+scoped to that caller and must never be reused as a bearer token.
+
 ## Configuration
 
 Add the following to your `appsettings.json`:

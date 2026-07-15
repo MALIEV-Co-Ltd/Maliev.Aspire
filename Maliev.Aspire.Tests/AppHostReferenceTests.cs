@@ -8,6 +8,30 @@ namespace Maliev.Aspire.Tests;
 public sealed class AppHostReferenceTests
 {
     /// <summary>
+    /// The local live-permission credential must be raw only in IntranetBff and hashed only in IAMService.
+    /// </summary>
+    [Fact]
+    public void AppHost_IamLiveCheckCredential_IsIsolatedToAuthorizedResources()
+    {
+        var appHostSource = File.ReadAllText(FindAppHostSource());
+
+        Assert.Contains("RandomNumberGenerator.GetBytes(32)", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("Convert.ToBase64String(", appHostSource, StringComparison.Ordinal);
+        Assert.Contains("SHA256.HashData", appHostSource, StringComparison.Ordinal);
+        Assert.Contains(
+            ".WithEnvironment(\"IAM__LivePermissionChecks__CredentialHashes__IntranetBff\", config.IamLiveCheckCredentialHash)",
+            appHostSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".WithEnvironment(\"IAM__LivePermissionChecks__Credential\", config.IntranetBffIamLiveCheckCredential)",
+            appHostSource,
+            StringComparison.Ordinal);
+
+        Assert.Equal(1, CountOccurrences(appHostSource, "IAM__LivePermissionChecks__Credential\""));
+        Assert.Equal(1, CountOccurrences(appHostSource, "IAM__LivePermissionChecks__CredentialHashes__IntranetBff\""));
+    }
+
+    /// <summary>
     /// QuotationService must be able to resolve customer data and PDF generation during formal quote creation.
     /// </summary>
     [Fact]
@@ -622,6 +646,19 @@ public sealed class AppHostReferenceTests
         }
 
         throw new FileNotFoundException("Unable to locate Maliev.Aspire.AppHost/AppHost.cs.");
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        var startIndex = 0;
+        while ((startIndex = source.IndexOf(value, startIndex, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            startIndex += value.Length;
+        }
+
+        return count;
     }
 
     private static string FindAppHostProjectFile()
