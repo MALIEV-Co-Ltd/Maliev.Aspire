@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using Maliev.Aspire.ServiceDefaults.Authorization;
 using Maliev.Aspire.ServiceDefaults.IAM;
@@ -16,6 +17,156 @@ namespace Maliev.Aspire.Tests.Unit;
 /// </summary>
 public sealed class PermissionAuthorizationPolicyTests
 {
+    /// <summary>
+    /// Request cancellation must win when IAM converts it into an ordinary transport exception.
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_IamCancelsRequestThenThrowsTransportError_DoesNotFailOpenOrUseClaims()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Features:FailOpenOnIAMError"] = "true"
+            })
+            .Build();
+        await using var services = new ServiceCollection()
+            .AddSingleton<IConfiguration>(configuration)
+            .BuildServiceProvider();
+        using var requestCancellation = new CancellationTokenSource();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestAborted = requestCancellation.Token
+        };
+        var iamClient = new CoordinatedIamClient
+        {
+            StandardCheck = (_, _, _, _) =>
+            {
+                requestCancellation.Cancel();
+                throw new HttpRequestException("IAM transport ended after request cancellation.");
+            }
+        };
+        var metrics = new RecordingAuthMetrics();
+        var requirement = new PermissionRequirement("project.projects.read");
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim("sub", "transport-cancel-user"),
+            new Claim("permissions", "*")
+        ], "test"));
+        var context = new AuthorizationHandlerContext([requirement], principal, httpContext);
+
+        var exception = await Record.ExceptionAsync(
+            () => CreateHandler(services, httpContext, iamClient, metrics).HandleAsync(context));
+
+        Assert.IsAssignableFrom<OperationCanceledException>(exception);
+        Assert.False(context.HasSucceeded);
+        Assert.False(context.HasFailed);
+        Assert.Empty(httpContext.Items);
+        Assert.Equal(0, metrics.Successes);
+        Assert.Equal(0, metrics.Failures);
+    }
+
+    /// <summary>
+    /// An already-canceled request must not reuse an authorization result from its request cache.
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_AlreadyCanceledWithInitialCachedGrant_PropagatesCancellation()
+    {
+        await using var services = new ServiceCollection().BuildServiceProvider();
+        using var requestCancellation = new CancellationTokenSource();
+        requestCancellation.Cancel();
+        var httpContext = new DefaultHttpContext
+        {
+            RequestAborted = requestCancellation.Token
+        };
+        httpContext.Items["perm:initial-cache-user:project.projects.read:global:standard"] = true;
+        var requirement = new PermissionRequirement("project.projects.read");
+        var context = new AuthorizationHandlerContext(
+            [requirement],
+            CreatePrincipal("initial-cache-user"),
+            httpContext);
+
+        var exception = await Record.ExceptionAsync(
+            () => CreateHandler(services, httpContext, new CoordinatedIamClient()).HandleAsync(context));
+
+        Assert.IsAssignableFrom<OperationCanceledException>(exception);
+        Assert.False(context.HasSucceeded);
+        Assert.False(context.HasFailed);
+    }
+
+    /// <summary>
+    /// Cancellation after semaphore acquisition must win over a result cached while the caller waited.
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_CanceledBeforePostSemaphoreCacheReuse_PropagatesCancellation()
+    {
+        await using var services = new ServiceCollection().BuildServiceProvider();
+        var firstIamStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstIam = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var callCount = 0;
+        var iamClient = new CoordinatedIamClient
+        {
+            StandardCheck = (_, _, _, _) =>
+            {
+                Interlocked.Increment(ref callCount);
+                firstIamStarted.TrySetResult();
+                return releaseFirstIam.Task;
+            }
+        };
+        var requirement = new PermissionRequirement("project.projects.read");
+        var firstHttpContext = new DefaultHttpContext();
+        var firstAuthorizationContext = new AuthorizationHandlerContext(
+            [requirement],
+            CreatePrincipal("post-cache-user"),
+            firstHttpContext);
+        var firstAuthorization = CreateHandler(services, firstHttpContext, iamClient)
+            .HandleAsync(firstAuthorizationContext);
+        await firstIamStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        using var waitingCancellation = new CancellationTokenSource();
+        var waitingHttpContext = new DefaultHttpContext
+        {
+            RequestAborted = waitingCancellation.Token
+        };
+        var waitingAuthorizationContext = new AuthorizationHandlerContext(
+            [requirement],
+            CreatePrincipal("post-cache-user"),
+            waitingHttpContext);
+        var waitingMetrics = new RecordingAuthMetrics();
+        var queuedContext = new QueuedSynchronizationContext();
+        var previousContext = SynchronizationContext.Current;
+        Task waitingAuthorization;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(queuedContext);
+            waitingAuthorization = new TestablePermissionAuthorizationHandler(
+                services,
+                new HttpContextAccessor { HttpContext = waitingHttpContext },
+                iamClient,
+                waitingMetrics).EvaluateAsync(waitingAuthorizationContext, requirement);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+
+        waitingHttpContext.Items["perm:post-cache-user:project.projects.read:global:standard"] = true;
+        releaseFirstIam.TrySetResult(true);
+        await firstAuthorization.WaitAsync(TimeSpan.FromSeconds(5));
+        await queuedContext.WaitForPostAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        waitingCancellation.Cancel();
+        await queuedContext.RunUntilCompletedAsync(waitingAuthorization);
+
+        var exception = await Record.ExceptionAsync(() => waitingAuthorization);
+        Assert.IsAssignableFrom<OperationCanceledException>(exception);
+        Assert.False(waitingAuthorizationContext.HasSucceeded);
+        Assert.False(waitingAuthorizationContext.HasFailed);
+        Assert.Equal(1, Volatile.Read(ref callCount));
+        Assert.Equal(0, waitingMetrics.Successes);
+        Assert.Equal(0, waitingMetrics.Failures);
+    }
+
     /// <summary>
     /// Forced-live permission checks must observe and propagate request cancellation without caching a denial.
     /// </summary>
@@ -415,6 +566,72 @@ public sealed class PermissionAuthorizationPolicyTests
         public void RecordSuccess(string permission) => Successes++;
 
         public void RecordFailure(string permission, string reason) => Failures++;
+    }
+
+    private sealed class QueuedSynchronizationContext : SynchronizationContext
+    {
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _callbacks = new();
+        private readonly SemaphoreSlim _available = new(0);
+        private readonly TaskCompletionSource _posted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            _callbacks.Enqueue((d, state));
+            _available.Release();
+            _posted.TrySetResult();
+        }
+
+        public Task WaitForPostAsync() => _posted.Task;
+
+        public async Task RunUntilCompletedAsync(Task task)
+        {
+            for (var iteration = 0; !task.IsCompleted && iteration < 16; iteration++)
+            {
+                if (!await _available.WaitAsync(TimeSpan.FromSeconds(5)))
+                {
+                    throw new InvalidOperationException("The authorization continuation was not queued.");
+                }
+
+                if (!_callbacks.TryDequeue(out var work))
+                {
+                    throw new InvalidOperationException("The queued authorization continuation was unavailable.");
+                }
+
+                var previousContext = Current;
+                try
+                {
+                    SetSynchronizationContext(this);
+                    work.Callback(work.State);
+                }
+                finally
+                {
+                    SetSynchronizationContext(previousContext);
+                }
+            }
+
+            if (!task.IsCompleted)
+            {
+                throw new InvalidOperationException("The authorization continuation did not complete.");
+            }
+        }
+    }
+
+    private sealed class TestablePermissionAuthorizationHandler(
+        IServiceProvider serviceProvider,
+        IHttpContextAccessor httpContextAccessor,
+        IIamServiceClient iamClient,
+        IAuthMetrics authMetrics) : PermissionAuthorizationHandler(
+            serviceProvider,
+            httpContextAccessor,
+            NullLogger<PermissionAuthorizationHandler>.Instance,
+            iamClient,
+            authMetrics)
+    {
+        public Task EvaluateAsync(
+            AuthorizationHandlerContext context,
+            PermissionRequirement requirement) =>
+            HandleRequirementAsync(context, requirement);
     }
 
     private sealed class CoordinatedIamClient : IIamServiceClient

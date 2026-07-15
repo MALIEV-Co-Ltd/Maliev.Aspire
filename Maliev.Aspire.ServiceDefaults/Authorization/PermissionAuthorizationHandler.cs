@@ -63,6 +63,8 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         PermissionRequirement requirement)
     {
         var httpContext = _httpContextAccessor.HttpContext;
+        var requestCancellation = httpContext?.RequestAborted ?? CancellationToken.None;
+        requestCancellation.ThrowIfCancellationRequested();
 
         var principalId = context.User.FindFirst("user_id")?.Value
             ?? context.User.FindFirst("sub")?.Value
@@ -105,11 +107,12 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         // only one IAM HTTP request is made and subsequent callers reuse the result.
         var semKey = $"{principalId}:{requirement.Permission}:{resourcePath}:{enforcementMode}";
         var sem = _permissionSemaphores.GetOrAdd(semKey, _ => new SemaphoreSlim(1, 1));
-        var requestCancellation = httpContext?.RequestAborted ?? CancellationToken.None;
 
         await sem.WaitAsync(requestCancellation);
         try
         {
+            requestCancellation.ThrowIfCancellationRequested();
+
             // Re-check cache after acquiring semaphore — another caller may have populated it
             // while we were waiting.
             if (httpContext != null && !string.IsNullOrEmpty(principalId))
@@ -138,6 +141,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         }
         catch (Exception ex)
         {
+            requestCancellation.ThrowIfCancellationRequested();
             _logger.LogError(ex, "Unhandled exception in PermissionAuthorizationHandler");
         }
         finally
@@ -197,6 +201,7 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             }
             catch (Exception ex)
             {
+                requestCancellation.ThrowIfCancellationRequested();
                 _logger.LogError(ex, "IAM service call failed for permission {Permission}", permission);
                 var config = _serviceProvider.GetService<IConfiguration>();
                 if (config?.GetValue<bool>("Features:FailOpenOnIAMError", false) ?? false)
@@ -205,6 +210,8 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
                 }
             }
         }
+
+        requestCancellation.ThrowIfCancellationRequested();
 
         // Standard checks may fall back to token claims. Forced-live checks fail closed
         // when IAM is unavailable or denies the permission.
@@ -250,6 +257,8 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
                 permission,
                 principalId);
         }
+
+        requestCancellation.ThrowIfCancellationRequested();
 
         // Cache result for the remainder of this request to prevent double evaluation.
         // Use the same cache key format as HandleRequirementAsync for consistency.
