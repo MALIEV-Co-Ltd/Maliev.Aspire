@@ -105,8 +105,9 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         // only one IAM HTTP request is made and subsequent callers reuse the result.
         var semKey = $"{principalId}:{requirement.Permission}:{resourcePath}:{enforcementMode}";
         var sem = _permissionSemaphores.GetOrAdd(semKey, _ => new SemaphoreSlim(1, 1));
+        var requestCancellation = httpContext?.RequestAborted ?? CancellationToken.None;
 
-        await sem.WaitAsync();
+        await sem.WaitAsync(requestCancellation);
         try
         {
             // Re-check cache after acquiring semaphore — another caller may have populated it
@@ -125,10 +126,15 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
                 requirement.Permission,
                 resourcePath,
                 requirement.RequireLiveCheck,
-                requirement.AuditPurpose))
+                requirement.AuditPurpose,
+                requestCancellation))
             {
                 context.Succeed(requirement);
             }
+        }
+        catch (OperationCanceledException) when (requestCancellation.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -145,8 +151,11 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         string permission,
         string resourcePath,
         bool requireLiveCheck,
-        string? auditPurpose)
+        string? auditPurpose,
+        CancellationToken requestCancellation)
     {
+        requestCancellation.ThrowIfCancellationRequested();
+
         var httpContext = _httpContextAccessor.HttpContext;
         if (httpContext == null) return false;
 
@@ -170,8 +179,21 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             try
             {
                 hasPermission = requireLiveCheck
-                    ? await _iamClient.CheckPermissionLiveAsync(principalId, permission, resourcePath)
-                    : await _iamClient.CheckPermissionAsync(principalId, permission, resourcePath);
+                    ? await _iamClient.CheckPermissionLiveAsync(
+                        principalId,
+                        permission,
+                        resourcePath,
+                        requestCancellation)
+                    : await _iamClient.CheckPermissionAsync(
+                        principalId,
+                        permission,
+                        resourcePath,
+                        requestCancellation);
+                requestCancellation.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException) when (requestCancellation.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
