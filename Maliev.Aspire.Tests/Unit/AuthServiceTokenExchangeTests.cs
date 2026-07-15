@@ -126,13 +126,61 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
             provider.GetTokenAsync());
     }
 
-    /// <summary>Verifies future-issued and not-yet-valid tokens are rejected.</summary>
+    /// <summary>Verifies a token whose not-before time is in the future is rejected.</summary>
     [Fact]
-    public async Task GetTokenAsync_FutureNotBeforeAndIssuedAt_FailsClosed()
+    public async Task GetTokenAsync_FutureNotBefore_FailsClosed()
     {
         var transport = RespondWith(() => CreateSuccessResponse(CreateServiceToken(
-            notBeforeOffset: TimeSpan.FromMinutes(2),
+            notBeforeOffset: TimeSpan.FromMinutes(2))));
+        var provider = CreateProvider(transport);
+
+        await Assert.ThrowsAsync<ServiceTokenExchangeException>(() => provider.GetTokenAsync());
+    }
+
+    /// <summary>Verifies a token whose issued-at time is in the future is rejected independently.</summary>
+    [Fact]
+    public async Task GetTokenAsync_FutureIssuedAt_FailsClosed()
+    {
+        var transport = RespondWith(() => CreateSuccessResponse(CreateServiceToken(
             issuedAtOffset: TimeSpan.FromMinutes(2))));
+        var provider = CreateProvider(transport);
+
+        await Assert.ThrowsAsync<ServiceTokenExchangeException>(() => provider.GetTokenAsync());
+    }
+
+    /// <summary>Verifies a duplicated subject cannot be collapsed into one trusted identity.</summary>
+    [Fact]
+    public async Task GetTokenAsync_DuplicateSubject_FailsClosed()
+    {
+        const string principalId = "11111111-1111-1111-1111-111111111111";
+        var transport = RespondWith(() => CreateSuccessResponse(
+            CreateServiceToken(additionalClaims: [new Claim(JwtRegisteredClaimNames.Sub, principalId)]),
+            responsePrincipalId: principalId));
+        var provider = CreateProvider(transport);
+
+        await Assert.ThrowsAsync<ServiceTokenExchangeException>(() => provider.GetTokenAsync());
+    }
+
+    /// <summary>Verifies an empty subject is never accepted as a service principal.</summary>
+    [Fact]
+    public async Task GetTokenAsync_EmptySubject_FailsClosed()
+    {
+        var transport = RespondWith(() => CreateSuccessResponse(
+            CreateServiceToken(subject: string.Empty),
+            responsePrincipalId: string.Empty));
+        var provider = CreateProvider(transport);
+
+        await Assert.ThrowsAsync<ServiceTokenExchangeException>(() => provider.GetTokenAsync());
+    }
+
+    /// <summary>Verifies an opaque non-Guid subject cannot become a service principal.</summary>
+    [Fact]
+    public async Task GetTokenAsync_NonGuidSubject_FailsClosed()
+    {
+        const string principalId = "opaque-service-principal";
+        var transport = RespondWith(() => CreateSuccessResponse(
+            CreateServiceToken(subject: principalId),
+            responsePrincipalId: principalId));
         var provider = CreateProvider(transport);
 
         await Assert.ThrowsAsync<ServiceTokenExchangeException>(() => provider.GetTokenAsync());
@@ -174,6 +222,24 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
 
         await Assert.ThrowsAsync<ServiceTokenExchangeException>(() =>
             provider.GetTokenAsync());
+    }
+
+    /// <summary>Verifies network receipt latency does not make a valid server lifetime inconsistent.</summary>
+    [Fact]
+    public async Task GetTokenAsync_DelayedReceipt_UsesExchangeStartForExpiryConsistency()
+    {
+        string? token = null;
+        var transport = new StubHttpMessageHandler((_, _) =>
+        {
+            _time.Advance(TimeSpan.FromSeconds(8));
+            token = CreateServiceToken(lifetimeSeconds: 900);
+            return Task.FromResult(CreateSuccessResponse(token, expiresIn: 900));
+        });
+        var provider = CreateProvider(transport);
+
+        var exchanged = await provider.GetTokenAsync();
+
+        Assert.Equal(token, exchanged);
     }
 
     /// <summary>Verifies cached tokens refresh before their effective expiry.</summary>
@@ -247,6 +313,29 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
 
         Assert.False(string.IsNullOrWhiteSpace(token));
         Assert.Equal(1, transport.RequestCount);
+    }
+
+    /// <summary>Verifies a failed refresh is cleared so the next caller can recover.</summary>
+    [Fact]
+    public async Task GetTokenAsync_FailedRefresh_AllowsNextRefreshAttempt()
+    {
+        var attempt = 0;
+        var transport = RespondWith(() =>
+        {
+            attempt++;
+            return attempt == 2
+                ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                : CreateSuccessResponse(CreateServiceToken(jti: attempt.ToString()));
+        });
+        var provider = CreateProvider(transport, refreshSafetyMarginSeconds: 60);
+
+        var first = await provider.GetTokenAsync();
+        _time.Advance(TimeSpan.FromSeconds(841));
+        await Assert.ThrowsAsync<ServiceTokenExchangeException>(() => provider.GetTokenAsync());
+        var recovered = await provider.GetTokenAsync();
+
+        Assert.NotEqual(first, recovered);
+        Assert.Equal(3, transport.RequestCount);
     }
 
     /// <summary>Verifies AuthService failure responses never yield a token.</summary>
@@ -359,6 +448,59 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
         await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
     }
 
+    /// <summary>Verifies a present but malformed public key fails before serving traffic.</summary>
+    [Fact]
+    public async Task AddAuthServiceTokenExchange_MalformedPublicKey_FailsHostStartup()
+    {
+        using var host = CreateExchangeHost("not-a-public-key");
+
+        await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+    }
+
+    /// <summary>Verifies a non-RSA subject public key fails before serving traffic.</summary>
+    [Fact]
+    public async Task AddAuthServiceTokenExchange_NonRsaPublicKey_FailsHostStartup()
+    {
+        using var ec = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var host = CreateExchangeHost(ec.ExportSubjectPublicKeyInfoPem());
+
+        await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+    }
+
+    /// <summary>Verifies an undersized RSA key fails before serving traffic.</summary>
+    [Fact]
+    public async Task AddAuthServiceTokenExchange_UndersizedRsaPublicKey_FailsHostStartup()
+    {
+        using var weakRsa = RSA.Create(1024);
+        using var host = CreateExchangeHost(weakRsa.ExportSubjectPublicKeyInfoPem());
+
+        await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+    }
+
+    /// <summary>Verifies issuer and audience trust identifiers must be absolute HTTPS URLs.</summary>
+    [Theory]
+    [InlineData("http://api.maliev.com", Audience)]
+    [InlineData(Issuer, "relative-audience")]
+    [InlineData("https://api.maliev.com/a/../b", Audience)]
+    public async Task AddAuthServiceTokenExchange_InvalidTrustIdentifier_FailsHostStartup(
+        string issuer,
+        string audience)
+    {
+        using var host = CreateExchangeHost(_rsa.ExportSubjectPublicKeyInfoPem(), issuer, audience);
+
+        await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+    }
+
+    /// <summary>Verifies the provider owns disposable cryptographic key material.</summary>
+    [Fact]
+    public void AuthServiceTokenProvider_OwnsDisposableKeyMaterial()
+    {
+        var provider = CreateProvider(RespondWith(() => CreateSuccessResponse(CreateServiceToken())));
+
+        var disposable = Assert.IsAssignableFrom<IDisposable>(provider);
+        disposable.Dispose();
+    }
+
     /// <summary>Verifies registration adds only the new opt-in provider and exchange client.</summary>
     [Fact]
     public void AddAuthServiceTokenExchange_RegistersOptInProviderAndDedicatedClient()
@@ -443,6 +585,27 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
             NullLogger<AuthServiceTokenProvider>.Instance);
     }
 
+    private IHost CreateExchangeHost(
+        string publicKey,
+        string issuer = Issuer,
+        string audience = Audience)
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            EnvironmentName = Environments.Production
+        });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceAuthentication:ClientId"] = ClientId,
+            ["ServiceAuthentication:ClientSecret"] = ClientSecret,
+            ["Jwt:PublicKey"] = publicKey,
+            ["Jwt:Issuer"] = issuer,
+            ["Jwt:Audience"] = audience
+        });
+        builder.AddAuthServiceTokenExchange(ServiceName);
+        return builder.Build();
+    }
+
     private StubHttpMessageHandler RespondWith(Func<HttpResponseMessage> responseFactory) =>
         new((_, _) => Task.FromResult(responseFactory()));
 
@@ -450,7 +613,8 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
         string token,
         int expiresIn = 900,
         string responseClientId = ClientId,
-        string responseServiceName = ServiceName)
+        string responseServiceName = ServiceName,
+        string responsePrincipalId = "11111111-1111-1111-1111-111111111111")
     {
         return new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -462,7 +626,7 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
                 user = new
                 {
                     user_id = responseClientId,
-                    principal_id = "11111111-1111-1111-1111-111111111111",
+                    principal_id = responsePrincipalId,
                     user_type = "service",
                     name = responseServiceName
                 }
@@ -478,13 +642,14 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
         IReadOnlyCollection<Claim>? additionalClaims = null,
         RSA? signingKey = null,
         TimeSpan? notBeforeOffset = null,
-        TimeSpan? issuedAtOffset = null)
+        TimeSpan? issuedAtOffset = null,
+        string subject = "11111111-1111-1111-1111-111111111111")
     {
         var now = _time.GetUtcNow();
         var key = new RsaSecurityKey(signingKey ?? _rsa) { KeyId = "test-key" };
         var claims = new List<Claim>
         {
-            new(JwtRegisteredClaimNames.Sub, "11111111-1111-1111-1111-111111111111"),
+            new(JwtRegisteredClaimNames.Sub, subject),
             new(JwtRegisteredClaimNames.Jti, jti ?? Guid.NewGuid().ToString()),
             new(
                 JwtRegisteredClaimNames.Iat,

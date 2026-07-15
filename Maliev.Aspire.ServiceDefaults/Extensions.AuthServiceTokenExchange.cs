@@ -47,10 +47,8 @@ public static class AuthServiceTokenExchangeExtensions
             .Bind(builder.Configuration.GetSection(AuthServiceTokenExchangeOptions.SectionName))
             .ValidateDataAnnotations()
             .Validate(
-                _ => !string.IsNullOrWhiteSpace(builder.Configuration["Jwt:PublicKey"]) &&
-                    !string.IsNullOrWhiteSpace(builder.Configuration["Jwt:Issuer"]) &&
-                    !string.IsNullOrWhiteSpace(builder.Configuration["Jwt:Audience"]),
-                "Jwt:PublicKey, Jwt:Issuer, and Jwt:Audience are required for AuthService token exchange.")
+                _ => AuthServiceTokenProvider.HasValidTrustConfiguration(builder.Configuration),
+                "Jwt:PublicKey must be an RSA SPKI key of at least 2048 bits, and Jwt:Issuer and Jwt:Audience must be absolute HTTPS identifiers.")
             .ValidateOnStart();
 
         builder.Services.AddSingleton(new ServiceProcessIdentity(processServiceName));

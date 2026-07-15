@@ -91,7 +91,7 @@ public sealed class ServiceTokenExchangeException : Exception
 /// <summary>
 /// Exchanges client credentials for a short-lived AuthService token and validates the complete trust response.
 /// </summary>
-public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
+public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider, IDisposable
 {
     /// <summary>
     /// Named client used exclusively for the unauthenticated client-credential exchange.
@@ -107,6 +107,7 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
     private readonly ServiceProcessIdentity _processIdentity;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AuthServiceTokenProvider> _logger;
+    private readonly RSA _signingKey;
     private readonly TokenValidationParameters _validationParameters;
     private readonly object _stateLock = new();
     private CacheEntry? _cachedToken;
@@ -128,7 +129,8 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
         _processIdentity = processIdentity ?? throw new ArgumentNullException(nameof(processIdentity));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _validationParameters = CreateValidationParameters(configuration ?? throw new ArgumentNullException(nameof(configuration)));
+        (_signingKey, _validationParameters) = CreateValidationState(
+            configuration ?? throw new ArgumentNullException(nameof(configuration)));
     }
 
     /// <inheritdoc />
@@ -177,6 +179,7 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
     {
         try
         {
+            var exchangeStartedAt = _timeProvider.GetUtcNow();
             using var request = new HttpRequestMessage(HttpMethod.Post, "/auth/v1/service/login")
             {
                 Content = JsonContent.Create(new ServiceLoginRequest(_options.ClientId, _options.ClientSecret))
@@ -199,7 +202,7 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
                 throw new ServiceTokenExchangeException("AuthService returned an empty token response.");
             }
 
-            return ValidateResponse(exchange);
+            return ValidateResponse(exchange, exchangeStartedAt);
         }
         catch (ServiceTokenExchangeException)
         {
@@ -211,7 +214,7 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
         }
     }
 
-    private CacheEntry ValidateResponse(ServiceLoginResponse response)
+    private CacheEntry ValidateResponse(ServiceLoginResponse response, DateTimeOffset exchangeStartedAt)
     {
         if (string.IsNullOrWhiteSpace(response.AccessToken) ||
             !string.Equals(response.TokenType, "Bearer", StringComparison.OrdinalIgnoreCase) ||
@@ -244,14 +247,19 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
             throw new ServiceTokenExchangeException("AuthService returned an inconsistent service identity or authority.");
         }
 
-        var subject = principal.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+        var subjects = principal.FindAll(JwtRegisteredClaimNames.Sub).Select(claim => claim.Value).ToArray();
+        var subject = subjects.Length == 1 ? subjects[0] : null;
         var issuedAtValue = principal.FindAll(JwtRegisteredClaimNames.Iat).Select(claim => claim.Value).ToArray();
-        if (string.IsNullOrWhiteSpace(subject) ||
+        if (subject is null ||
+            !Guid.TryParseExact(subject, "D", out var subjectId) ||
+            !string.Equals(subject, subjectId.ToString("D"), StringComparison.Ordinal) ||
             issuedAtValue.Length != 1 ||
             !long.TryParse(issuedAtValue[0], out var issuedAtSeconds) ||
             DateTimeOffset.FromUnixTimeSeconds(issuedAtSeconds) > _timeProvider.GetUtcNow() ||
             !string.Equals(response.User.UserId, _options.ClientId, StringComparison.Ordinal) ||
-            !string.Equals(response.User.PrincipalId, subject, StringComparison.Ordinal) ||
+            !Guid.TryParseExact(response.User.PrincipalId, "D", out var responsePrincipalId) ||
+            !string.Equals(response.User.PrincipalId, responsePrincipalId.ToString("D"), StringComparison.Ordinal) ||
+            responsePrincipalId != subjectId ||
             !string.Equals(response.User.UserType, "service", StringComparison.Ordinal) ||
             !string.Equals(response.User.Name, _processIdentity.ServiceName, StringComparison.Ordinal))
         {
@@ -260,9 +268,13 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
 
         var now = _timeProvider.GetUtcNow();
         var jwtExpiresAt = new DateTimeOffset(jwt.ValidTo, TimeSpan.Zero);
-        var responseExpiresAt = now.AddSeconds(response.ExpiresIn);
-        var expiryDifference = (jwtExpiresAt - responseExpiresAt).Duration();
-        if (jwtExpiresAt <= now || expiryDifference > TimeSpan.FromSeconds(ExpiryConsistencyToleranceSeconds))
+        var responseExpiresAt = exchangeStartedAt.AddSeconds(response.ExpiresIn);
+        var expiryTolerance = TimeSpan.FromSeconds(ExpiryConsistencyToleranceSeconds);
+        var earliestConsistentExpiry = responseExpiresAt - expiryTolerance;
+        var latestConsistentExpiry = now.AddSeconds(response.ExpiresIn) + expiryTolerance;
+        if (jwtExpiresAt <= now ||
+            jwtExpiresAt < earliestConsistentExpiry ||
+            jwtExpiresAt > latestConsistentExpiry)
         {
             throw new ServiceTokenExchangeException("AuthService returned inconsistent service token expiry.");
         }
@@ -287,27 +299,43 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
         return values.Length == 1 && string.Equals(values[0], expectedValue, StringComparison.Ordinal);
     }
 
-    private TokenValidationParameters CreateValidationParameters(IConfiguration configuration)
+    internal static bool HasValidTrustConfiguration(IConfiguration configuration)
     {
-        var configuredPublicKey = configuration["Jwt:PublicKey"];
-        var issuer = configuration["Jwt:Issuer"];
-        var audience = configuration["Jwt:Audience"];
-        if (string.IsNullOrWhiteSpace(configuredPublicKey) ||
-            string.IsNullOrWhiteSpace(issuer) ||
-            string.IsNullOrWhiteSpace(audience))
+        ArgumentNullException.ThrowIfNull(configuration);
+        if (!TryGetHttpsTrustIdentifier(configuration["Jwt:Issuer"], out _) ||
+            !TryGetHttpsTrustIdentifier(configuration["Jwt:Audience"], out _))
         {
-            throw new InvalidOperationException(
-                "Jwt:PublicKey, Jwt:Issuer, and Jwt:Audience are required for AuthService token exchange.");
+            return false;
         }
 
         try
         {
-            var publicKeyPem = configuredPublicKey.Contains("BEGIN", StringComparison.Ordinal)
-                ? configuredPublicKey
-                : Encoding.UTF8.GetString(Convert.FromBase64String(configuredPublicKey));
-            var rsa = RSA.Create();
-            rsa.ImportFromPem(publicKeyPem);
-            return new TokenValidationParameters
+            using var rsa = LoadRsaSubjectPublicKey(configuration["Jwt:PublicKey"]);
+            return rsa.KeySize >= 2048;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _signingKey.Dispose();
+
+    private (RSA SigningKey, TokenValidationParameters ValidationParameters) CreateValidationState(
+        IConfiguration configuration)
+    {
+        if (!TryGetHttpsTrustIdentifier(configuration["Jwt:Issuer"], out var issuer) ||
+            !TryGetHttpsTrustIdentifier(configuration["Jwt:Audience"], out var audience))
+        {
+            throw new InvalidOperationException(
+                "Jwt:Issuer and Jwt:Audience must be canonical absolute HTTPS identifiers.");
+        }
+
+        var rsa = LoadRsaSubjectPublicKey(configuration["Jwt:PublicKey"]);
+        try
+        {
+            var validationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
                 ValidIssuer = issuer,
@@ -329,11 +357,92 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider
                 NameClaimType = JwtRegisteredClaimNames.Sub,
                 RoleClaimType = "roles"
             };
+
+            return (rsa, validationParameters);
         }
-        catch (Exception ex) when (ex is FormatException or CryptographicException or ArgumentException)
+        catch
         {
-            throw new InvalidOperationException("Jwt:PublicKey is not a valid RSA public key.", ex);
+            rsa.Dispose();
+            throw;
         }
+    }
+
+    private static RSA LoadRsaSubjectPublicKey(string? configuredPublicKey)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPublicKey))
+        {
+            throw new InvalidOperationException("Jwt:PublicKey is required.");
+        }
+
+        try
+        {
+            var publicKeyPem = configuredPublicKey.Contains("BEGIN", StringComparison.Ordinal)
+                ? configuredPublicKey
+                : Encoding.UTF8.GetString(Convert.FromBase64String(configuredPublicKey));
+            var pem = publicKeyPem.AsSpan();
+            if (!PemEncoding.TryFind(pem, out var fields) ||
+                !pem[fields.Label].SequenceEqual("PUBLIC KEY"))
+            {
+                throw new InvalidOperationException("Jwt:PublicKey must contain an RSA subject public key.");
+            }
+
+            var prefixEnd = fields.Location.Start.GetOffset(pem.Length);
+            var suffixStart = fields.Location.End.GetOffset(pem.Length);
+            if (!pem[..prefixEnd].Trim().IsEmpty || !pem[suffixStart..].Trim().IsEmpty)
+            {
+                throw new InvalidOperationException("Jwt:PublicKey must contain one subject public key.");
+            }
+
+            var subjectPublicKeyInfo = Convert.FromBase64String(pem[fields.Base64Data].ToString());
+            try
+            {
+                var rsa = RSA.Create();
+                try
+                {
+                    rsa.ImportSubjectPublicKeyInfo(subjectPublicKeyInfo, out var bytesRead);
+                    if (bytesRead != subjectPublicKeyInfo.Length || rsa.KeySize < 2048)
+                    {
+                        throw new InvalidOperationException("Jwt:PublicKey must be an RSA key of at least 2048 bits.");
+                    }
+
+                    return rsa;
+                }
+                catch
+                {
+                    rsa.Dispose();
+                    throw;
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(subjectPublicKeyInfo);
+            }
+        }
+        catch (Exception exception) when (exception is FormatException or CryptographicException or ArgumentException)
+        {
+            throw new InvalidOperationException("Jwt:PublicKey is not a valid RSA subject public key.", exception);
+        }
+    }
+
+    private static bool TryGetHttpsTrustIdentifier(string? configuredValue, out string value)
+    {
+        value = configuredValue ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(value) ||
+            !string.Equals(value, value.Trim(), StringComparison.Ordinal) ||
+            !Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(uri.Host) ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment))
+        {
+            return false;
+        }
+
+        var canonicalValue = uri.GetComponents(
+            UriComponents.SchemeAndServer | UriComponents.Path,
+            UriFormat.UriEscaped).TrimEnd('/');
+        return string.Equals(value, canonicalValue, StringComparison.Ordinal);
     }
 
     private sealed record CacheEntry(string Token, DateTimeOffset RefreshAtUtc);
