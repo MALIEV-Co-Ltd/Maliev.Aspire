@@ -1,4 +1,5 @@
 using Maliev.Aspire.ServiceDefaults.IAM;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,6 +14,8 @@ namespace Maliev.Aspire.Tests.Unit;
 /// </summary>
 public sealed class IamServiceClientTests
 {
+    private const string LiveCheckHeaderName = "X-Maliev-IAM-Live-Check-Key";
+
     /// <summary>
     /// High-volume authorization success-path logs should stay below Information level.
     /// </summary>
@@ -45,7 +48,8 @@ public sealed class IamServiceClientTests
         var client = new IamServiceClient(
             new StaticHttpClientFactory(httpClient),
             NullLogger<IamServiceClient>.Instance,
-            new TestHostEnvironment());
+            new TestHostEnvironment(),
+            CreateConfiguration());
 
         var principalId = $"system:service:test-{Guid.NewGuid():N}";
         var tasks = Enumerable.Range(0, 32)
@@ -59,12 +63,12 @@ public sealed class IamServiceClientTests
     }
 
     /// <summary>
-    /// Forced-live checks must bypass a previously cached standard result and request an authoritative IAM read.
+    /// Existing callers of the original constructor retain cached checks while live checks fail closed.
     /// </summary>
     [Fact]
-    public async Task CheckPermissionLiveAsync_CachedStandardResult_SendsBypassRequest()
+    public async Task LegacyConstructor_StandardAndLiveChecks_PreservesCompatibilityAndFailsLiveClosed()
     {
-        var handler = new LivePermissionHandler();
+        var handler = new CountingPermissionHandler();
         using var httpClient = new HttpClient(handler)
         {
             BaseAddress = new Uri("https://iam.test")
@@ -73,6 +77,39 @@ public sealed class IamServiceClientTests
             new StaticHttpClientFactory(httpClient),
             NullLogger<IamServiceClient>.Instance,
             new TestHostEnvironment());
+        var principalId = $"legacy-user-{Guid.NewGuid():N}";
+
+        var standardResult = await client.CheckPermissionAsync(
+            principalId,
+            "project.projects.read",
+            "projects/project-123");
+        var liveResult = await client.CheckPermissionLiveAsync(
+            principalId,
+            "project.projects.read",
+            "projects/project-123");
+
+        Assert.True(standardResult);
+        Assert.False(liveResult);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    /// <summary>
+    /// Forced-live checks must bypass a previously cached standard result and request an authoritative IAM read.
+    /// </summary>
+    [Fact]
+    public async Task CheckPermissionLiveAsync_CachedStandardResult_SendsBypassRequest()
+    {
+        const string liveCheckCredential = "test-live-check-credential";
+        var handler = new LivePermissionHandler(liveCheckCredential);
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://iam.test")
+        };
+        var client = new IamServiceClient(
+            new StaticHttpClientFactory(httpClient),
+            NullLogger<IamServiceClient>.Instance,
+            new TestHostEnvironment(),
+            CreateConfiguration(liveCheckCredential));
         var principalId = $"user-{Guid.NewGuid():N}";
 
         var standardResult = await client.CheckPermissionAsync(
@@ -87,6 +124,54 @@ public sealed class IamServiceClientTests
         Assert.True(standardResult);
         Assert.False(liveResult);
         Assert.Equal([false, true], handler.BypassCacheValues);
+        Assert.Equal([false, true], handler.LiveCheckCredentialMatches);
+    }
+
+    /// <summary>
+    /// A forced-live check without its dedicated credential must fail closed before creating an IAM request.
+    /// </summary>
+    [Fact]
+    public async Task CheckPermissionLiveAsync_MissingCredential_FailsClosedWithoutHttpRequest()
+    {
+        var handler = new CountingPermissionHandler();
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://iam.test")
+        };
+        var client = new IamServiceClient(
+            new StaticHttpClientFactory(httpClient),
+            NullLogger<IamServiceClient>.Instance,
+            new TestHostEnvironment(),
+            CreateConfiguration());
+
+        var result = await client.CheckPermissionLiveAsync(
+            $"user-{Guid.NewGuid():N}",
+            "project.projects.read",
+            "projects/project-123");
+
+        Assert.False(result);
+        Assert.Equal(0, handler.RequestCount);
+    }
+
+    /// <summary>
+    /// The live-check credential header must be configured as sensitive in HttpClient logs.
+    /// </summary>
+    [Fact]
+    public void AddIamClient_RedactsLiveCheckCredentialHeader()
+    {
+        var source = File.ReadAllText(FindRepoFile(
+            "Maliev.Aspire.ServiceDefaults",
+            "Extensions.IAM.cs"));
+        var clientSource = File.ReadAllText(FindRepoFile(
+            "Maliev.Aspire.ServiceDefaults",
+            "IAM",
+            "IamServiceClient.cs"));
+
+        Assert.Contains($"RedactLoggedHeaders([\"{LiveCheckHeaderName}\"])", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "Interlocked.Exchange(ref _missingLiveCheckCredentialLogged, 1) == 0",
+            clientSource,
+            StringComparison.Ordinal);
     }
 
     private sealed class CountingPermissionHandler : HttpMessageHandler
@@ -115,9 +200,11 @@ public sealed class IamServiceClientTests
         }
     }
 
-    private sealed class LivePermissionHandler : HttpMessageHandler
+    private sealed class LivePermissionHandler(string expectedLiveCheckCredential) : HttpMessageHandler
     {
         public List<bool> BypassCacheValues { get; } = [];
+
+        public List<bool> LiveCheckCredentialMatches { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -126,6 +213,9 @@ public sealed class IamServiceClientTests
             var payload = await request.Content!.ReadFromJsonAsync<JsonElement>(cancellationToken);
             var bypassCache = payload.TryGetProperty("bypassCache", out var value) && value.GetBoolean();
             BypassCacheValues.Add(bypassCache);
+            var credentialMatches = request.Headers.TryGetValues(LiveCheckHeaderName, out var values) &&
+                string.Equals(values.Single(), expectedLiveCheckCredential, StringComparison.Ordinal);
+            LiveCheckCredentialMatches.Add(credentialMatches);
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -140,6 +230,19 @@ public sealed class IamServiceClientTests
                 })
             };
         }
+    }
+
+    private static IConfiguration CreateConfiguration(string? liveCheckCredential = null)
+    {
+        var values = new Dictionary<string, string?>();
+        if (liveCheckCredential is not null)
+        {
+            values["IAM:LivePermissionChecks:Credential"] = liveCheckCredential;
+        }
+
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
+            .Build();
     }
 
     private sealed class StaticHttpClientFactory : IHttpClientFactory

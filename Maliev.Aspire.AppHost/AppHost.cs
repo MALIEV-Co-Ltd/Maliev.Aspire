@@ -7,6 +7,8 @@ using Maliev.Aspire.AppHost.OpenTelemetryCollector;
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Configuration;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
 
 // Disable GSSAPI negotiation globally for the AppHost process and its probes.
 // This silences the "SPNEGO cannot find mechanisms to negotiate" logs in postgres-server.
@@ -133,6 +135,25 @@ static partial class Program
         var googleDriveClientId = builder.AddParameterFromConfig("GoogleDriveClientId", "GoogleDrive:ClientId", secret: true);
         var googleDriveClientSecret = builder.AddParameterFromConfig("GoogleDriveClientSecret", "GoogleDrive:ClientSecret", secret: true);
 
+        // Local-only credential for authoritative Intranet permission checks. Generate a fresh
+        // value for each AppHost start unless the developer explicitly supplies one. Only the
+        // caller receives the raw value; IAM receives the SHA-256 verifier.
+        var configuredIamLiveCheckCredential =
+            builder.Configuration["IAM:LivePermissionChecks:IntranetBffCredential"];
+        var iamLiveCheckCredential = string.IsNullOrWhiteSpace(configuredIamLiveCheckCredential)
+            ? Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
+            : configuredIamLiveCheckCredential;
+        var iamLiveCheckCredentialHash = Convert.ToBase64String(
+            SHA256.HashData(Encoding.UTF8.GetBytes(iamLiveCheckCredential)));
+        var intranetBffIamLiveCheckCredential = builder.AddParameter(
+            "IntranetBffIamLiveCheckCredential",
+            secret: true);
+        builder.Configuration["Parameters:IntranetBffIamLiveCheckCredential"] = iamLiveCheckCredential;
+        var iamLiveCheckCredentialHashParameter = builder.AddParameter(
+            "IamLiveCheckCredentialHash",
+            secret: true);
+        builder.Configuration["Parameters:IamLiveCheckCredentialHash"] = iamLiveCheckCredentialHash;
+
         var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
         builder.Configuration["Parameters:AspireTestAdminEnabled"] =
             builder.Configuration["AspireTestAdmin:Enabled"] ?? "false";
@@ -175,6 +196,8 @@ static partial class Program
             GoogleClientId: googleClientId,
             GoogleDriveClientId: googleDriveClientId,
             GoogleDriveClientSecret: googleDriveClientSecret,
+            IntranetBffIamLiveCheckCredential: intranetBffIamLiveCheckCredential,
+            IamLiveCheckCredentialHash: iamLiveCheckCredentialHashParameter,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
             AspireTestAdminPassword: aspireTestAdminPassword,
             CorsAllowedOrigins: corsAllowedOrigins,
@@ -365,6 +388,7 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
+                .WithEnvironment("IAM__LivePermissionChecks__CredentialHashes__IntranetBff", config.IamLiveCheckCredentialHash)
                 .WithTestingSafeHttpHealthCheck("/iam/aspire-liveness"),
             config,
             grafana,
@@ -1197,7 +1221,8 @@ static partial class Program
         // ──────────────────────────────────────────────
         // Apply shared secrets to frontends
         // ──────────────────────────────────────────────
-        intranetBff = WithSharedSecrets(intranetBff, config, grafana, otelCollector, environmentName);
+        intranetBff = WithSharedSecrets(intranetBff, config, grafana, otelCollector, environmentName)
+            .WithEnvironment("IAM__LivePermissionChecks__Credential", config.IntranetBffIamLiveCheckCredential);
         quoteEngineBff = WithSharedSecrets(quoteEngineBff, config, grafana, otelCollector, environmentName)
             .WithEnvironment("Web__BaseUrl", webBff.GetEndpoint("https"))
             .WithEnvironment("QuoteAgent__EnableThinkingCallbacks", "true")
@@ -1332,6 +1357,8 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> GoogleClientId,
     IResourceBuilder<ParameterResource> GoogleDriveClientId,
     IResourceBuilder<ParameterResource> GoogleDriveClientSecret,
+    IResourceBuilder<ParameterResource> IntranetBffIamLiveCheckCredential,
+    IResourceBuilder<ParameterResource> IamLiveCheckCredentialHash,
     IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
     IResourceBuilder<ParameterResource> AspireTestAdminPassword,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using System.Collections.Concurrent;
@@ -15,23 +16,29 @@ namespace Maliev.Aspire.ServiceDefaults.IAM;
 public partial class IamServiceClient : IIamServiceClient
 {
     private const string AspireTestAdminPrincipalId = "00000000-0000-0000-0000-000000000002";
+    private const string LiveCheckCredentialConfigurationKey = "IAM:LivePermissionChecks:Credential";
+    private const string LiveCheckCredentialHeaderName = "X-Maliev-IAM-Live-Check-Key";
 
     // Allowed results are stable enough to reuse for a minute; denials expire fast so
     // newly granted permissions propagate within seconds.
     private static readonly TimeSpan AllowedCacheTtl = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan DeniedCacheTtl = TimeSpan.FromSeconds(5);
     private const int CacheCleanupThreshold = 2048;
+    private static readonly IConfiguration EmptyConfiguration = new ConfigurationBuilder().Build();
 
     // Static: the client is registered scoped, so an instance cache would reset on
     // every request. Keys embed the principal, so sharing across scopes is safe.
     private static readonly ConcurrentDictionary<string, CachedPermissionResult> _permissionCache = new();
     private static readonly ConcurrentDictionary<string, Lazy<Task<bool>>> _inFlightPermissionChecks = new();
+    private static int _missingLiveCheckCredentialLogged;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<IamServiceClient> _logger;
     private readonly IHostEnvironment _environment;
+    private readonly IConfiguration _configuration;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="IamServiceClient"/> class.
+    /// Initializes a client without live-check credentials for compatibility with existing callers.
+    /// Standard checks remain available; live checks fail closed.
     /// </summary>
     /// <param name="httpClientFactory">The HTTP client factory for creating named clients.</param>
     /// <param name="logger">The logger instance.</param>
@@ -40,10 +47,27 @@ public partial class IamServiceClient : IIamServiceClient
         IHttpClientFactory httpClientFactory,
         ILogger<IamServiceClient> logger,
         IHostEnvironment environment)
+        : this(httpClientFactory, logger, environment, EmptyConfiguration)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IamServiceClient"/> class.
+    /// </summary>
+    /// <param name="httpClientFactory">The HTTP client factory for creating named clients.</param>
+    /// <param name="logger">The logger instance.</param>
+    /// <param name="environment">The current host environment.</param>
+    /// <param name="configuration">The application configuration.</param>
+    public IamServiceClient(
+        IHttpClientFactory httpClientFactory,
+        ILogger<IamServiceClient> logger,
+        IHostEnvironment environment,
+        IConfiguration configuration)
     {
         _httpClientFactory = httpClientFactory;
         _logger = logger;
         _environment = environment;
+        _configuration = configuration;
     }
 
     private HttpClient GetHttpClient() => _httpClientFactory.CreateClient("IAMService");
@@ -104,6 +128,7 @@ public partial class IamServiceClient : IIamServiceClient
                 resourcePath,
                 cacheKey,
                 bypassCache: false,
+                liveCheckCredential: null,
                 CancellationToken.None),
             LazyThreadSafetyMode.ExecutionAndPublication);
         var activeCheck = _inFlightPermissionChecks.GetOrAdd(cacheKey, lazyCheck);
@@ -134,6 +159,17 @@ public partial class IamServiceClient : IIamServiceClient
             return Task.FromResult(true);
         }
 
+        var liveCheckCredential = _configuration[LiveCheckCredentialConfigurationKey];
+        if (string.IsNullOrWhiteSpace(liveCheckCredential))
+        {
+            if (Interlocked.Exchange(ref _missingLiveCheckCredentialLogged, 1) == 0)
+            {
+                Log.MissingLiveCheckCredential(_logger);
+            }
+
+            return Task.FromResult(false);
+        }
+
         var cacheKey = $"{principalId}|{permissionId}|{resourcePath ?? "global"}";
         return FetchAndCachePermissionAsync(
             principalId,
@@ -141,6 +177,7 @@ public partial class IamServiceClient : IIamServiceClient
             resourcePath,
             cacheKey,
             bypassCache: true,
+            liveCheckCredential,
             cancellationToken);
     }
 
@@ -150,16 +187,22 @@ public partial class IamServiceClient : IIamServiceClient
         string? resourcePath,
         string cacheKey,
         bool bypassCache,
+        string? liveCheckCredential,
         CancellationToken cancellationToken)
     {
         try
         {
             var request = new CheckPermissionRequest(principalId, permissionId, resourcePath, bypassCache);
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, "/iam/v1/auth/check-permission")
+            {
+                Content = JsonContent.Create(request)
+            };
+            if (!string.IsNullOrWhiteSpace(liveCheckCredential))
+            {
+                requestMessage.Headers.Add(LiveCheckCredentialHeaderName, liveCheckCredential);
+            }
 
-            var response = await GetHttpClient().PostAsJsonAsync(
-                "/iam/v1/auth/check-permission",
-                request,
-                cancellationToken);
+            using var response = await GetHttpClient().SendAsync(requestMessage, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -333,5 +376,8 @@ public partial class IamServiceClient : IIamServiceClient
 
         [LoggerMessage(Level = LogLevel.Error, Message = "Error occurred while bulk checking {Count} permissions for principal {PrincipalId}")]
         public static partial void ErrorBulkCheckingPermissions(ILogger logger, string principalId, int count, Exception ex);
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "IAM live permission check denied because its dedicated credential is not configured")]
+        public static partial void MissingLiveCheckCredential(ILogger logger);
     }
 }
