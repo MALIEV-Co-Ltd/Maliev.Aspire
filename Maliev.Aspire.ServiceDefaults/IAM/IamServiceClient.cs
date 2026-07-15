@@ -216,6 +216,10 @@ public partial class IamServiceClient : IIamServiceClient
             CachePermissionResult(cacheKey, allowed);
             return allowed;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Log.ErrorCheckingPermission(_logger, principalId, permissionId, resourcePath ?? "global", ex);

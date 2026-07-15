@@ -128,6 +128,38 @@ public sealed class IamServiceClientTests
     }
 
     /// <summary>
+    /// Caller-triggered cancellation of an authoritative live check must propagate to the caller.
+    /// </summary>
+    [Fact]
+    public async Task CheckPermissionLiveAsync_CallerCancels_PropagatesCancellation()
+    {
+        const string liveCheckCredential = "test-live-check-credential";
+        var handler = new CancellablePermissionHandler();
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://iam.test")
+        };
+        var client = new IamServiceClient(
+            new StaticHttpClientFactory(httpClient),
+            NullLogger<IamServiceClient>.Instance,
+            new TestHostEnvironment(),
+            CreateConfiguration(liveCheckCredential));
+        using var cancellationSource = new CancellationTokenSource();
+
+        var checkTask = client.CheckPermissionLiveAsync(
+            $"user-{Guid.NewGuid():N}",
+            "project.projects.read",
+            "projects/project-123",
+            cancellationSource.Token);
+        await handler.RequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        cancellationSource.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => checkTask);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    /// <summary>
     /// A forced-live check without its dedicated credential must fail closed before creating an IAM request.
     /// </summary>
     [Fact]
@@ -229,6 +261,27 @@ public sealed class IamServiceClientTests
                     LatencyMs = 1
                 })
             };
+        }
+    }
+
+    private sealed class CancellablePermissionHandler : HttpMessageHandler
+    {
+        private int _requestCount;
+
+        public TaskCompletionSource RequestStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int RequestCount => Volatile.Read(ref _requestCount);
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _requestCount);
+            RequestStarted.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+
+            return new HttpResponseMessage(HttpStatusCode.OK);
         }
     }
 
