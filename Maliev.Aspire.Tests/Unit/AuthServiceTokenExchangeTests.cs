@@ -491,6 +491,90 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
         await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
     }
 
+    /// <summary>Verifies production never sends service credentials to a plaintext AuthService endpoint.</summary>
+    [Theory]
+    [InlineData("http://auth.internal")]
+    [InlineData("http://localhost")]
+    public async Task AddAuthServiceTokenExchange_ProductionHttpBaseUrl_FailsHostStartup(string baseUrl)
+    {
+        using var host = CreateExchangeHost(
+            _rsa.ExportSubjectPublicKeyInfoPem(),
+            authServiceBaseUrl: baseUrl,
+            environmentName: "Production");
+
+        await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+    }
+
+    /// <summary>Verifies local plaintext exchange is limited to loopback in local-only environments.</summary>
+    [Theory]
+    [InlineData("Development", "http://localhost")]
+    [InlineData("Development", "http://127.0.0.1:5100")]
+    [InlineData("Testing", "http://[::1]:5100")]
+    public async Task AddAuthServiceTokenExchange_LocalEnvironmentLoopbackHttpBaseUrl_Starts(
+        string environmentName,
+        string baseUrl)
+    {
+        using var host = CreateExchangeHost(
+            _rsa.ExportSubjectPublicKeyInfoPem(),
+            authServiceBaseUrl: baseUrl,
+            environmentName: environmentName);
+
+        await host.StartAsync();
+        await host.StopAsync();
+    }
+
+    /// <summary>Verifies a local environment cannot opt into plaintext exchange with a non-loopback peer.</summary>
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Testing")]
+    public async Task AddAuthServiceTokenExchange_LocalEnvironmentNonLoopbackHttpBaseUrl_FailsHostStartup(
+        string environmentName)
+    {
+        using var host = CreateExchangeHost(
+            _rsa.ExportSubjectPublicKeyInfoPem(),
+            authServiceBaseUrl: "http://auth.internal",
+            environmentName: environmentName);
+
+        await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+    }
+
+    /// <summary>Verifies unsafe or ambiguous AuthService endpoint syntax fails before serving traffic.</summary>
+    [Theory]
+    [InlineData("https://user@auth.test")]
+    [InlineData("https://auth.test?region=one")]
+    [InlineData("https://auth.test#fragment")]
+    [InlineData("https://auth.test/a/../b")]
+    [InlineData(" https://auth.test")]
+    [InlineData("https://AUTH.test")]
+    [InlineData("https://auth.test/")]
+    public async Task AddAuthServiceTokenExchange_NonCanonicalBaseUrl_FailsHostStartup(string baseUrl)
+    {
+        using var host = CreateExchangeHost(
+            _rsa.ExportSubjectPublicKeyInfoPem(),
+            authServiceBaseUrl: baseUrl,
+            environmentName: "Production");
+
+        await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+    }
+
+    /// <summary>Verifies local Aspire keeps HTTPS-first discovery with an HTTP fallback.</summary>
+    [Theory]
+    [InlineData("Development", "https+http://authservice/")]
+    [InlineData("Testing", "https+http://authservice/")]
+    [InlineData("Production", "https://authservice/")]
+    public void AddAuthServiceTokenExchange_DefaultDiscoveryTransport_IsEnvironmentSafe(
+        string environmentName,
+        string expectedBaseUrl)
+    {
+        using var host = CreateExchangeHost(
+            _rsa.ExportSubjectPublicKeyInfoPem(),
+            environmentName: environmentName);
+        var client = host.Services.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(AuthServiceTokenProvider.HttpClientName);
+
+        Assert.Equal(new Uri(expectedBaseUrl), client.BaseAddress);
+    }
+
     /// <summary>Verifies the provider owns disposable cryptographic key material.</summary>
     [Fact]
     public void AuthServiceTokenProvider_OwnsDisposableKeyMaterial()
@@ -588,11 +672,13 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
     private IHost CreateExchangeHost(
         string publicKey,
         string issuer = Issuer,
-        string audience = Audience)
+        string audience = Audience,
+        string? authServiceBaseUrl = null,
+        string environmentName = "Production")
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
-            EnvironmentName = Environments.Production
+            EnvironmentName = environmentName
         });
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -602,6 +688,11 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
             ["Jwt:Issuer"] = issuer,
             ["Jwt:Audience"] = audience
         });
+        if (authServiceBaseUrl is not null)
+        {
+            builder.Configuration["Services:AuthService:BaseUrl"] = authServiceBaseUrl;
+        }
+
         builder.AddAuthServiceTokenExchange(ServiceName);
         return builder.Build();
     }

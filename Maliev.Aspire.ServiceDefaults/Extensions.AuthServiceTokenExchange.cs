@@ -1,4 +1,5 @@
 using Maliev.Aspire.ServiceDefaults.IAM;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -49,6 +50,12 @@ public static class AuthServiceTokenExchangeExtensions
             .Validate(
                 _ => AuthServiceTokenProvider.HasValidTrustConfiguration(builder.Configuration),
                 "Jwt:PublicKey must be an RSA SPKI key of at least 2048 bits, and Jwt:Issuer and Jwt:Audience must be absolute HTTPS identifiers.")
+            .Validate(
+                options => TryResolveAuthServiceBaseAddress(
+                    builder.Configuration,
+                    builder.Environment.EnvironmentName,
+                    out _),
+                "Services:AuthService:BaseUrl must be a canonical HTTPS origin. Plain HTTP is allowed only for a loopback origin in Development or Testing.")
             .ValidateOnStart();
 
         builder.Services.AddSingleton(new ServiceProcessIdentity(processServiceName));
@@ -58,14 +65,65 @@ public static class AuthServiceTokenExchangeExtensions
 
         builder.Services.AddHttpClient(AuthServiceTokenProvider.HttpClientName, client =>
         {
-            var explicitUrl = builder.Configuration["Services:AuthService:BaseUrl"];
-            client.BaseAddress = !string.IsNullOrWhiteSpace(explicitUrl)
-                ? new Uri(explicitUrl)
-                : new Uri("https+http://AuthService");
+            if (!TryResolveAuthServiceBaseAddress(
+                    builder.Configuration,
+                    builder.Environment.EnvironmentName,
+                    out var baseAddress))
+            {
+                throw new InvalidOperationException(
+                    "Services:AuthService:BaseUrl is not safe for service credential exchange.");
+            }
+
+            client.BaseAddress = baseAddress;
             client.Timeout = TimeSpan.FromSeconds(10);
         })
         .AddServiceDiscovery();
 
         return builder;
     }
+
+    private static bool TryResolveAuthServiceBaseAddress(
+        IConfiguration configuration,
+        string environmentName,
+        out Uri baseAddress)
+    {
+        var configuredValue = configuration["Services:AuthService:BaseUrl"];
+        if (configuredValue is null)
+        {
+            baseAddress = new Uri(IsLocalEnvironment(environmentName)
+                ? "https+http://AuthService"
+                : "https://AuthService");
+            return true;
+        }
+
+        baseAddress = null!;
+        if (string.IsNullOrWhiteSpace(configuredValue) ||
+            !string.Equals(configuredValue, configuredValue.Trim(), StringComparison.Ordinal) ||
+            !Uri.TryCreate(configuredValue, UriKind.Absolute, out var uri) ||
+            string.IsNullOrWhiteSpace(uri.Host) ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment) ||
+            uri.AbsolutePath != "/")
+        {
+            return false;
+        }
+
+        var canonicalOrigin = uri.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped);
+        if (!string.Equals(configuredValue, canonicalOrigin, StringComparison.Ordinal) ||
+            !(string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ||
+              string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) &&
+              IsLocalEnvironment(environmentName) &&
+              uri.IsLoopback))
+        {
+            return false;
+        }
+
+        baseAddress = uri;
+        return true;
+    }
+
+    private static bool IsLocalEnvironment(string environmentName) =>
+        string.Equals(environmentName, Environments.Development, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(environmentName, "Testing", StringComparison.OrdinalIgnoreCase);
 }
