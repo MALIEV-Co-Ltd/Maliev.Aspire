@@ -54,6 +54,7 @@ public sealed class LocalServiceIdentityWiringSourceTests
         Assert.Contains("AspireLocalServiceIdentity__Profiles__contact-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__search-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__registry-service__SecretHash", source, StringComparison.Ordinal);
+        Assert.Contains("AspireLocalServiceIdentity__Profiles__country-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("localIdentitySecretHashes", source, StringComparison.Ordinal);
 
         Assert.Contains("AuthServiceLocalClientSecret", source, StringComparison.Ordinal);
@@ -66,7 +67,7 @@ public sealed class LocalServiceIdentityWiringSourceTests
         var verifierEnvironmentOccurrences = CountOccurrences(
             source,
             "__SecretHash\"");
-        Assert.Equal(8, verifierEnvironmentOccurrences);
+        Assert.Equal(10, verifierEnvironmentOccurrences);
     }
 
     /// <summary>
