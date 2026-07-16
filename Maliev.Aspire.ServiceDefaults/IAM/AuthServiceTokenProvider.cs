@@ -147,6 +147,12 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider, IDispo
                 return _cachedToken.Token;
             }
 
+            if (_activeRefresh is { IsFaulted: true } failedRefresh)
+            {
+                _ = failedRefresh.Exception;
+                _activeRefresh = null;
+            }
+
             refreshTask = _activeRefresh ??= ExchangeAndValidateAsync();
         }
 
