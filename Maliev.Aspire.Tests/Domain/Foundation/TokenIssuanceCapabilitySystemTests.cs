@@ -403,6 +403,28 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         Assert.DoesNotContain(token.Claims, claim => claim.Value == "*");
         Assert.DoesNotContain(token.Claims, claim =>
             claim.Value.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
+
+        var accountingCredential = credentials[^1];
+        foreach (var precedingCredential in credentials[..^1])
+        {
+            using var precedingClientWithAccountingSecret = await authClient.PostAsJsonAsync(
+                "/auth/v1/service/login",
+                new
+                {
+                    client_id = precedingCredential.ClientId,
+                    client_secret = accountingCredential.Secret
+                });
+            Assert.Equal(HttpStatusCode.Unauthorized, precedingClientWithAccountingSecret.StatusCode);
+
+            using var accountingClientWithPrecedingSecret = await authClient.PostAsJsonAsync(
+                "/auth/v1/service/login",
+                new
+                {
+                    client_id = accountingCredential.ClientId,
+                    client_secret = precedingCredential.Secret
+                });
+            Assert.Equal(HttpStatusCode.Unauthorized, accountingClientWithPrecedingSecret.StatusCode);
+        }
     }
 
     /// <summary>
