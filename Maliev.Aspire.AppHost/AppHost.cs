@@ -140,8 +140,19 @@ static partial class Program
             secret: true);
         builder.Configuration["Parameters:AuthTokenIssuanceCapabilityPrivateKey"] =
             capabilityMaterial.PrivateKeyPem;
-        var livePermissionCheckCredentialHash = Convert.ToBase64String(
-            SHA256.HashData(Encoding.UTF8.GetBytes(localIdentityMaterial.RawSecret)));
+        var livePermissionCheckCredential = RandomNumberGenerator.GetBytes(32);
+        var livePermissionCheckCredentialDigest = SHA256.HashData(livePermissionCheckCredential);
+        string livePermissionCheckCredentialHash;
+        try
+        {
+            livePermissionCheckCredentialHash = Convert.ToBase64String(
+                livePermissionCheckCredentialDigest);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(livePermissionCheckCredential);
+            CryptographicOperations.ZeroMemory(livePermissionCheckCredentialDigest);
+        }
 
         using var fleetRsa = RSA.Create(2048);
         var jwtPrivateKey = Convert.ToBase64String(fleetRsa.ExportPkcs8PrivateKey());

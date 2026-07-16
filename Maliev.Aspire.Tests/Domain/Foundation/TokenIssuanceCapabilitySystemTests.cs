@@ -1,12 +1,15 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Maliev.Aspire.Tests.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit.Abstractions;
 
 namespace Maliev.Aspire.Tests.Domain.Foundation;
@@ -17,6 +20,12 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     TokenIssuanceCapabilitySystemFixture fixture,
     ITestOutputHelper output)
 {
+    private const string AuthActiveKeyId = "Auth__TokenIssuanceCapability__ActiveKeyId";
+    private const string AuthPrivateKey = "Auth__TokenIssuanceCapability__PrivateKey";
+    private const string IamPublicKeyPrefix = "IAM__TokenIssuanceCapability__PublicKeys__";
+    private const string IamLiveCheckRawCredential = "IAM__LivePermissionChecks__Credential";
+    private const string IamLiveCheckVerifier = "IAM__LivePermissionChecks__CredentialHashes__IntranetBff";
+
     /// <summary>
     /// The real hosted Auth service must resolve the seeded workload through IAM's additive capability route.
     /// </summary>
@@ -37,7 +46,6 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         if (!response.IsSuccessStatusCode)
         {
             output.WriteLine($"AuthService response body: {body}");
-            await Task.Delay(TimeSpan.FromSeconds(2));
         }
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -56,6 +64,75 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         Assert.DoesNotContain(token.Claims, claim => claim.Value == "*");
         Assert.DoesNotContain(token.Claims, claim =>
             claim.Value.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The evaluated bounded model must isolate capability material and keep live-check credentials independent.
+    /// </summary>
+    [Fact]
+    public async Task BoundedModel_EvaluatedEnvironment_IsolatesCapabilityMaterialAndLiveCheckVerifier()
+    {
+        var model = fixture.GetModel();
+        var authSecret = await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret");
+        var authSecretBytes = Encoding.UTF8.GetBytes(authSecret);
+        var authDerivedVerifierDigest = SHA256.HashData(authSecretBytes);
+        var authDerivedVerifier = Convert.ToBase64String(authDerivedVerifierDigest);
+        CryptographicOperations.ZeroMemory(authSecretBytes);
+        CryptographicOperations.ZeroMemory(authDerivedVerifierDigest);
+        string? authActiveKeyId = null;
+        string? iamPublicKeyName = null;
+        string? iamVerifier = null;
+
+        foreach (var resource in model.Resources.OfType<IResourceWithEnvironment>())
+        {
+            var configuration = await ExecutionConfigurationBuilder
+                .Create(resource)
+                .WithEnvironmentVariablesConfig()
+                .BuildAsync(
+                    new DistributedApplicationExecutionContext(DistributedApplicationOperation.Run),
+                    NullLogger.Instance,
+                    CancellationToken.None);
+            var environment = configuration.EnvironmentVariables
+                .ToDictionary(StringComparer.Ordinal);
+            Assert.DoesNotContain(IamLiveCheckRawCredential, environment.Keys);
+            var capabilityKeys = environment.Keys
+                .Where(key =>
+                    key is AuthActiveKeyId or AuthPrivateKey ||
+                    key.StartsWith(IamPublicKeyPrefix, StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+
+            if (resource.Name == "AuthService")
+            {
+                Assert.Equal([AuthActiveKeyId, AuthPrivateKey], capabilityKeys);
+                authActiveKeyId = Assert.IsType<string>(environment[AuthActiveKeyId]);
+                Assert.Contains(
+                    "BEGIN PRIVATE KEY",
+                    Assert.IsType<string>(environment[AuthPrivateKey]),
+                    StringComparison.Ordinal);
+                Assert.DoesNotContain(environment.Keys, key =>
+                    key.StartsWith(IamPublicKeyPrefix, StringComparison.Ordinal));
+            }
+            else if (resource.Name == "IAMService")
+            {
+                var publicKey = Assert.Single(capabilityKeys);
+                Assert.StartsWith(IamPublicKeyPrefix, publicKey, StringComparison.Ordinal);
+                iamPublicKeyName = publicKey;
+                Assert.False(string.IsNullOrWhiteSpace(
+                    Assert.IsType<string>(environment[publicKey])));
+                Assert.DoesNotContain(AuthActiveKeyId, environment.Keys);
+                Assert.DoesNotContain(AuthPrivateKey, environment.Keys);
+                iamVerifier = Assert.IsType<string>(environment[IamLiveCheckVerifier]);
+            }
+            else
+            {
+                Assert.Empty(capabilityKeys);
+            }
+        }
+
+        Assert.NotNull(iamVerifier);
+        Assert.NotEqual(authDerivedVerifier, iamVerifier);
+        Assert.Equal($"{IamPublicKeyPrefix}{authActiveKeyId}", iamPublicKeyName);
     }
 }
 
@@ -118,6 +195,10 @@ public sealed class TokenIssuanceCapabilitySystemFixture : IAsyncLifetime
         return await parameter.GetValueAsync(cancellationToken) ?? throw new InvalidOperationException(
             $"Aspire secret parameter '{parameterName}' has no initialized value.");
     }
+
+    /// <summary>Returns the evaluated bounded AppHost resource model.</summary>
+    public DistributedApplicationModel GetModel() =>
+        _factory!.Application.Services.GetRequiredService<DistributedApplicationModel>();
 
     private sealed class CapturingDistributedApplicationFactory(Type entryPoint, string[] args)
         : DistributedApplicationFactory(entryPoint, args)
