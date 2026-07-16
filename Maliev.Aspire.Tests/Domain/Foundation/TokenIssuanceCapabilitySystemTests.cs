@@ -250,6 +250,60 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     }
 
     /// <summary>
+    /// CountryService credentials must be unique across all five local workloads and issue only
+    /// the canonical live-permission-check authority before Country runtime wiring is enabled.
+    /// </summary>
+    [Fact]
+    public async Task CountryServiceCredential_HostedAuthIamBoundary_AllFiveIdentitiesAreIsolatedAndBounded()
+    {
+        var credentials = new[]
+        {
+            (ClientId: "service-auth-service", Secret: await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret")),
+            (ClientId: "service-contact-service", Secret: await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret")),
+            (ClientId: "service-search-service", Secret: await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret")),
+            (ClientId: "service-registry-service", Secret: await fixture.GetSecretParameterValueAsync("RegistryServiceLocalClientSecret")),
+            (ClientId: "service-country-service", Secret: await fixture.GetSecretParameterValueAsync("CountryServiceLocalClientSecret"))
+        };
+        Assert.Equal(5, credentials.Select(credential => credential.Secret).Distinct().Count());
+        using var authClient = await fixture.CreateLiveAuthClientAsync();
+
+        for (var index = 0; index < credentials.Length; index++)
+        {
+            var credential = credentials[index];
+            var crossedSecret = credentials[(index + 1) % credentials.Length].Secret;
+            using var rejected = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+            {
+                client_id = credential.ClientId,
+                client_secret = crossedSecret
+            });
+            Assert.Equal(HttpStatusCode.Unauthorized, rejected.StatusCode);
+        }
+
+        using var countryLogin = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-country-service",
+            client_secret = credentials[^1].Secret
+        });
+        var loginBody = await countryLogin.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, countryLogin.StatusCode);
+        using var loginJson = JsonDocument.Parse(loginBody);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(
+            loginJson.RootElement.GetProperty("access_token").GetString());
+
+        Assert.Equal("service-country-service", token.Claims.Single(claim => claim.Type == "client_id").Value);
+        Assert.Equal("CountryService", token.Claims.Single(claim => claim.Type == "service_name").Value);
+        Assert.Equal(
+            ["iam.auth.check-permission"],
+            token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        Assert.Equal(
+            ["roles.workloads.country-service.v1"],
+            token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
+        Assert.DoesNotContain(token.Claims, claim => claim.Value == "*");
+        Assert.DoesNotContain(token.Claims, claim =>
+            claim.Value.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// The evaluated bounded model must isolate capability material and keep live-check credentials independent.
     /// </summary>
     [Fact]
@@ -260,6 +314,7 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         var contactSecret = await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret");
         var searchSecret = await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret");
         var registrySecret = await fixture.GetSecretParameterValueAsync("RegistryServiceLocalClientSecret");
+        var countrySecret = await fixture.GetSecretParameterValueAsync("CountryServiceLocalClientSecret");
         Assert.DoesNotContain(
             model.Resources,
             resource => string.Equals(resource.Name, "SearchService", StringComparison.Ordinal));
@@ -349,6 +404,10 @@ public sealed class TokenIssuanceCapabilitySystemTests(
             // Registry runtime is intentionally absent until its central-exchange wiring lands.
             // Its raw credential must therefore remain unprojected to every process resource.
             Assert.DoesNotContain(environment, pair => Equals(pair.Value, registrySecret));
+
+            // Country's central-exchange runtime wiring has not landed yet.
+            // Its raw credential must therefore remain unprojected to every process resource.
+            Assert.DoesNotContain(environment, pair => Equals(pair.Value, countrySecret));
         }
 
         Assert.NotNull(iamVerifier);
