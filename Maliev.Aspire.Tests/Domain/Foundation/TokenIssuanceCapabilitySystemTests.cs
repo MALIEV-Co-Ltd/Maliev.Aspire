@@ -304,6 +304,64 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     }
 
     /// <summary>
+    /// CurrencyService credentials must be unique across all six local workloads, reject every
+    /// ordered crossed-secret pair, and issue only the canonical live-permission-check authority.
+    /// </summary>
+    [Fact]
+    public async Task CurrencyServiceCredential_HostedAuthIamBoundary_AllSixIdentitiesAreIsolatedAndBounded()
+    {
+        var credentials = new[]
+        {
+            (ClientId: "service-auth-service", Secret: await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret")),
+            (ClientId: "service-contact-service", Secret: await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret")),
+            (ClientId: "service-search-service", Secret: await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret")),
+            (ClientId: "service-registry-service", Secret: await fixture.GetSecretParameterValueAsync("RegistryServiceLocalClientSecret")),
+            (ClientId: "service-country-service", Secret: await fixture.GetSecretParameterValueAsync("CountryServiceLocalClientSecret")),
+            (ClientId: "service-currency-service", Secret: await fixture.GetSecretParameterValueAsync("CurrencyServiceLocalClientSecret"))
+        };
+        Assert.Equal(6, credentials.Select(credential => credential.Secret).Distinct().Count());
+        using var authClient = await fixture.CreateLiveAuthClientAsync();
+
+        foreach (var credential in credentials)
+        {
+            foreach (var crossedSecret in credentials
+                         .Where(candidate => candidate.ClientId != credential.ClientId)
+                         .Select(candidate => candidate.Secret))
+            {
+                using var rejected = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+                {
+                    client_id = credential.ClientId,
+                    client_secret = crossedSecret
+                });
+                Assert.Equal(HttpStatusCode.Unauthorized, rejected.StatusCode);
+            }
+        }
+
+        using var currencyLogin = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-currency-service",
+            client_secret = credentials[^1].Secret
+        });
+        var loginBody = await currencyLogin.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, currencyLogin.StatusCode);
+        using var loginJson = JsonDocument.Parse(loginBody);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(
+            loginJson.RootElement.GetProperty("access_token").GetString());
+
+        Assert.Equal("service-currency-service", token.Claims.Single(claim => claim.Type == "client_id").Value);
+        Assert.Equal("CurrencyService", token.Claims.Single(claim => claim.Type == "service_name").Value);
+        Assert.Equal(
+            ["iam.auth.check-permission"],
+            token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        Assert.Equal(
+            ["roles.workloads.currency-service.v1"],
+            token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
+        Assert.DoesNotContain(token.Claims, claim => claim.Value == "*");
+        Assert.DoesNotContain(token.Claims, claim =>
+            claim.Value.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// The evaluated bounded model must isolate capability material and keep live-check credentials independent.
     /// </summary>
     [Fact]
@@ -315,12 +373,16 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         var searchSecret = await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret");
         var registrySecret = await fixture.GetSecretParameterValueAsync("RegistryServiceLocalClientSecret");
         var countrySecret = await fixture.GetSecretParameterValueAsync("CountryServiceLocalClientSecret");
+        var currencySecret = await fixture.GetSecretParameterValueAsync("CurrencyServiceLocalClientSecret");
         Assert.DoesNotContain(
             model.Resources,
             resource => string.Equals(resource.Name, "SearchService", StringComparison.Ordinal));
         Assert.DoesNotContain(
             model.Resources,
             resource => string.Equals(resource.Name, "RegistryService", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            model.Resources,
+            resource => string.Equals(resource.Name, "CurrencyService", StringComparison.Ordinal));
         var authSecretBytes = Encoding.UTF8.GetBytes(authSecret);
         var authDerivedVerifierDigest = SHA256.HashData(authSecretBytes);
         var authDerivedVerifier = Convert.ToBase64String(authDerivedVerifierDigest);
@@ -408,6 +470,10 @@ public sealed class TokenIssuanceCapabilitySystemTests(
             // Country's central-exchange runtime wiring has not landed yet.
             // Its raw credential must therefore remain unprojected to every process resource.
             Assert.DoesNotContain(environment, pair => Equals(pair.Value, countrySecret));
+
+            // This bounded capability host intentionally excludes Currency runtime wiring.
+            // Its raw credential must therefore remain unprojected to every process resource here.
+            Assert.DoesNotContain(environment, pair => Equals(pair.Value, currencySecret));
         }
 
         Assert.NotNull(iamVerifier);

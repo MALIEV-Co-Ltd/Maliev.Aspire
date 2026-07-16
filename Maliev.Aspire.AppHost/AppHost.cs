@@ -143,6 +143,8 @@ static partial class Program
             LocalServiceIdentityProfileCatalog.RegistryService.WorkloadId];
         var countryIdentityMaterial = localIdentityMaterials[
             LocalServiceIdentityProfileCatalog.CountryService.WorkloadId];
+        var currencyIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.CurrencyService.WorkloadId];
         var localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = authIdentityMaterial.RawSecret;
         var contactIdentitySecret = builder.AddParameter("ContactServiceLocalClientSecret", secret: true);
@@ -153,6 +155,8 @@ static partial class Program
         builder.Configuration["Parameters:RegistryServiceLocalClientSecret"] = registryIdentityMaterial.RawSecret;
         var countryIdentitySecret = builder.AddParameter("CountryServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:CountryServiceLocalClientSecret"] = countryIdentityMaterial.RawSecret;
+        var currencyIdentitySecret = builder.AddParameter("CurrencyServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:CurrencyServiceLocalClientSecret"] = currencyIdentityMaterial.RawSecret;
         var capabilityMaterial = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
         var capabilityPrivateKey = builder.AddParameter(
             "AuthTokenIssuanceCapabilityPrivateKey",
@@ -272,6 +276,9 @@ static partial class Program
                 .WithEnvironment(
                     "AspireLocalServiceIdentity__Profiles__country-service__SecretHash",
                     countryIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__currency-service__SecretHash",
+                    currencyIdentityMaterial.SecretHash)
                 .WithReference(iamDatabase, "IamDbContext")
                 .WaitFor(iamService),
             runAutomatically: true);
@@ -850,6 +857,10 @@ static partial class Program
                         "AspireLocalServiceIdentity__Profiles__country-service__SecretHash",
                         config.LocalServiceIdentitySecretHashes[
                             LocalServiceIdentityProfileCatalog.CountryService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__currency-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.CurrencyService.WorkloadId])
                     .WithReference(databases.IAM, "IamDbContext")
                     .WaitFor(iamService),
                 runAutomatically: true);
