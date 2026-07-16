@@ -1,6 +1,7 @@
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -695,6 +696,90 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(new AuthenticationHeaderValue("Bearer", token), capturedRequest!.Headers.Authorization);
+    }
+
+    /// <summary>Verifies the IAM client uses the central exchange without registering legacy signing.</summary>
+    [Fact]
+    public void AddAuthServiceIAMClient_RegistersCentralExchangeClientWithoutLegacySigner()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceAuthentication:ClientId"] = ClientId,
+            ["ServiceAuthentication:ClientSecret"] = ClientSecret,
+            ["Services:AuthService:BaseUrl"] = "https://auth.test",
+            ["Services:IAMService:BaseUrl"] = "https://iam.test",
+            ["Jwt:PublicKey"] = Convert.ToBase64String(Encoding.UTF8.GetBytes(_rsa.ExportSubjectPublicKeyInfoPem())),
+            ["Jwt:Issuer"] = Issuer,
+            ["Jwt:Audience"] = Audience
+        });
+        builder.AddAuthServiceTokenExchange(ServiceName);
+
+        builder.AddAuthServiceIAMClient();
+
+        using var provider = builder.Services.BuildServiceProvider();
+        Assert.IsType<IamServiceClient>(provider.GetRequiredService<IIamServiceClient>());
+        Assert.Null(provider.GetService<IServiceAccountTokenProvider>());
+        Assert.Null(provider.GetService<ServiceAccountAuthenticationHandler>());
+        var iamClient = provider.GetRequiredService<IHttpClientFactory>().CreateClient("IAMService");
+        Assert.Equal(new Uri("https://iam.test/"), iamClient.BaseAddress);
+        Assert.Equal(TimeSpan.FromSeconds(30), iamClient.Timeout);
+    }
+
+    /// <summary>Verifies service tokens cannot be sent to a plaintext production IAM origin.</summary>
+    [Fact]
+    public void AddAuthServiceIAMClient_ProductionHttpBaseUrl_FailsClosed()
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            EnvironmentName = Environments.Production
+        });
+        builder.Configuration["Services:IAMService:BaseUrl"] = "http://iam.internal";
+        builder.AddAuthServiceTokenExchange(ServiceName);
+
+        Assert.Throws<InvalidOperationException>(() => builder.AddAuthServiceIAMClient());
+    }
+
+    /// <summary>Verifies the IAM client sends the AuthService token through the opt-in handler chain.</summary>
+    [Fact]
+    public async Task AddAuthServiceIAMClient_PermissionRequest_UsesCentralExchangeBearerToken()
+    {
+        var token = CreateServiceToken();
+        HttpRequestMessage? capturedRequest = null;
+        var terminal = new StubHttpMessageHandler((request, _) =>
+        {
+            capturedRequest = request;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    principalId = "user-1",
+                    permissions = new[] { "search.documents.read" },
+                    roles = Array.Empty<string>(),
+                    cacheUntil = DateTimeOffset.UtcNow,
+                    fromCache = false
+                })
+            });
+        });
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Services:IAMService:BaseUrl"] = "https://iam.test"
+        });
+        builder.AddAuthServiceTokenExchange(ServiceName);
+        builder.AddAuthServiceIAMClient();
+        builder.Services.RemoveAll<IAuthServiceTokenProvider>();
+        builder.Services.AddSingleton<IAuthServiceTokenProvider>(new StubTokenProvider(token));
+        builder.Services.AddHttpClient("IAMService")
+            .ConfigurePrimaryHttpMessageHandler(() => terminal);
+        using var provider = builder.Services.BuildServiceProvider();
+
+        var permissions = await provider.GetRequiredService<IIamServiceClient>()
+            .GetUserPermissionsAsync("user-1");
+
+        Assert.Equal(["search.documents.read"], permissions);
+        Assert.Equal(new AuthenticationHeaderValue("Bearer", token), capturedRequest!.Headers.Authorization);
+        Assert.Equal("/iam/v1/auth/resolve-permissions", capturedRequest.RequestUri!.AbsolutePath);
     }
 
     private AuthServiceTokenProvider CreateProvider(

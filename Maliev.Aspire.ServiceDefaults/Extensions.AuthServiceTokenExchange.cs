@@ -10,6 +10,8 @@ namespace Microsoft.Extensions.Hosting;
 /// </summary>
 public static class AuthServiceTokenExchangeExtensions
 {
+    private const string IamServiceClientName = "IAMService";
+
     /// <summary>
     /// Adds the opt-in AuthService token handler to a downstream HTTP client.
     /// </summary>
@@ -19,6 +21,48 @@ public static class AuthServiceTokenExchangeExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         return builder.AddHttpMessageHandler<AuthServiceTokenExchangeHandler>();
+    }
+
+    /// <summary>
+    /// Adds the IAM permission client using an AuthService-issued workload token without enabling legacy local signing.
+    /// </summary>
+    /// <param name="builder">The application builder.</param>
+    /// <returns>The application builder.</returns>
+    public static IHostApplicationBuilder AddAuthServiceIAMClient(this IHostApplicationBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        if (!builder.Services.Any(descriptor =>
+                descriptor.ServiceType == typeof(IAuthServiceTokenProvider)))
+        {
+            throw new InvalidOperationException(
+                "AddAuthServiceTokenExchange must be registered before the AuthService-backed IAM client.");
+        }
+
+        if (!TryResolveIamServiceBaseAddress(
+                builder.Configuration,
+                builder.Environment.EnvironmentName,
+                out var baseAddress))
+        {
+            throw new InvalidOperationException(
+                "Services:IAMService:BaseUrl must be a canonical HTTPS origin. Plain HTTP is allowed only for a loopback origin in Development or Testing.");
+        }
+
+        builder.Services.AddScoped<IIamServiceClient, IamServiceClient>();
+        var iamClientBuilder = builder.Services.AddHttpClient(IamServiceClientName, client =>
+        {
+            client.BaseAddress = baseAddress;
+            client.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .RedactLoggedHeaders(["X-Maliev-IAM-Live-Check-Key"]);
+
+        if (builder.Configuration["Services:IAMService:BaseUrl"] is null)
+        {
+            iamClientBuilder.AddServiceDiscovery();
+        }
+
+        iamClientBuilder.AddAuthServiceAuthentication();
+
+        return builder;
     }
 
     /// <summary>
@@ -93,6 +137,47 @@ public static class AuthServiceTokenExchangeExtensions
             baseAddress = new Uri(IsLocalEnvironment(environmentName)
                 ? "https+http://AuthService"
                 : "https://AuthService");
+            return true;
+        }
+
+        baseAddress = null!;
+        if (string.IsNullOrWhiteSpace(configuredValue) ||
+            !string.Equals(configuredValue, configuredValue.Trim(), StringComparison.Ordinal) ||
+            !Uri.TryCreate(configuredValue, UriKind.Absolute, out var uri) ||
+            string.IsNullOrWhiteSpace(uri.Host) ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment) ||
+            uri.AbsolutePath != "/")
+        {
+            return false;
+        }
+
+        var canonicalOrigin = uri.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped);
+        if (!string.Equals(configuredValue, canonicalOrigin, StringComparison.Ordinal) ||
+            !(string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) ||
+              string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.Ordinal) &&
+              IsLocalEnvironment(environmentName) &&
+              uri.IsLoopback))
+        {
+            return false;
+        }
+
+        baseAddress = uri;
+        return true;
+    }
+
+    private static bool TryResolveIamServiceBaseAddress(
+        IConfiguration configuration,
+        string environmentName,
+        out Uri baseAddress)
+    {
+        var configuredValue = configuration["Services:IAMService:BaseUrl"];
+        if (configuredValue is null)
+        {
+            baseAddress = new Uri(IsLocalEnvironment(environmentName)
+                ? "https+http://IAMService"
+                : "https://IAMService");
             return true;
         }
 
