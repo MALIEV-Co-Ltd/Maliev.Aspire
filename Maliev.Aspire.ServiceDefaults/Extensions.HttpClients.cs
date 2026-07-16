@@ -22,11 +22,19 @@ public static class HttpClientExtensions
         this IHostApplicationBuilder builder,
         string? serviceName = null)
     {
+        ArgumentNullException.ThrowIfNull(builder);
+        IamClientRegistrationGuard.EnsureLegacyClientCanRegister(builder.Services);
+
         // Require explicit name via parameter or configuration
         // REMOVED multiple fallbacks to ensure standardized configuration
         var finalServiceName = serviceName
             ?? builder.Configuration["ServiceName"]
             ?? throw new InvalidOperationException("Service name must be provided to AddIAMServiceClient via the 'serviceName' parameter or configuration key 'ServiceName'.");
+
+        if (!IamClientRegistrationGuard.TryReserveLegacyClient(builder.Services))
+        {
+            return builder;
+        }
 
         // Register the named client "IAMService" with full configuration (resilience + service account auth)
         // This uses the AddIAMClient extension which configures auth handler and service discovery

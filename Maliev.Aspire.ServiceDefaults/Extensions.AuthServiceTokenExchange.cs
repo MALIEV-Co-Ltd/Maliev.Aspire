@@ -31,8 +31,8 @@ public static class AuthServiceTokenExchangeExtensions
     public static IHostApplicationBuilder AddAuthServiceIAMClient(this IHostApplicationBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
-        if (!builder.Services.Any(descriptor =>
-                descriptor.ServiceType == typeof(IAuthServiceTokenProvider)))
+        IamClientRegistrationGuard.EnsureAuthServiceClientCanRegister(builder.Services);
+        if (!IamClientRegistrationGuard.IsAuthServiceTokenExchangeRegistered(builder.Services))
         {
             throw new InvalidOperationException(
                 "AddAuthServiceTokenExchange must be registered before the AuthService-backed IAM client.");
@@ -45,6 +45,11 @@ public static class AuthServiceTokenExchangeExtensions
         {
             throw new InvalidOperationException(
                 "Services:IAMService:BaseUrl must be a canonical HTTPS origin. Plain HTTP is allowed only for a loopback origin in Development or Testing.");
+        }
+
+        if (!IamClientRegistrationGuard.TryReserveAuthServiceClient(builder.Services))
+        {
+            return builder;
         }
 
         builder.Services.AddScoped<IIamServiceClient, IamServiceClient>();
@@ -87,6 +92,8 @@ public static class AuthServiceTokenExchangeExtensions
         {
             throw new InvalidOperationException("AuthService token exchange can be registered only once per process.");
         }
+
+        IamClientRegistrationGuard.MarkAuthServiceTokenExchangeRegistered(builder.Services);
 
         builder.Services.AddOptions<AuthServiceTokenExchangeOptions>()
             .Bind(builder.Configuration.GetSection(AuthServiceTokenExchangeOptions.SectionName))

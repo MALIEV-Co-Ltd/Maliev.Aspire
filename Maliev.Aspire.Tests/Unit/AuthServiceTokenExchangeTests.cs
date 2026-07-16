@@ -740,6 +740,89 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => builder.AddAuthServiceIAMClient());
     }
 
+    /// <summary>Verifies the legacy IAM registration cannot mutate a central-exchange client graph.</summary>
+    [Fact]
+    public void AddAuthServiceIAMClient_ThenLegacyIAMClient_RejectsMixedAuthenticationBeforeMutation()
+    {
+        var builder = CreateConfiguredExchangeBuilder();
+        builder.AddAuthServiceTokenExchange(ServiceName);
+        builder.AddAuthServiceIAMClient();
+        var descriptorCount = builder.Services.Count;
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            builder.AddIAMServiceClient("legacy-search"));
+
+        Assert.Contains("cannot be combined", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(descriptorCount, builder.Services.Count);
+        Assert.DoesNotContain(builder.Services, descriptor =>
+            descriptor.ServiceType == typeof(IServiceAccountTokenProvider));
+        Assert.DoesNotContain(builder.Services, descriptor =>
+            descriptor.ServiceType == typeof(ServiceAccountAuthenticationHandler));
+    }
+
+    /// <summary>Verifies an existing central registration wins over missing legacy configuration.</summary>
+    [Fact]
+    public void AddAuthServiceIAMClient_ThenUnconfiguredLegacyIAMClient_ReportsAuthenticationConflict()
+    {
+        var builder = CreateConfiguredExchangeBuilder();
+        builder.AddAuthServiceTokenExchange(ServiceName);
+        builder.AddAuthServiceIAMClient();
+        builder.Configuration["ServiceName"] = null;
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            builder.AddIAMServiceClient());
+
+        Assert.Contains("cannot be combined", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Verifies the central IAM registration cannot mutate a legacy-authenticated client graph.</summary>
+    [Fact]
+    public void AddIAMServiceClient_ThenAuthServiceIAMClient_RejectsMixedAuthenticationBeforeMutation()
+    {
+        var builder = CreateConfiguredExchangeBuilder();
+        builder.AddIAMServiceClient("legacy-search");
+        builder.AddAuthServiceTokenExchange(ServiceName);
+        var descriptorCount = builder.Services.Count;
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            builder.AddAuthServiceIAMClient());
+
+        Assert.Contains("cannot be combined", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(descriptorCount, builder.Services.Count);
+    }
+
+    /// <summary>Verifies an existing legacy registration wins over invalid central-client configuration.</summary>
+    [Fact]
+    public void AddIAMServiceClient_ThenMisconfiguredAuthServiceIAMClient_ReportsAuthenticationConflict()
+    {
+        var builder = CreateConfiguredExchangeBuilder();
+        builder.AddIAMServiceClient("legacy-search");
+        builder.AddAuthServiceTokenExchange(ServiceName);
+        builder.Configuration["Services:IAMService:BaseUrl"] = "http://iam.internal";
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            builder.AddAuthServiceIAMClient());
+
+        Assert.Contains("cannot be combined", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Verifies an arbitrary provider registration cannot impersonate token-exchange setup.</summary>
+    [Fact]
+    public void AddAuthServiceIAMClient_StubProviderWithoutExchangeMarker_FailsImmediately()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<IAuthServiceTokenProvider>(new StubTokenProvider("untrusted"));
+        var descriptorCount = builder.Services.Count;
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            builder.AddAuthServiceIAMClient());
+
+        Assert.Contains("AddAuthServiceTokenExchange", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(descriptorCount, builder.Services.Count);
+        Assert.DoesNotContain(builder.Services, descriptor =>
+            descriptor.ServiceType == typeof(IIamServiceClient));
+    }
+
     /// <summary>Verifies the IAM client sends the AuthService token through the opt-in handler chain.</summary>
     [Fact]
     public async Task AddAuthServiceIAMClient_PermissionRequest_UsesCentralExchangeBearerToken()
@@ -813,6 +896,22 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
             configuration,
             _time,
             NullLogger<AuthServiceTokenProvider>.Instance);
+    }
+
+    private HostApplicationBuilder CreateConfiguredExchangeBuilder()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ServiceAuthentication:ClientId"] = ClientId,
+            ["ServiceAuthentication:ClientSecret"] = ClientSecret,
+            ["Services:AuthService:BaseUrl"] = "https://auth.test",
+            ["Services:IAMService:BaseUrl"] = "https://iam.test",
+            ["Jwt:PublicKey"] = Convert.ToBase64String(Encoding.UTF8.GetBytes(_rsa.ExportSubjectPublicKeyInfoPem())),
+            ["Jwt:Issuer"] = Issuer,
+            ["Jwt:Audience"] = Audience
+        });
+        return builder;
     }
 
     private static object? GetActiveRefresh(AuthServiceTokenProvider provider) =>
