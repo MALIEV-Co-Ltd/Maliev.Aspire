@@ -145,6 +145,8 @@ static partial class Program
             LocalServiceIdentityProfileCatalog.CountryService.WorkloadId];
         var currencyIdentityMaterial = localIdentityMaterials[
             LocalServiceIdentityProfileCatalog.CurrencyService.WorkloadId];
+        var accountingIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.AccountingService.WorkloadId];
         var localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = authIdentityMaterial.RawSecret;
         var contactIdentitySecret = builder.AddParameter("ContactServiceLocalClientSecret", secret: true);
@@ -157,6 +159,8 @@ static partial class Program
         builder.Configuration["Parameters:CountryServiceLocalClientSecret"] = countryIdentityMaterial.RawSecret;
         var currencyIdentitySecret = builder.AddParameter("CurrencyServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:CurrencyServiceLocalClientSecret"] = currencyIdentityMaterial.RawSecret;
+        var accountingIdentitySecret = builder.AddParameter("AccountingServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:AccountingServiceLocalClientSecret"] = accountingIdentityMaterial.RawSecret;
         var capabilityMaterial = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
         var capabilityPrivateKey = builder.AddParameter(
             "AuthTokenIssuanceCapabilityPrivateKey",
@@ -279,6 +283,9 @@ static partial class Program
                 .WithEnvironment(
                     "AspireLocalServiceIdentity__Profiles__currency-service__SecretHash",
                     currencyIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__accounting-service__SecretHash",
+                    accountingIdentityMaterial.SecretHash)
                 .WithReference(iamDatabase, "IamDbContext")
                 .WaitFor(iamService),
             runAutomatically: true);
@@ -861,6 +868,10 @@ static partial class Program
                         "AspireLocalServiceIdentity__Profiles__currency-service__SecretHash",
                         config.LocalServiceIdentitySecretHashes[
                             LocalServiceIdentityProfileCatalog.CurrencyService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__accounting-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.AccountingService.WorkloadId])
                     .WithReference(databases.IAM, "IamDbContext")
                     .WaitFor(iamService),
                 runAutomatically: true);
@@ -874,13 +885,28 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
+                .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
                 .WaitFor(iamService)
                 .WithTestingSafeHttpHealthCheck("/accounting/aspire-liveness"),
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .WithoutJwtSigningMaterial();
+
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            accountingService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.AccountingService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.AccountingService.WorkloadId]);
+        }
 
 
 
