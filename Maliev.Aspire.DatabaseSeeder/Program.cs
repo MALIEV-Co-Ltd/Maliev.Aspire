@@ -1,5 +1,11 @@
 using System.Reflection;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Core;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.AuthService;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.IAMService;
+using Maliev.IAMService.Application.Services;
+using Maliev.IAMService.Application.Workloads;
+using Maliev.IAMService.Infrastructure.Persistence;
+using Maliev.IAMService.Infrastructure.Workloads;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -76,6 +82,19 @@ public class SeederRunner
         {
             builder.Services.AddSingleton<Maliev.CustomerService.Application.Interfaces.IEncryptionService, Maliev.CustomerService.Infrastructure.Security.EncryptionService>();
             builder.Services.AddSingleton<Maliev.CustomerService.Infrastructure.Persistence.Interceptors.EncryptionInterceptor>();
+        }
+
+        if (seedTarget.Equals(nameof(IAMDatabaseSeeder), StringComparison.OrdinalIgnoreCase))
+        {
+            builder.Services.AddDistributedMemoryCache();
+            builder.Services.AddSingleton(WorkloadAccessProfileCatalog.Default);
+            builder.Services.AddScoped<ICacheService, CacheService>();
+            builder.Services.AddScoped<IWorkloadPrincipalProvisioner, WorkloadPrincipalProvisioner>();
+        }
+
+        if (seedTarget.Equals(nameof(AuthServiceIdentityDatabaseSeeder), StringComparison.OrdinalIgnoreCase))
+        {
+            builder.AddPostgresDbContext<IAMDbContext>("IamDbContext");
         }
 
         // 5. Register ONLY the target seeder to avoid instantiation errors for others

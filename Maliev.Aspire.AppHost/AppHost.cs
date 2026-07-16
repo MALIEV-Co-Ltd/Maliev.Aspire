@@ -1,6 +1,8 @@
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.CountryService;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.EmployeeService;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.AuthService;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.IAMService;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
 using Maliev.Aspire.AppHost;
 using Maliev.Aspire.AppHost.Extensions;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
@@ -154,6 +156,16 @@ static partial class Program
             secret: true);
         builder.Configuration["Parameters:IamLiveCheckCredentialHash"] = iamLiveCheckCredentialHash;
 
+        IResourceBuilder<ParameterResource>? localIdentitySecret = null;
+        string? localIdentitySecretHash = null;
+        if (IsLocalEnvironment(builder.Environment.EnvironmentName))
+        {
+            var localIdentityMaterial = LocalServiceIdentitySeedMaterial.Create();
+            localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
+            builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = localIdentityMaterial.RawSecret;
+            localIdentitySecretHash = localIdentityMaterial.SecretHash;
+        }
+
         var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
         builder.Configuration["Parameters:AspireTestAdminEnabled"] =
             builder.Configuration["AspireTestAdmin:Enabled"] ?? "false";
@@ -198,6 +210,8 @@ static partial class Program
             GoogleDriveClientSecret: googleDriveClientSecret,
             IntranetBffIamLiveCheckCredential: intranetBffIamLiveCheckCredential,
             IamLiveCheckCredentialHash: iamLiveCheckCredentialHashParameter,
+            AuthServiceLocalClientSecret: localIdentitySecret,
+            AuthServiceLocalClientSecretHash: localIdentitySecretHash,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
             AspireTestAdminPassword: aspireTestAdminPassword,
             CorsAllowedOrigins: corsAllowedOrigins,
@@ -310,6 +324,10 @@ static partial class Program
         return parameter;
     }
 
+    private static bool IsLocalEnvironment(string environmentName) =>
+        string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(environmentName, "Testing", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// Configures all service databases using the -app-db naming pattern.
     /// </summary>
@@ -372,12 +390,18 @@ static partial class Program
         IResourceBuilder<ProjectResource> webBff)
     {
         var environmentName = builder.Environment.EnvironmentName;
+        var isLocalEnvironment = IsLocalEnvironment(environmentName);
 
         void ConfigureAspireTestAdminSeeder(IResourceBuilder<ExecutableResource> seeder)
         {
             seeder
                 .WithEnvironment("AspireTestAdmin__Enabled", config.AspireTestAdminEnabled)
                 .WithEnvironment("AspireTestAdmin__Password", config.AspireTestAdminPassword);
+
+            if (isLocalEnvironment)
+            {
+                seeder.WithEnvironment("AspireLocalServiceIdentity__Enabled", "true");
+            }
         }
 
         // --- Core Services (dependencies for Auth) ---
@@ -394,7 +418,10 @@ static partial class Program
             grafana,
             otelCollector,
             environmentName)
-            .SeedDatabase<IAMDatabaseSeeder>(databases.IAM, configureSeeder: ConfigureAspireTestAdminSeeder);
+            .SeedDatabase<IAMDatabaseSeeder>(
+                databases.IAM,
+                configureSeeder: ConfigureAspireTestAdminSeeder,
+                runAutomatically: isLocalEnvironment);
 
         // Note: CountryService must be declared before CustomerService to be referenced
         var countryService = WithSharedSecrets(
@@ -527,6 +554,31 @@ static partial class Program
             .WithEnvironment("GoogleIdentity__Customer__Audiences__quote-engine__0", config.GoogleClientId)
             .WithEnvironment("WebAuthn__RPId", "localhost")
             .WithEnvironment("WebAuthn__AllowedOrigins", "https://localhost:56139");
+
+        if (isLocalEnvironment &&
+            config.AuthServiceLocalClientSecret is not null &&
+            config.AuthServiceLocalClientSecretHash is not null)
+        {
+            authService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentitySeedOptions.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.AuthServiceLocalClientSecret);
+
+            authService = authService.SeedDatabase<AuthServiceIdentityDatabaseSeeder>(
+                databases.Auth,
+                configureSeeder: seeder => seeder
+                    .WithEnvironment("CONNECTION_NAME", "AuthDbContext")
+                    .WithEnvironment("AspireLocalServiceIdentity__Enabled", "true")
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__SecretHash",
+                        config.AuthServiceLocalClientSecretHash)
+                    .WithReference(databases.IAM, "IamDbContext")
+                    .WaitFor(iamService),
+                runAutomatically: true);
+        }
 
         // --- Business Services ---
         var accountingService = WithSharedSecrets(
@@ -1359,6 +1411,8 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> GoogleDriveClientSecret,
     IResourceBuilder<ParameterResource> IntranetBffIamLiveCheckCredential,
     IResourceBuilder<ParameterResource> IamLiveCheckCredentialHash,
+    IResourceBuilder<ParameterResource>? AuthServiceLocalClientSecret,
+    string? AuthServiceLocalClientSecretHash,
     IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
     IResourceBuilder<ParameterResource> AspireTestAdminPassword,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,

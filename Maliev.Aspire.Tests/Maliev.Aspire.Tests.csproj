@@ -37,6 +37,8 @@
     <ProjectReference Include="..\Maliev.Aspire.DatabaseSeeder\Maliev.Aspire.DatabaseSeeder.csproj" />
     <ProjectReference Include="..\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" />
     <ProjectReference Include="..\..\Maliev.Intranet\Maliev.Intranet.Shared\Maliev.Intranet.Shared.csproj" />
+    <ProjectReference Include="..\..\Maliev.AuthService\Maliev.AuthService.Domain\Maliev.AuthService.Domain.csproj" />
+    <ProjectReference Include="..\..\Maliev.AuthService\Maliev.AuthService.Infrastructure\Maliev.AuthService.Infrastructure.csproj" />
     <ProjectReference Include="..\..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
   </ItemGroup>
 

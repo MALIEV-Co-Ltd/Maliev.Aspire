@@ -61,11 +61,13 @@ public static class MalievResourceExtensions
     /// <param name="database">The database resource to seed.</param>
     /// <param name="seederName">Optional custom name for the seeder. Useful for chaining multiple seeders.</param>
     /// <param name="configureSeeder">Optional callback for adding seeder-specific environment.</param>
+    /// <param name="runAutomatically">Whether this local-only seeder must complete before its service starts.</param>
     public static IResourceBuilder<ProjectResource> SeedDatabase<TSeeder>(
         this IResourceBuilder<ProjectResource> targetService,
         IResourceBuilder<PostgresDatabaseResource> database,
         string? seederName = null,
-        Action<IResourceBuilder<ExecutableResource>>? configureSeeder = null)
+        Action<IResourceBuilder<ExecutableResource>>? configureSeeder = null,
+        bool runAutomatically = false)
         where TSeeder : class
     {
         var seederClassName = typeof(TSeeder).Name;
@@ -84,7 +86,8 @@ public static class MalievResourceExtensions
             .WaitFor(database)
             .WithParentRelationship(targetService);
 
-        if (targetService.ApplicationBuilder.Environment.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+        if (runAutomatically ||
+            targetService.ApplicationBuilder.Environment.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
         {
             targetService.WaitForCompletion(seeder);
         }
@@ -137,6 +140,7 @@ public static class MalievResourceExtensions
 
             context.EnvironmentVariables.Remove("ASPNETCORE_URLS");
             context.EnvironmentVariables.Remove("ASPNETCORE_HTTPS_PORT");
+            context.EnvironmentVariables.Remove("ServiceAuthentication__ClientSecret");
         });
     }
 
