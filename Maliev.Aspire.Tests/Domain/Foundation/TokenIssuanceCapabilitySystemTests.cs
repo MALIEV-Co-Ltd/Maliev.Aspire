@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -67,6 +68,75 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     }
 
     /// <summary>
+    /// ContactService must authenticate only with its own secret, receive bounded global authority,
+    /// call CountryService, and preserve anonymous contact intake.
+    /// </summary>
+    [Fact]
+    public async Task ContactServiceCredential_HostedFlow_IsolatedAndBounded()
+    {
+        var authSecret = await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret");
+        var contactSecret = await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret");
+        using var authClient = await fixture.CreateLiveAuthClientAsync();
+
+        using var authWithContactSecret = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-auth-service",
+            client_secret = contactSecret
+        });
+        using var contactWithAuthSecret = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-contact-service",
+            client_secret = authSecret
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, authWithContactSecret.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, contactWithAuthSecret.StatusCode);
+
+        using var login = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-contact-service",
+            client_secret = contactSecret
+        });
+        var loginBody = await login.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        using var loginJson = JsonDocument.Parse(loginBody);
+        var accessToken = loginJson.RootElement.GetProperty("access_token").GetString();
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(accessToken);
+        Assert.Equal("ContactService", token.Claims.Single(claim => claim.Type == "service_name").Value);
+        Assert.Equal(
+            ["country.countries.read"],
+            token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        Assert.Equal(
+            ["roles.workloads.contact-service.v1"],
+            token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
+        Assert.DoesNotContain(token.Claims, claim => claim.Value.Contains("upload.files", StringComparison.Ordinal));
+
+        using var countryClient = await fixture.CreateLiveCountryClientAsync();
+        countryClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        using var thailand = await countryClient.GetAsync("/country/v1/countries/iso2/TH");
+        Assert.Equal(HttpStatusCode.OK, thailand.StatusCode);
+        var thailandJson = await thailand.Content.ReadFromJsonAsync<JsonElement>();
+        var thailandId = thailandJson.GetProperty("id").GetGuid();
+        using var forbiddenCreate = await countryClient.PostAsJsonAsync("/country/v1/admin/countries", new { });
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenCreate.StatusCode);
+
+        using var contactClient = await fixture.CreateLiveContactClientAsync();
+        using var createContact = await contactClient.PostAsJsonAsync("/contact/v1/contacts", new
+        {
+            FullName = "Hosted Contact Test",
+            Email = $"hosted.{Guid.NewGuid():N}@example.com",
+            Subject = "Hosted identity boundary",
+            Message = "Validates the ContactService local workload credential exchange.",
+            CountryId = thailandId,
+            ContactType = 0
+        });
+        var contactBody = await createContact.Content.ReadAsStringAsync();
+        output.WriteLine($"Hosted ContactService submission returned {(int)createContact.StatusCode}.");
+        Assert.True(
+            createContact.StatusCode == HttpStatusCode.Created,
+            $"Expected 201 Created but received {(int)createContact.StatusCode}: {contactBody}");
+    }
+
+    /// <summary>
     /// The evaluated bounded model must isolate capability material and keep live-check credentials independent.
     /// </summary>
     [Fact]
@@ -74,6 +144,7 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     {
         var model = fixture.GetModel();
         var authSecret = await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret");
+        var contactSecret = await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret");
         var authSecretBytes = Encoding.UTF8.GetBytes(authSecret);
         var authDerivedVerifierDigest = SHA256.HashData(authSecretBytes);
         var authDerivedVerifier = Convert.ToBase64String(authDerivedVerifierDigest);
@@ -124,9 +195,30 @@ public sealed class TokenIssuanceCapabilitySystemTests(
                 Assert.DoesNotContain(AuthPrivateKey, environment.Keys);
                 iamVerifier = Assert.IsType<string>(environment[IamLiveCheckVerifier]);
             }
+            else if (resource.Name == "ContactService")
+            {
+                Assert.Empty(capabilityKeys);
+                Assert.Equal("service-contact-service", environment["ServiceAuthentication__ClientId"]);
+                Assert.Equal(contactSecret, environment["ServiceAuthentication__ClientSecret"]);
+                Assert.DoesNotContain("Jwt__PrivateKey", environment.Keys);
+                Assert.DoesNotContain("Jwt__SecurityKey", environment.Keys);
+                Assert.Contains("Jwt__PublicKey", environment.Keys);
+                Assert.Contains("Jwt__Issuer", environment.Keys);
+                Assert.Contains("Jwt__Audience", environment.Keys);
+            }
             else
             {
                 Assert.Empty(capabilityKeys);
+            }
+
+            if (resource.Name != "AuthService")
+            {
+                Assert.DoesNotContain(environment, pair => Equals(pair.Value, authSecret));
+            }
+
+            if (resource.Name != "ContactService")
+            {
+                Assert.DoesNotContain(environment, pair => Equals(pair.Value, contactSecret));
             }
         }
 
@@ -136,7 +228,7 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     }
 }
 
-/// <summary>Starts only PostgreSQL, Redis, RabbitMQ, IAM, Auth, and their local seeders.</summary>
+/// <summary>Starts the bounded local identity vertical slice and its seeders.</summary>
 public sealed class TokenIssuanceCapabilitySystemFixture : IAsyncLifetime
 {
     private CapturingDistributedApplicationFactory? _factory;
@@ -165,6 +257,29 @@ public sealed class TokenIssuanceCapabilitySystemFixture : IAsyncLifetime
 
     /// <summary>Creates an Auth client after its real hosted liveness endpoint succeeds.</summary>
     public async Task<HttpClient> CreateLiveAuthClientAsync()
+        => await CreateLiveClientAsync(
+            "AuthService",
+            "/auth/aspire-liveness",
+            "Hosted AuthService did not become live for the capability system test.");
+
+    /// <summary>Creates a CountryService client after liveness succeeds.</summary>
+    public async Task<HttpClient> CreateLiveCountryClientAsync()
+        => await CreateLiveClientAsync(
+            "CountryService",
+            "/country/aspire-liveness",
+            "Hosted CountryService did not become live for the capability system test.");
+
+    /// <summary>Creates a ContactService client after liveness succeeds.</summary>
+    public async Task<HttpClient> CreateLiveContactClientAsync()
+        => await CreateLiveClientAsync(
+            "ContactService",
+            "/contact/aspire-liveness",
+            "Hosted ContactService did not become live for the capability system test.");
+
+    private async Task<HttpClient> CreateLiveClientAsync(
+        string resourceName,
+        string livenessPath,
+        string failureMessage)
     {
         var handler = new HttpClientHandler
         {
@@ -172,13 +287,13 @@ public sealed class TokenIssuanceCapabilitySystemFixture : IAsyncLifetime
         };
         var client = new HttpClient(handler)
         {
-            BaseAddress = _factory!.GetEndpoint("AuthService", "https"),
+            BaseAddress = _factory!.GetEndpoint(resourceName, "https"),
             Timeout = TimeSpan.FromSeconds(100)
         };
         using var liveness = await TestHelpers.WaitForSuccessAsync(
-            () => client.GetAsync("/auth/aspire-liveness"),
+            () => client.GetAsync(livenessPath),
             timeout: TimeSpan.FromMinutes(3),
-            message: "Hosted AuthService did not become live for the capability system test.");
+            message: failureMessage);
         return client;
     }
 

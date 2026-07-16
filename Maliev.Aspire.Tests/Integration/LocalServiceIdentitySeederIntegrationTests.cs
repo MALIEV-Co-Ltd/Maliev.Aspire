@@ -38,122 +38,86 @@ public sealed class LocalServiceIdentitySeederIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// The full seed path must persist exact authority, rotate fresh verifiers, and reject IAM drift.
+    /// The full seed path persists both exact profiles, rotates verifiers atomically, and rejects drift.
     /// </summary>
     [Fact]
-    public async Task Seed_ExactLocalIdentity_RotatesVerifierAndRejectsAuthorityDrift()
+    public async Task Seed_ExactLocalIdentityCatalog_IsIdempotentAndRejectsAuthorityDrift()
     {
-        var firstMaterial = LocalServiceIdentitySeedMaterial.Create();
+        var firstMaterials = LocalServiceIdentitySeedMaterial.CreateCatalog();
         await using var iamContext = CreateIamContext();
-        await RunIamSeederAsync(iamContext, firstMaterial.SecretHash);
+        await RunIamSeederAsync(iamContext, firstMaterials);
 
-        var actor = await iamContext.Principals.AsNoTracking().SingleAsync(
-            principal => principal.PrincipalId == LocalServiceIdentitySeedOptions.ProvisionerPrincipalId);
-        Assert.Equal("user", actor.PrincipalType);
-        Assert.True(actor.IsActive);
-        Assert.Null(actor.WorkloadId);
-
-        var actorBinding = await iamContext.PrincipalRoleBindings.AsNoTracking().SingleAsync(
-            binding => binding.PrincipalId == actor.PrincipalId);
-        Assert.Equal(LocalServiceIdentitySeedOptions.ProvisionerRoleId, actorBinding.RoleId);
-        Assert.Null(actorBinding.ResourcePath);
-        Assert.Null(actorBinding.ExpiresAt);
-
-        var actorPermissions = await (
-            from binding in iamContext.PrincipalRoleBindings
-            join rolePermission in iamContext.RolePermissions on binding.RoleId equals rolePermission.RoleId
-            where binding.PrincipalId == actor.PrincipalId
-            select rolePermission.PermissionId).ToListAsync();
-        Assert.Equal([LocalServiceIdentitySeedOptions.ProvisionPermission], actorPermissions);
-        Assert.DoesNotContain("*", actorPermissions);
-        Assert.DoesNotContain(
-            await iamContext.PrincipalRoleBindings.AsNoTracking()
-                .Where(binding => binding.PrincipalId == actor.PrincipalId)
-                .Select(binding => binding.RoleId)
-                .ToListAsync(),
-            roleId => roleId.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
-
-        var workload = await iamContext.Principals.AsNoTracking().SingleAsync(
-            principal => principal.WorkloadId == LocalServiceIdentitySeedOptions.WorkloadId);
-        var workloadBinding = await iamContext.PrincipalRoleBindings.AsNoTracking().SingleAsync(
-            binding => binding.PrincipalId == workload.PrincipalId);
-        Assert.Equal(LocalServiceIdentitySeedOptions.RoleId, workloadBinding.RoleId);
-        Assert.Null(workloadBinding.ResourcePath);
-        Assert.Empty(await iamContext.PrincipalPermissionBindings.AsNoTracking()
-            .Where(binding => binding.PrincipalId == workload.PrincipalId)
-            .ToListAsync());
-        Assert.Empty(await iamContext.ServiceAccountApiKeys.AsNoTracking()
-            .Where(key => key.PrincipalId == workload.PrincipalId)
-            .ToListAsync());
+        await AssertProvisionerIsBoundedAsync(iamContext);
+        foreach (var localProfile in LocalServiceIdentityProfileCatalog.All)
+        {
+            await AssertExactIamProfileAsync(iamContext, localProfile);
+        }
 
         await using var authContext = CreateAuthContext();
         await authContext.Database.OpenConnectionAsync();
         await authContext.Database.CloseConnectionAsync();
-        await RunAuthSeederAsync(authContext, iamContext, firstMaterial.SecretHash);
+        await RunAuthSeederAsync(authContext, iamContext, firstMaterials);
+        await AssertCurrentCredentialCatalogAsync(authContext, firstMaterials, expectedVersionsPerCredential: 1);
 
-        var firstCredential = await authContext.ServiceCredentials.AsNoTracking()
-            .Include(credential => credential.Versions)
-            .SingleAsync(credential => credential.WorkloadId == LocalServiceIdentitySeedOptions.WorkloadId);
-        Assert.Equal(workload.PrincipalId, firstCredential.PrincipalId);
-        Assert.Equal(firstMaterial.SecretHash, firstCredential.ClientSecretHash);
-        Assert.DoesNotContain(firstMaterial.RawSecret, GetPersistedCredentialStrings(firstCredential));
-        var firstVersion = Assert.Single(firstCredential.Versions);
-        Assert.Equal(ServiceCredentialVersionStatus.Active, firstVersion.Status);
-        Assert.Equal(firstMaterial.SecretHash, firstVersion.SecretHash);
+        await RunIamSeederAsync(iamContext, firstMaterials);
+        await RunAuthSeederAsync(authContext, iamContext, firstMaterials);
+        Assert.Equal(
+            LocalServiceIdentityProfileCatalog.All.Count,
+            await authContext.ServiceCredentialVersions.CountAsync());
 
-        // Replaying the same AppHost material is idempotent; a new AppHost material rotates it.
-        await RunIamSeederAsync(iamContext, firstMaterial.SecretHash);
-        await RunAuthSeederAsync(authContext, iamContext, firstMaterial.SecretHash);
-        Assert.Equal(1, await authContext.ServiceCredentialVersions.CountAsync());
+        var secondMaterials = LocalServiceIdentitySeedMaterial.CreateCatalog();
+        await RunAuthSeederAsync(authContext, iamContext, secondMaterials);
+        await AssertCurrentCredentialCatalogAsync(authContext, secondMaterials, expectedVersionsPerCredential: 2);
 
-        var secondMaterial = LocalServiceIdentitySeedMaterial.Create();
-        await RunAuthSeederAsync(authContext, iamContext, secondMaterial.SecretHash);
-        var versions = await authContext.ServiceCredentialVersions.AsNoTracking()
-            .OrderBy(version => version.Version)
-            .ToListAsync();
-        Assert.Equal(2, versions.Count);
-        Assert.Equal(ServiceCredentialVersionStatus.Revoked, versions[0].Status);
-        Assert.NotNull(versions[0].RevokedAt);
-        Assert.Equal(ServiceCredentialVersionStatus.Active, versions[1].Status);
-        Assert.Equal(secondMaterial.SecretHash, versions[1].SecretHash);
-        Assert.DoesNotContain(secondMaterial.RawSecret, versions.Select(version => version.SecretHash));
-
-        var thirdMaterial = LocalServiceIdentitySeedMaterial.Create();
+        var thirdMaterials = LocalServiceIdentitySeedMaterial.CreateCatalog();
         await using (var failingAuthContext = CreateAuthContext(new ThrowOnSaveChangesInterceptor(2)))
         {
             await Assert.ThrowsAsync<InjectedSeedFailureException>(() =>
-                RunAuthSeederAsync(failingAuthContext, iamContext, thirdMaterial.SecretHash));
+                RunAuthSeederAsync(failingAuthContext, iamContext, thirdMaterials));
         }
 
         await using (var verificationContext = CreateAuthContext())
         {
-            var credentialAfterRollback = await verificationContext.ServiceCredentials
-                .AsNoTracking()
-                .Include(credential => credential.Versions)
-                .SingleAsync(credential => credential.WorkloadId == LocalServiceIdentitySeedOptions.WorkloadId);
-            Assert.Equal(secondMaterial.SecretHash, credentialAfterRollback.ClientSecretHash);
-            Assert.Equal(2, credentialAfterRollback.Versions.Count);
-            Assert.Equal(
-                secondMaterial.SecretHash,
-                Assert.Single(
-                    credentialAfterRollback.Versions,
-                    version => version.Status == ServiceCredentialVersionStatus.Active).SecretHash);
+            await AssertCurrentCredentialCatalogAsync(
+                verificationContext,
+                secondMaterials,
+                expectedVersionsPerCredential: 2);
         }
 
+        var contactProfile = LocalServiceIdentityProfileCatalog.ContactService;
+        var contactPrincipal = await iamContext.Principals.SingleAsync(
+            principal => principal.WorkloadId == contactProfile.WorkloadId);
+        var scopedBinding = await iamContext.PrincipalRoleBindings.SingleAsync(
+            binding => binding.PrincipalId == contactPrincipal.PrincipalId &&
+                binding.ResourcePath == "folders/contacts");
+        scopedBinding.ResourcePath = "folders/archive";
+        await iamContext.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            RunAuthSeederAsync(authContext, iamContext, secondMaterials));
+
+        iamContext.ChangeTracker.Clear();
+        scopedBinding = await iamContext.PrincipalRoleBindings.SingleAsync(
+            binding => binding.PrincipalId == contactPrincipal.PrincipalId &&
+                binding.ResourcePath == "folders/archive");
+        scopedBinding.ResourcePath = "folders/contacts";
         iamContext.PrincipalPermissionBindings.Add(new PrincipalPermissionBinding
         {
             BindingId = Guid.NewGuid(),
-            PrincipalId = workload.PrincipalId,
-            PermissionId = LocalServiceIdentitySeedOptions.WorkloadPermission,
+            PrincipalId = contactPrincipal.PrincipalId,
+            PermissionId = "country.countries.read",
             ResourcePath = null,
             GrantedAt = DateTime.UtcNow
         });
         await iamContext.SaveChangesAsync();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            RunAuthSeederAsync(authContext, iamContext, secondMaterial.SecretHash));
+            RunAuthSeederAsync(authContext, iamContext, secondMaterials));
 
         iamContext.ChangeTracker.Clear();
+        var directBinding = await iamContext.PrincipalPermissionBindings.SingleAsync(
+            binding => binding.PrincipalId == contactPrincipal.PrincipalId);
+        iamContext.PrincipalPermissionBindings.Remove(directBinding);
         var provisionerActor = await iamContext.Principals.SingleAsync(
             principal => principal.PrincipalId == LocalServiceIdentitySeedOptions.ProvisionerPrincipalId);
         provisionerActor.IsActive = false;
@@ -168,12 +132,95 @@ public sealed class LocalServiceIdentitySeederIntegrationTests : IAsyncLifetime
         await iamContext.SaveChangesAsync();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            RunIamSeederAsync(iamContext, secondMaterial.SecretHash));
-        iamContext.ChangeTracker.Clear();
-        Assert.False(await iamContext.Principals
-            .Where(principal => principal.PrincipalId == provisionerActor.PrincipalId)
-            .Select(principal => principal.IsActive)
-            .SingleAsync());
+            RunIamSeederAsync(iamContext, secondMaterials));
+    }
+
+    private static async Task AssertProvisionerIsBoundedAsync(IAMDbContext context)
+    {
+        var actor = await context.Principals.AsNoTracking().SingleAsync(
+            principal => principal.PrincipalId == LocalServiceIdentitySeedOptions.ProvisionerPrincipalId);
+        Assert.Equal("user", actor.PrincipalType);
+        Assert.True(actor.IsActive);
+        Assert.Null(actor.WorkloadId);
+
+        var actorBinding = await context.PrincipalRoleBindings.AsNoTracking().SingleAsync(
+            binding => binding.PrincipalId == actor.PrincipalId);
+        Assert.Equal(LocalServiceIdentitySeedOptions.ProvisionerRoleId, actorBinding.RoleId);
+        Assert.Null(actorBinding.ResourcePath);
+        Assert.Null(actorBinding.ExpiresAt);
+
+        var actorPermissions = await (
+            from binding in context.PrincipalRoleBindings
+            join rolePermission in context.RolePermissions on binding.RoleId equals rolePermission.RoleId
+            where binding.PrincipalId == actor.PrincipalId
+            select rolePermission.PermissionId).ToListAsync();
+        Assert.Equal([LocalServiceIdentitySeedOptions.ProvisionPermission], actorPermissions);
+        Assert.DoesNotContain("*", actorPermissions);
+        Assert.DoesNotContain(
+            await context.PrincipalRoleBindings.AsNoTracking()
+                .Where(binding => binding.PrincipalId == actor.PrincipalId)
+                .Select(binding => binding.RoleId)
+                .ToListAsync(),
+            roleId => roleId.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static async Task AssertExactIamProfileAsync(
+        IAMDbContext context,
+        LocalServiceIdentityProfile localProfile)
+    {
+        var expected = WorkloadAccessProfileCatalog.Default.Get(
+            localProfile.WorkloadId,
+            localProfile.ProfileVersion);
+        var principal = await context.Principals.AsNoTracking().SingleAsync(
+            candidate => candidate.WorkloadId == localProfile.WorkloadId);
+        var bindings = await context.PrincipalRoleBindings.AsNoTracking()
+            .Where(binding => binding.PrincipalId == principal.PrincipalId)
+            .OrderBy(binding => binding.ResourcePath)
+            .ToListAsync();
+        Assert.Equal(1 + expected.AdditionalGrants.Count, bindings.Count);
+        Assert.Contains(bindings, binding =>
+            binding.RoleId == expected.RoleId && binding.ResourcePath is null);
+        foreach (var grant in expected.AdditionalGrants)
+        {
+            Assert.Contains(bindings, binding =>
+                binding.RoleId == grant.RoleId && binding.ResourcePath == grant.ResourcePath);
+        }
+
+        Assert.Empty(await context.PrincipalPermissionBindings.AsNoTracking()
+            .Where(binding => binding.PrincipalId == principal.PrincipalId)
+            .ToListAsync());
+        Assert.Empty(await context.ServiceAccountApiKeys.AsNoTracking()
+            .Where(key => key.PrincipalId == principal.PrincipalId)
+            .ToListAsync());
+    }
+
+    private static async Task AssertCurrentCredentialCatalogAsync(
+        AuthDbContext context,
+        IReadOnlyDictionary<string, LocalServiceIdentitySeedMaterial> materials,
+        int expectedVersionsPerCredential)
+    {
+        var credentials = await context.ServiceCredentials.AsNoTracking()
+            .Include(credential => credential.Versions)
+            .OrderBy(credential => credential.WorkloadId)
+            .ToListAsync();
+        Assert.Equal(LocalServiceIdentityProfileCatalog.All.Count, credentials.Count);
+        foreach (var profile in LocalServiceIdentityProfileCatalog.All)
+        {
+            var credential = Assert.Single(credentials, candidate =>
+                candidate.WorkloadId == profile.WorkloadId);
+            var material = materials[profile.WorkloadId];
+            Assert.Equal(profile.ClientId, credential.ClientId);
+            Assert.Equal(profile.ServiceName, credential.ServiceName);
+            Assert.Equal(profile.RoleId, credential.RoleId);
+            Assert.Equal(material.SecretHash, credential.ClientSecretHash);
+            Assert.Equal(expectedVersionsPerCredential, credential.Versions.Count);
+            Assert.Equal(
+                material.SecretHash,
+                Assert.Single(
+                    credential.Versions,
+                    version => version.Status == ServiceCredentialVersionStatus.Active).SecretHash);
+            Assert.DoesNotContain(material.RawSecret, GetPersistedCredentialStrings(credential));
+        }
     }
 
     private static PostgreSqlContainer CreatePostgres(string database) =>
@@ -182,8 +229,6 @@ public sealed class LocalServiceIdentitySeederIntegrationTests : IAsyncLifetime
             .WithUsername("test_user")
             .WithPassword("test_password")
             .WithPortBinding(5432, true)
-            // The fixture disposes both containers explicitly; avoid requiring the
-            // Testcontainers resource-reaper sidecar on constrained local runners.
             .WithCleanUp(false)
             .Build();
 
@@ -204,7 +249,9 @@ public sealed class LocalServiceIdentitySeederIntegrationTests : IAsyncLifetime
         return new AuthDbContext(options.Options);
     }
 
-    private static async Task RunIamSeederAsync(IAMDbContext context, string secretHash)
+    private static async Task RunIamSeederAsync(
+        IAMDbContext context,
+        IReadOnlyDictionary<string, LocalServiceIdentitySeedMaterial> materials)
     {
         var cache = new Mock<ICacheService>();
         cache.Setup(service => service.RemoveByPrefixAsync(
@@ -218,7 +265,7 @@ public sealed class LocalServiceIdentitySeederIntegrationTests : IAsyncLifetime
         var seeder = new IAMDatabaseSeeder(
             context,
             NullLogger<IAMDatabaseSeeder>.Instance,
-            BuildConfiguration(secretHash),
+            BuildConfiguration(materials),
             BuildEnvironment(),
             provisioner);
         await seeder.ExecuteAsync();
@@ -227,26 +274,33 @@ public sealed class LocalServiceIdentitySeederIntegrationTests : IAsyncLifetime
     private static async Task RunAuthSeederAsync(
         AuthDbContext authContext,
         IAMDbContext iamContext,
-        string secretHash)
+        IReadOnlyDictionary<string, LocalServiceIdentitySeedMaterial> materials)
     {
         var seeder = new AuthServiceIdentityDatabaseSeeder(
             authContext,
             iamContext,
             NullLogger<AuthServiceIdentityDatabaseSeeder>.Instance,
-            BuildConfiguration(secretHash),
+            BuildConfiguration(materials),
             BuildEnvironment());
         await seeder.ExecuteAsync();
     }
 
-    private static IConfiguration BuildConfiguration(string secretHash) =>
-        new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["AspireLocalServiceIdentity:Enabled"] = "true",
-                ["AspireLocalServiceIdentity:SecretHash"] = secretHash,
-                ["AspireTestAdmin:Enabled"] = "false"
-            })
-            .Build();
+    private static IConfiguration BuildConfiguration(
+        IReadOnlyDictionary<string, LocalServiceIdentitySeedMaterial> materials)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["AspireLocalServiceIdentity:Enabled"] = "true",
+            ["AspireTestAdmin:Enabled"] = "false"
+        };
+        foreach (var profile in LocalServiceIdentityProfileCatalog.All)
+        {
+            values[$"AspireLocalServiceIdentity:Profiles:{profile.WorkloadId}:SecretHash"] =
+                materials[profile.WorkloadId].SecretHash;
+        }
+
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+    }
 
     private static IHostEnvironment BuildEnvironment()
     {

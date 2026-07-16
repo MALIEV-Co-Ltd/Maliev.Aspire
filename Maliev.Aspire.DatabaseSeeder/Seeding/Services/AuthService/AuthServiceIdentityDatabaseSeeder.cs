@@ -3,6 +3,7 @@ using global::Maliev.Aspire.DatabaseSeeder.Seeding.Core;
 using global::Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
 using global::Maliev.AuthService.Domain.Entities;
 using global::Maliev.AuthService.Infrastructure.DbContexts;
+using global::Maliev.IAMService.Application.Workloads;
 using global::Maliev.IAMService.Domain.Entities;
 using global::Maliev.IAMService.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,7 @@ using Microsoft.Extensions.Logging;
 namespace Maliev.Aspire.DatabaseSeeder.Seeding.Services.AuthService;
 
 /// <summary>
-/// Persists the verifier-only AuthService credential after validating its exact IAM workload state.
+/// Persists verifier-only local credentials after validating each exact IAM workload profile.
 /// </summary>
 public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbContext>
 {
@@ -22,7 +23,7 @@ public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbCon
     private readonly IHostEnvironment _hostEnvironment;
     private readonly IAMDbContext _iamDbContext;
 
-    /// <summary>Initializes the local AuthService identity seeder.</summary>
+    /// <summary>Initializes the local workload identity seeder.</summary>
     /// <param name="context">Auth database context.</param>
     /// <param name="iamDbContext">IAM database context used only for exact-state validation.</param>
     /// <param name="logger">Seeder logger.</param>
@@ -49,7 +50,7 @@ public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbCon
             _hostEnvironment.EnvironmentName);
         if (!options.Enabled)
         {
-            Logger.LogInformation("Aspire-local AuthService identity seeding is disabled.");
+            Logger.LogInformation("Aspire-local workload identity seeding is disabled.");
             return;
         }
 
@@ -63,17 +64,25 @@ public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbCon
             await Context.Database.ExecuteSqlRawAsync(
                 "SELECT pg_advisory_xact_lock(2071220626)",
                 cancellationToken);
-            await SeedCredentialAsync(options, cancellationToken);
+            foreach (var profile in LocalServiceIdentityProfileCatalog.All)
+            {
+                await SeedCredentialAsync(
+                    profile,
+                    options.GetSecretHash(profile),
+                    cancellationToken);
+            }
+
             await transaction.CommitAsync(cancellationToken);
         });
     }
 
     private async Task SeedCredentialAsync(
-        LocalServiceIdentitySeedOptions options,
+        LocalServiceIdentityProfile profile,
+        string secretHash,
         CancellationToken cancellationToken)
     {
-        var workloadPrincipal = await GetExactIamWorkloadPrincipalAsync(cancellationToken);
-        var credential = await GetCredentialAsync(cancellationToken);
+        var workloadPrincipal = await GetExactIamWorkloadPrincipalAsync(profile, cancellationToken);
+        var credential = await GetCredentialAsync(profile, cancellationToken);
         var now = DateTimeOffset.UtcNow;
 
         if (credential is null)
@@ -81,13 +90,13 @@ public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbCon
             credential = new ServiceCredential
             {
                 Id = Guid.NewGuid(),
-                ClientId = LocalServiceIdentitySeedOptions.ClientId,
+                ClientId = profile.ClientId,
                 PrincipalId = workloadPrincipal.PrincipalId,
-                WorkloadId = LocalServiceIdentitySeedOptions.WorkloadId,
-                ProfileVersion = LocalServiceIdentitySeedOptions.ProfileVersion,
-                RoleId = LocalServiceIdentitySeedOptions.RoleId,
-                ClientSecretHash = options.SecretHash,
-                ServiceName = LocalServiceIdentitySeedOptions.ServiceName,
+                WorkloadId = profile.WorkloadId,
+                ProfileVersion = profile.ProfileVersion,
+                RoleId = profile.RoleId,
+                ClientSecretHash = secretHash,
+                ServiceName = profile.ServiceName,
                 IsActive = true,
                 CreatedAt = now.UtcDateTime,
                 UpdatedAt = now.UtcDateTime,
@@ -97,16 +106,16 @@ public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbCon
         }
         else
         {
-            EnsureExactCredentialBinding(credential, workloadPrincipal.PrincipalId);
+            EnsureExactCredentialBinding(credential, profile, workloadPrincipal.PrincipalId);
         }
 
         var currentActive = credential.Versions.SingleOrDefault(
             version => version.Status == ServiceCredentialVersionStatus.Active);
         if (currentActive is not null &&
-            string.Equals(currentActive.SecretHash, options.SecretHash, StringComparison.Ordinal) &&
+            string.Equals(currentActive.SecretHash, secretHash, StringComparison.Ordinal) &&
             currentActive.CanAuthenticate(now))
         {
-            credential.ClientSecretHash = options.SecretHash;
+            credential.ClientSecretHash = secretHash;
             credential.IsActive = true;
             credential.RevokedAt = null;
             credential.UpdatedAt = now.UtcDateTime;
@@ -124,13 +133,10 @@ public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbCon
             version.GraceExpiresAt = null;
         }
 
-        credential.ClientSecretHash = options.SecretHash;
+        credential.ClientSecretHash = secretHash;
         credential.IsActive = true;
         credential.RevokedAt = null;
         credential.UpdatedAt = now.UtcDateTime;
-
-        // Persist revocation before inserting the new Active row so PostgreSQL's partial
-        // unique index never observes two active versions during a local restart.
         await Context.SaveChangesAsync(cancellationToken);
 
         var nextVersion = credential.Versions.Count == 0
@@ -141,7 +147,7 @@ public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbCon
             Id = Guid.NewGuid(),
             ServiceCredentialId = credential.Id,
             Version = nextVersion,
-            SecretHash = options.SecretHash,
+            SecretHash = secretHash,
             Status = ServiceCredentialVersionStatus.Active,
             CreatedAt = now,
             ActivatedAt = now,
@@ -153,52 +159,69 @@ public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbCon
 
         Logger.LogInformation(
             "Seeded verifier-only Aspire-local credential for {WorkloadId} v{ProfileVersion}.",
-            LocalServiceIdentitySeedOptions.WorkloadId,
-            LocalServiceIdentitySeedOptions.ProfileVersion);
+            profile.WorkloadId,
+            profile.ProfileVersion);
     }
 
-    private async Task<Principal> GetExactIamWorkloadPrincipalAsync(CancellationToken cancellationToken)
+    private async Task<Principal> GetExactIamWorkloadPrincipalAsync(
+        LocalServiceIdentityProfile localProfile,
+        CancellationToken cancellationToken)
     {
+        var profile = WorkloadAccessProfileCatalog.Default.Get(
+            localProfile.WorkloadId,
+            localProfile.ProfileVersion);
+        if (!string.Equals(profile.RoleId, localProfile.RoleId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"The local identity profile for '{localProfile.WorkloadId}' does not match IAM.");
+        }
+
         var principal = await _iamDbContext.Principals
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                candidate => candidate.WorkloadId == LocalServiceIdentitySeedOptions.WorkloadId,
+                candidate => candidate.WorkloadId == localProfile.WorkloadId,
                 cancellationToken);
         if (principal is null ||
             !principal.IsActive ||
             !string.Equals(principal.PrincipalType, "service_account", StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                "The canonical IAM auth-service workload principal is missing or inactive.");
+                $"The canonical IAM '{localProfile.WorkloadId}' workload principal is missing or inactive.");
         }
 
-        var role = await _iamDbContext.Roles
+        var expectedGrants = new List<ExpectedGrant>
+        {
+            new(profile.RoleId, null, profile.Permissions)
+        };
+        expectedGrants.AddRange(profile.AdditionalGrants.Select(grant =>
+            new ExpectedGrant(grant.RoleId, grant.ResourcePath, grant.Permissions)));
+        var expectedRoleIds = expectedGrants.Select(grant => grant.RoleId).ToArray();
+        var roles = await _iamDbContext.Roles
             .AsNoTracking()
             .Include(candidate => candidate.RolePermissions)
-            .SingleOrDefaultAsync(
-                candidate => candidate.RoleId == LocalServiceIdentitySeedOptions.RoleId,
-                cancellationToken);
-        if (role is null ||
-            role.IsCustom ||
-            !string.Equals(role.ServiceName, "iam", StringComparison.Ordinal) ||
-            role.RolePermissions.Count != 1 ||
-            !string.Equals(
-                role.RolePermissions.Single().PermissionId,
-                LocalServiceIdentitySeedOptions.WorkloadPermission,
-                StringComparison.Ordinal))
+            .Where(candidate => expectedRoleIds.Contains(candidate.RoleId))
+            .ToListAsync(cancellationToken);
+        if (roles.Count != expectedGrants.Count || expectedGrants.Any(expected =>
+                roles.SingleOrDefault(role => role.RoleId == expected.RoleId) is not { } role ||
+                role.IsCustom ||
+                !string.Equals(role.ServiceName, "iam", StringComparison.Ordinal) ||
+                !role.RolePermissions.Select(permission => permission.PermissionId)
+                    .Order(StringComparer.Ordinal)
+                    .SequenceEqual(expected.Permissions.Order(StringComparer.Ordinal))))
         {
             throw new InvalidOperationException(
-                "The canonical IAM auth-service role is missing or has authority drift.");
+                $"The canonical IAM '{localProfile.WorkloadId}' roles are missing or have authority drift.");
         }
 
         var bindings = await _iamDbContext.PrincipalRoleBindings
             .AsNoTracking()
             .Where(binding => binding.PrincipalId == principal.PrincipalId)
             .ToListAsync(cancellationToken);
-        if (bindings.Count != 1 ||
-            !string.Equals(bindings[0].RoleId, LocalServiceIdentitySeedOptions.RoleId, StringComparison.Ordinal) ||
-            bindings[0].ResourcePath is not null ||
-            bindings[0].ExpiresAt is not null ||
+        if (bindings.Count != expectedGrants.Count || expectedGrants.Any(expected =>
+                !bindings.Any(binding =>
+                    string.Equals(binding.RoleId, expected.RoleId, StringComparison.Ordinal) &&
+                    string.Equals(binding.ResourcePath, expected.ResourcePath, StringComparison.Ordinal) &&
+                    binding.ExpiresAt is null)) ||
             await _iamDbContext.PrincipalPermissionBindings.AsNoTracking().AnyAsync(
                 binding => binding.PrincipalId == principal.PrincipalId,
                 cancellationToken) ||
@@ -207,44 +230,54 @@ public sealed class AuthServiceIdentityDatabaseSeeder : DatabaseSeeder<AuthDbCon
                 cancellationToken))
         {
             throw new InvalidOperationException(
-                "The canonical IAM auth-service principal has authority outside its exact profile.");
+                $"The canonical IAM '{localProfile.WorkloadId}' principal has authority outside its exact profile.");
         }
 
         return principal;
     }
 
-    private async Task<ServiceCredential?> GetCredentialAsync(CancellationToken cancellationToken)
+    private async Task<ServiceCredential?> GetCredentialAsync(
+        LocalServiceIdentityProfile profile,
+        CancellationToken cancellationToken)
     {
         var byWorkload = await Context.ServiceCredentials
             .Include(credential => credential.Versions)
             .SingleOrDefaultAsync(
-                credential => credential.WorkloadId == LocalServiceIdentitySeedOptions.WorkloadId,
+                credential => credential.WorkloadId == profile.WorkloadId,
                 cancellationToken);
         var byClient = await Context.ServiceCredentials
             .Include(credential => credential.Versions)
             .SingleOrDefaultAsync(
-                credential => credential.ClientId == LocalServiceIdentitySeedOptions.ClientId,
+                credential => credential.ClientId == profile.ClientId,
                 cancellationToken);
         if (byWorkload is not null && byClient is not null && byWorkload.Id != byClient.Id)
         {
             throw new InvalidOperationException(
-                "The Aspire-local AuthService workload and client identifiers belong to different credentials.");
+                $"The Aspire-local '{profile.WorkloadId}' workload and client identifiers belong to different credentials.");
         }
 
         return byWorkload ?? byClient;
     }
 
-    private static void EnsureExactCredentialBinding(ServiceCredential credential, Guid principalId)
+    private static void EnsureExactCredentialBinding(
+        ServiceCredential credential,
+        LocalServiceIdentityProfile profile,
+        Guid principalId)
     {
-        if (!string.Equals(credential.ClientId, LocalServiceIdentitySeedOptions.ClientId, StringComparison.Ordinal) ||
+        if (!string.Equals(credential.ClientId, profile.ClientId, StringComparison.Ordinal) ||
             credential.PrincipalId != principalId ||
-            !string.Equals(credential.WorkloadId, LocalServiceIdentitySeedOptions.WorkloadId, StringComparison.Ordinal) ||
-            credential.ProfileVersion != LocalServiceIdentitySeedOptions.ProfileVersion ||
-            !string.Equals(credential.RoleId, LocalServiceIdentitySeedOptions.RoleId, StringComparison.Ordinal) ||
-            !string.Equals(credential.ServiceName, LocalServiceIdentitySeedOptions.ServiceName, StringComparison.Ordinal))
+            !string.Equals(credential.WorkloadId, profile.WorkloadId, StringComparison.Ordinal) ||
+            credential.ProfileVersion != profile.ProfileVersion ||
+            !string.Equals(credential.RoleId, profile.RoleId, StringComparison.Ordinal) ||
+            !string.Equals(credential.ServiceName, profile.ServiceName, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                "The Aspire-local AuthService credential has identity or IAM binding drift.");
+                $"The Aspire-local '{profile.WorkloadId}' credential has identity or IAM binding drift.");
         }
     }
+
+    private sealed record ExpectedGrant(
+        string RoleId,
+        string? ResourcePath,
+        IReadOnlyList<string> Permissions);
 }

@@ -9,6 +9,7 @@ using Maliev.Aspire.AppHost.OpenTelemetryCollector;
 using Maliev.Aspire.AppHost.Security;
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Configuration;
+using System.Collections.ObjectModel;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
@@ -131,9 +132,15 @@ static partial class Program
                 "The token-issuance capability system-test host is allowed only in Testing.");
         }
 
-        var localIdentityMaterial = LocalServiceIdentitySeedMaterial.Create();
+        var localIdentityMaterials = LocalServiceIdentitySeedMaterial.CreateCatalog();
+        var authIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.AuthService.WorkloadId];
+        var contactIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.ContactService.WorkloadId];
         var localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
-        builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = localIdentityMaterial.RawSecret;
+        builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = authIdentityMaterial.RawSecret;
+        var contactIdentitySecret = builder.AddParameter("ContactServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:ContactServiceLocalClientSecret"] = contactIdentityMaterial.RawSecret;
         var capabilityMaterial = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
         var capabilityPrivateKey = builder.AddParameter(
             "AuthTokenIssuanceCapabilityPrivateKey",
@@ -171,6 +178,8 @@ static partial class Program
         var rabbitMq = builder.AddRabbitMQ("rabbitmq");
         var iamDatabase = postgres.AddDatabase("iam-app-db");
         var authDatabase = postgres.AddDatabase("auth-app-db");
+        var countryDatabase = postgres.AddDatabase("country-app-db");
+        var contactDatabase = postgres.AddDatabase("contact-app-db");
 
         IResourceBuilder<ProjectResource> WithTestConfiguration(
             IResourceBuilder<ProjectResource> project) =>
@@ -219,7 +228,9 @@ static partial class Program
                 .WaitFor(rabbitMq)
                 .WithReference(iamService)
                 .WaitFor(iamService)
-                .WithEnvironment("ServiceAuthentication__ClientId", LocalServiceIdentitySeedOptions.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.AuthService.ClientId)
                 .WithEnvironment("ServiceAuthentication__ClientSecret", localIdentitySecret)
                 .WithEnvironment("Auth__TokenIssuanceCapability__ActiveKeyId", capabilityMaterial.ActiveKeyId)
                 .WithEnvironment("Auth__TokenIssuanceCapability__PrivateKey", capabilityPrivateKey))
@@ -235,11 +246,46 @@ static partial class Program
                 .WithEnvironment("CONNECTION_NAME", "AuthDbContext")
                 .WithEnvironment("AspireLocalServiceIdentity__Enabled", "true")
                 .WithEnvironment(
-                    "AspireLocalServiceIdentity__SecretHash",
-                    localIdentityMaterial.SecretHash)
+                    "AspireLocalServiceIdentity__Profiles__auth-service__SecretHash",
+                    authIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__contact-service__SecretHash",
+                    contactIdentityMaterial.SecretHash)
                 .WithReference(iamDatabase, "IamDbContext")
                 .WaitFor(iamService),
             runAutomatically: true);
+
+        var countryService = WithTestConfiguration(
+            builder.AddProject<Projects.Maliev_CountryService_Api>("CountryService")
+                .WithReference(countryDatabase, "CountryDbContext")
+                .WaitFor(countryDatabase)
+                .WithReference(rabbitMq)
+                .WaitFor(rabbitMq)
+                .WithReference(redis)
+                .WithReference(iamService)
+                .WaitFor(iamService))
+            .SeedDatabase<CountryDatabaseSeeder>(
+                countryDatabase,
+                runAutomatically: true);
+
+        WithTestConfiguration(
+                builder.AddProject<Projects.Maliev_ContactService_Api>("ContactService")
+                    .WithReference(contactDatabase, "ContactDbContext")
+                    .WaitFor(contactDatabase)
+                    .WithReference(rabbitMq)
+                    .WaitFor(rabbitMq)
+                    .WithReference(redis)
+                    .WithReference(countryService)
+                    .WaitFor(countryService)
+                    .WithReference(authService)
+                    .WaitFor(authService)
+                    .WithReference(iamService)
+                    .WaitFor(iamService))
+            .WithoutJwtSigningMaterial()
+            .WithEnvironment(
+                "ServiceAuthentication__ClientId",
+                LocalServiceIdentityProfileCatalog.ContactService.ClientId)
+            .WithEnvironment("ServiceAuthentication__ClientSecret", contactIdentitySecret);
     }
 
     /// <summary>
@@ -291,15 +337,30 @@ static partial class Program
             secret: true);
         builder.Configuration["Parameters:IamLiveCheckCredentialHash"] = iamLiveCheckCredentialHash;
 
-        IResourceBuilder<ParameterResource>? localIdentitySecret = null;
-        string? localIdentitySecretHash = null;
+        IReadOnlyDictionary<string, IResourceBuilder<ParameterResource>>? localIdentitySecrets = null;
+        IReadOnlyDictionary<string, string>? localIdentitySecretHashes = null;
         LocalTokenIssuanceCapabilityMaterial? tokenIssuanceCapability = null;
         if (IsLocalEnvironment(environmentName))
         {
-            var localIdentityMaterial = LocalServiceIdentitySeedMaterial.Create();
-            localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
-            builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = localIdentityMaterial.RawSecret;
-            localIdentitySecretHash = localIdentityMaterial.SecretHash;
+            var localIdentityMaterials = LocalServiceIdentitySeedMaterial.CreateCatalog();
+            var secretParameters = new Dictionary<string, IResourceBuilder<ParameterResource>>(
+                StringComparer.Ordinal);
+            foreach (var profile in LocalServiceIdentityProfileCatalog.All)
+            {
+                var parameterName = $"{profile.ServiceName}LocalClientSecret";
+                var parameter = builder.AddParameter(parameterName, secret: true);
+                builder.Configuration[$"Parameters:{parameterName}"] =
+                    localIdentityMaterials[profile.WorkloadId].RawSecret;
+                secretParameters.Add(profile.WorkloadId, parameter);
+            }
+
+            localIdentitySecrets = new ReadOnlyDictionary<string, IResourceBuilder<ParameterResource>>(
+                secretParameters);
+            localIdentitySecretHashes = new ReadOnlyDictionary<string, string>(
+                localIdentityMaterials.ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value.SecretHash,
+                    StringComparer.Ordinal));
             tokenIssuanceCapability = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
         }
 
@@ -347,8 +408,8 @@ static partial class Program
             GoogleDriveClientSecret: googleDriveClientSecret,
             IntranetBffIamLiveCheckCredential: intranetBffIamLiveCheckCredential,
             IamLiveCheckCredentialHash: iamLiveCheckCredentialHashParameter,
-            AuthServiceLocalClientSecret: localIdentitySecret,
-            AuthServiceLocalClientSecretHash: localIdentitySecretHash,
+            LocalServiceIdentitySecrets: localIdentitySecrets,
+            LocalServiceIdentitySecretHashes: localIdentitySecretHashes,
             TokenIssuanceCapability: tokenIssuanceCapability,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
             AspireTestAdminPassword: aspireTestAdminPassword,
@@ -731,16 +792,17 @@ static partial class Program
         }
 
         if (isLocalEnvironment &&
-            config.AuthServiceLocalClientSecret is not null &&
-            config.AuthServiceLocalClientSecretHash is not null)
+            config.LocalServiceIdentitySecrets is not null &&
+            config.LocalServiceIdentitySecretHashes is not null)
         {
             authService
                 .WithEnvironment(
                     "ServiceAuthentication__ClientId",
-                    LocalServiceIdentitySeedOptions.ClientId)
+                    LocalServiceIdentityProfileCatalog.AuthService.ClientId)
                 .WithEnvironment(
                     "ServiceAuthentication__ClientSecret",
-                    config.AuthServiceLocalClientSecret);
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.AuthService.WorkloadId]);
 
             authService = authService.SeedDatabase<AuthServiceIdentityDatabaseSeeder>(
                 databases.Auth,
@@ -748,8 +810,13 @@ static partial class Program
                     .WithEnvironment("CONNECTION_NAME", "AuthDbContext")
                     .WithEnvironment("AspireLocalServiceIdentity__Enabled", "true")
                     .WithEnvironment(
-                        "AspireLocalServiceIdentity__SecretHash",
-                        config.AuthServiceLocalClientSecretHash)
+                        "AspireLocalServiceIdentity__Profiles__auth-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.AuthService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__contact-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.ContactService.WorkloadId])
                     .WithReference(databases.IAM, "IamDbContext")
                     .WaitFor(iamService),
                 runAutomatically: true);
@@ -904,13 +971,28 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(uploadService)
                 .WithReference(countryService)
+                .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
                 .WaitFor(iamService)
                 .WithTestingSafeHttpHealthCheck("/contact/aspire-liveness"),
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .WithoutJwtSigningMaterial();
+
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            contactService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.ContactService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.ContactService.WorkloadId]);
+        }
 
         var currencyService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_CurrencyService_Api>("CurrencyService")
@@ -1586,8 +1668,8 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> GoogleDriveClientSecret,
     IResourceBuilder<ParameterResource> IntranetBffIamLiveCheckCredential,
     IResourceBuilder<ParameterResource> IamLiveCheckCredentialHash,
-    IResourceBuilder<ParameterResource>? AuthServiceLocalClientSecret,
-    string? AuthServiceLocalClientSecretHash,
+    IReadOnlyDictionary<string, IResourceBuilder<ParameterResource>>? LocalServiceIdentitySecrets,
+    IReadOnlyDictionary<string, string>? LocalServiceIdentitySecretHashes,
     LocalTokenIssuanceCapabilityMaterial? TokenIssuanceCapability,
     IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
     IResourceBuilder<ParameterResource> AspireTestAdminPassword,

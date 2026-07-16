@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -7,7 +8,52 @@ using Microsoft.Extensions.Hosting;
 namespace Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
 
 /// <summary>
-/// Contains the verifier-only configuration and exact IAM profile for the Aspire-local AuthService identity.
+/// Defines one deterministic local workload identity whose authorization is owned by IAM.
+/// </summary>
+/// <param name="WorkloadId">Canonical workload identifier.</param>
+/// <param name="ClientId">AuthService OAuth client identifier.</param>
+/// <param name="ServiceName">Exact process identity emitted in access tokens.</param>
+/// <param name="ProfileVersion">IAM workload profile version.</param>
+/// <param name="RoleId">Canonical base role owned by the IAM profile.</param>
+/// <param name="ProvisionOperationId">Stable idempotency operation for local reconciliation.</param>
+public sealed record LocalServiceIdentityProfile(
+    string WorkloadId,
+    string ClientId,
+    string ServiceName,
+    int ProfileVersion,
+    string RoleId,
+    Guid ProvisionOperationId);
+
+/// <summary>
+/// Immutable catalog of workload identities provisioned by the local Aspire host.
+/// </summary>
+public static class LocalServiceIdentityProfileCatalog
+{
+    /// <summary>Gets the AuthService identity.</summary>
+    public static LocalServiceIdentityProfile AuthService { get; } = new(
+        "auth-service",
+        "service-auth-service",
+        "AuthService",
+        1,
+        "roles.workloads.auth-service.v1",
+        new Guid("83856ea6-82d8-4384-af5c-942a15b519b8"));
+
+    /// <summary>Gets the ContactService identity.</summary>
+    public static LocalServiceIdentityProfile ContactService { get; } = new(
+        "contact-service",
+        "service-contact-service",
+        "ContactService",
+        1,
+        "roles.workloads.contact-service.v1",
+        new Guid("7f7a4a0d-15fe-4f2a-87c7-f0d3dfcb5f83"));
+
+    /// <summary>Gets all profiles in deterministic provisioning order.</summary>
+    public static IReadOnlyList<LocalServiceIdentityProfile> All { get; } =
+        Array.AsReadOnly([AuthService, ContactService]);
+}
+
+/// <summary>
+/// Contains verifier-only configuration for Aspire-local workload identities.
 /// </summary>
 public sealed class LocalServiceIdentitySeedOptions
 {
@@ -18,24 +64,6 @@ public sealed class LocalServiceIdentitySeedOptions
     /// <summary>Gets the configuration section name.</summary>
     public const string SectionName = "AspireLocalServiceIdentity";
 
-    /// <summary>Gets the canonical IAM workload identifier.</summary>
-    public const string WorkloadId = "auth-service";
-
-    /// <summary>Gets the AuthService client identifier.</summary>
-    public const string ClientId = "service-auth-service";
-
-    /// <summary>Gets the process identity emitted in service access tokens.</summary>
-    public const string ServiceName = "AuthService";
-
-    /// <summary>Gets the server-owned IAM profile version.</summary>
-    public const int ProfileVersion = 1;
-
-    /// <summary>Gets the exact server-owned workload role.</summary>
-    public const string RoleId = "roles.workloads.auth-service.v1";
-
-    /// <summary>Gets the workload's sole permission.</summary>
-    public const string WorkloadPermission = "iam.auth.resolve-permissions";
-
     /// <summary>Gets the local bootstrap actor's sole permission.</summary>
     public const string ProvisionPermission = "iam.workload-principals.provision";
 
@@ -45,14 +73,24 @@ public sealed class LocalServiceIdentitySeedOptions
     /// <summary>Gets the stable local bootstrap actor identifier.</summary>
     public static readonly Guid ProvisionerPrincipalId = new("dc7d29c5-22e8-48e3-b317-60f242f553ad");
 
-    /// <summary>Gets the stable idempotency operation for the local canonical workload.</summary>
-    public static readonly Guid ProvisionOperationId = new("83856ea6-82d8-4384-af5c-942a15b519b8");
-
     /// <summary>Gets whether local identity seeding is enabled.</summary>
     public bool Enabled { get; private init; }
 
-    /// <summary>Gets the uppercase SHA-256 verifier. Plaintext is never accepted by this type.</summary>
-    public string SecretHash { get; private init; } = string.Empty;
+    /// <summary>Gets verifier hashes keyed by canonical workload ID.</summary>
+    public IReadOnlyDictionary<string, string> SecretHashes { get; private init; } =
+        new ReadOnlyDictionary<string, string>(new Dictionary<string, string>());
+
+    /// <summary>Gets the validated verifier for a profile.</summary>
+    /// <param name="profile">Local workload profile.</param>
+    /// <returns>Uppercase SHA-256 verifier.</returns>
+    public string GetSecretHash(LocalServiceIdentityProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return SecretHashes.TryGetValue(profile.WorkloadId, out var hash)
+            ? hash
+            : throw new InvalidOperationException(
+                $"No Aspire-local verifier is configured for '{profile.WorkloadId}'.");
+    }
 
     /// <summary>Reads and validates local-only verifier configuration.</summary>
     /// <param name="configuration">Seeder configuration.</param>
@@ -68,17 +106,24 @@ public sealed class LocalServiceIdentitySeedOptions
             return new LocalServiceIdentitySeedOptions();
         }
 
-        var hash = configuration[$"{SectionName}:SecretHash"];
-        if (hash is null || !Sha256Pattern.IsMatch(hash))
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var profile in LocalServiceIdentityProfileCatalog.All)
         {
-            throw new InvalidOperationException(
-                "Aspire local service identity seeding requires an uppercase SHA-256 verifier.");
+            var hash = configuration[
+                $"{SectionName}:Profiles:{profile.WorkloadId}:SecretHash"];
+            if (hash is null || !Sha256Pattern.IsMatch(hash))
+            {
+                throw new InvalidOperationException(
+                    $"Aspire local service identity '{profile.WorkloadId}' requires an uppercase SHA-256 verifier.");
+            }
+
+            hashes.Add(profile.WorkloadId, hash);
         }
 
         return new LocalServiceIdentitySeedOptions
         {
             Enabled = true,
-            SecretHash = hash
+            SecretHashes = new ReadOnlyDictionary<string, string>(hashes)
         };
     }
 
@@ -130,5 +175,16 @@ public sealed record LocalServiceIdentitySeedMaterial(string RawSecret, string S
         {
             CryptographicOperations.ZeroMemory(randomBytes);
         }
+    }
+
+    /// <summary>Creates independent per-start material for every registered local workload.</summary>
+    /// <returns>Read-only material keyed by canonical workload ID.</returns>
+    public static IReadOnlyDictionary<string, LocalServiceIdentitySeedMaterial> CreateCatalog()
+    {
+        var material = LocalServiceIdentityProfileCatalog.All.ToDictionary(
+            profile => profile.WorkloadId,
+            _ => Create(),
+            StringComparer.Ordinal);
+        return new ReadOnlyDictionary<string, LocalServiceIdentitySeedMaterial>(material);
     }
 }
