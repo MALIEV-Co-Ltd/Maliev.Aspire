@@ -194,6 +194,62 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     }
 
     /// <summary>
+    /// RegistryService credentials must remain distinct from every other local workload and issue only
+    /// the canonical live-permission-check authority before Registry runtime wiring is enabled.
+    /// </summary>
+    [Fact]
+    public async Task RegistryServiceCredential_HostedAuthIamBoundary_IsolatedAndBounded()
+    {
+        var authSecret = await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret");
+        var contactSecret = await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret");
+        var searchSecret = await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret");
+        var registrySecret = await fixture.GetSecretParameterValueAsync("RegistryServiceLocalClientSecret");
+        using var authClient = await fixture.CreateLiveAuthClientAsync();
+
+        using var registryLogin = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-registry-service",
+            client_secret = registrySecret
+        });
+        var loginBody = await registryLogin.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, registryLogin.StatusCode);
+        using var loginJson = JsonDocument.Parse(loginBody);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(
+            loginJson.RootElement.GetProperty("access_token").GetString());
+
+        Assert.Equal("service-registry-service", token.Claims.Single(claim => claim.Type == "client_id").Value);
+        Assert.Equal("RegistryService", token.Claims.Single(claim => claim.Type == "service_name").Value);
+        Assert.Equal(
+            ["iam.auth.check-permission"],
+            token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        Assert.Equal(
+            ["roles.workloads.registry-service.v1"],
+            token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
+        Assert.DoesNotContain(token.Claims, claim => claim.Value == "*");
+        Assert.DoesNotContain(token.Claims, claim =>
+            claim.Value.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
+
+        foreach (var crossedCredential in new[]
+        {
+            (ClientId: "service-auth-service", Secret: registrySecret),
+            (ClientId: "service-contact-service", Secret: registrySecret),
+            (ClientId: "service-search-service", Secret: registrySecret),
+            (ClientId: "service-registry-service", Secret: authSecret)
+        })
+        {
+            using var rejected = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+            {
+                client_id = crossedCredential.ClientId,
+                client_secret = crossedCredential.Secret
+            });
+            Assert.Equal(HttpStatusCode.Unauthorized, rejected.StatusCode);
+        }
+
+        Assert.NotEqual(contactSecret, registrySecret);
+        Assert.NotEqual(searchSecret, registrySecret);
+    }
+
+    /// <summary>
     /// The evaluated bounded model must isolate capability material and keep live-check credentials independent.
     /// </summary>
     [Fact]
@@ -203,9 +259,13 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         var authSecret = await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret");
         var contactSecret = await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret");
         var searchSecret = await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret");
+        var registrySecret = await fixture.GetSecretParameterValueAsync("RegistryServiceLocalClientSecret");
         Assert.DoesNotContain(
             model.Resources,
             resource => string.Equals(resource.Name, "SearchService", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            model.Resources,
+            resource => string.Equals(resource.Name, "RegistryService", StringComparison.Ordinal));
         var authSecretBytes = Encoding.UTF8.GetBytes(authSecret);
         var authDerivedVerifierDigest = SHA256.HashData(authSecretBytes);
         var authDerivedVerifier = Convert.ToBase64String(authDerivedVerifierDigest);
@@ -285,6 +345,10 @@ public sealed class TokenIssuanceCapabilitySystemTests(
             // Search runtime is intentionally absent until its central-exchange wiring lands.
             // Its raw credential must therefore remain unprojected to every process resource.
             Assert.DoesNotContain(environment, pair => Equals(pair.Value, searchSecret));
+
+            // Registry runtime is intentionally absent until its central-exchange wiring lands.
+            // Its raw credential must therefore remain unprojected to every process resource.
+            Assert.DoesNotContain(environment, pair => Equals(pair.Value, registrySecret));
         }
 
         Assert.NotNull(iamVerifier);

@@ -56,9 +56,18 @@ public static class LocalServiceIdentityProfileCatalog
         "roles.workloads.search-service.v1",
         new Guid("14189701-754f-46b8-a245-e70c2dfb5320"));
 
+    /// <summary>Gets the RegistryService identity.</summary>
+    public static LocalServiceIdentityProfile RegistryService { get; } = new(
+        "registry-service",
+        "service-registry-service",
+        "RegistryService",
+        1,
+        "roles.workloads.registry-service.v1",
+        new Guid("7cb1f75e-7d49-45a5-ae6a-a3112c714377"));
+
     /// <summary>Gets all profiles in deterministic provisioning order.</summary>
     public static IReadOnlyList<LocalServiceIdentityProfile> All { get; } =
-        Array.AsReadOnly([AuthService, ContactService, SearchService]);
+        Array.AsReadOnly([AuthService, ContactService, SearchService, RegistryService]);
 }
 
 /// <summary>
