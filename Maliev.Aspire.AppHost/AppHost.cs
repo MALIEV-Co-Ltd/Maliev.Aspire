@@ -6,6 +6,7 @@ using Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
 using Maliev.Aspire.AppHost;
 using Maliev.Aspire.AppHost.Extensions;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
+using Maliev.Aspire.AppHost.Security;
 using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Configuration;
 using System.Net.Http.Headers;
@@ -18,6 +19,13 @@ Environment.SetEnvironmentVariable("NPGSQL_GSSAPI_AUTHENTICATION", "false");
 Environment.SetEnvironmentVariable("PGGSSENCMODE", "disable");
 
 var builder = DistributedApplication.CreateBuilder(args);
+
+if (builder.Configuration.GetValue<bool>("TokenIssuanceCapabilitySystemTest:Enabled"))
+{
+    Program.ConfigureTokenIssuanceCapabilitySystemTest(builder);
+    builder.Build().Run();
+    return;
+}
 
 var config = Program.LoadSharedConfiguration(builder);
 
@@ -110,10 +118,126 @@ static IResourceBuilder<ContainerResource> ConfigureOpenTelemetry(
 static partial class Program
 {
     /// <summary>
+    /// Configures the bounded Testing-only Auth-to-IAM capability system-test host.
+    /// </summary>
+    /// <param name="builder">The distributed application builder.</param>
+    public static void ConfigureTokenIssuanceCapabilitySystemTest(IDistributedApplicationBuilder builder)
+    {
+        const string testingEnvironment = "Testing";
+        var environmentName = builder.Environment.EnvironmentName;
+        if (!string.Equals(environmentName, testingEnvironment, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The token-issuance capability system-test host is allowed only in Testing.");
+        }
+
+        var localIdentityMaterial = LocalServiceIdentitySeedMaterial.Create();
+        var localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = localIdentityMaterial.RawSecret;
+        var capabilityMaterial = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
+        var capabilityPrivateKey = builder.AddParameter(
+            "AuthTokenIssuanceCapabilityPrivateKey",
+            secret: true);
+        builder.Configuration["Parameters:AuthTokenIssuanceCapabilityPrivateKey"] =
+            capabilityMaterial.PrivateKeyPem;
+        var livePermissionCheckCredentialHash = Convert.ToBase64String(
+            SHA256.HashData(Encoding.UTF8.GetBytes(localIdentityMaterial.RawSecret)));
+
+        using var fleetRsa = RSA.Create(2048);
+        var jwtPrivateKey = Convert.ToBase64String(fleetRsa.ExportPkcs8PrivateKey());
+        var jwtPublicKey = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(fleetRsa.ExportSubjectPublicKeyInfoPem()));
+        const string jwtSecurityKey = "aspire-capability-system-test-hmac-key-64-characters-minimum-value";
+        const string jwtIssuer = "https://auth.test.maliev.com";
+        const string jwtAudience = "https://api.test.maliev.com";
+        const string capabilityIssuer = "https://auth.maliev.com";
+        const string capabilityAudience = "https://iam.maliev.com/auth/token-issuance";
+
+        var postgres = builder.AddPostgres("postgres-server")
+            .WithImageTag("18-alpine")
+            .WithEnvironment("PGGSSENCMODE", "disable");
+        var redis = builder.AddRedis("redis");
+        var rabbitMq = builder.AddRabbitMQ("rabbitmq");
+        var iamDatabase = postgres.AddDatabase("iam-app-db");
+        var authDatabase = postgres.AddDatabase("auth-app-db");
+
+        IResourceBuilder<ProjectResource> WithTestConfiguration(
+            IResourceBuilder<ProjectResource> project) =>
+            project
+                .WithEnvironment("ASPNETCORE_ENVIRONMENT", environmentName)
+                .WithEnvironment("DOTNET_ENVIRONMENT", environmentName)
+                .WithEnvironment("Jwt__SecurityKey", jwtSecurityKey)
+                .WithEnvironment("Jwt__PrivateKey", jwtPrivateKey)
+                .WithEnvironment("Jwt__PublicKey", jwtPublicKey)
+                .WithEnvironment("Jwt__Issuer", jwtIssuer)
+                .WithEnvironment("Jwt__Audience", jwtAudience)
+                .WithEnvironment("Authentication__Google__ClientId", "capability-system-test.apps.googleusercontent.com")
+                .WithEnvironment("CORS__AllowedOrigins", "https://localhost")
+                .WithEnvironment("NPGSQL_GSSAPI_AUTHENTICATION", "false")
+                .WithEnvironment("PGGSSENCMODE", "disable")
+                .WithEnvironment("Observability__TracingEnabled", "false")
+                .WithEnvironment("Observability__RuntimeMetricsEnabled", "false")
+                .WithEnvironment("MASSTRANSIT_INMEMORY", "true");
+
+        var iamService = WithTestConfiguration(
+            builder.AddProject<Projects.Maliev_IAMService_Api>("IAMService")
+                .WithReference(iamDatabase, "IamDbContext")
+                .WaitFor(iamDatabase)
+                .WithEnvironment(
+                    "IAM__LivePermissionChecks__CredentialHashes__IntranetBff",
+                    livePermissionCheckCredentialHash)
+                .WithEnvironment("IAM__TokenIssuanceCapability__Issuer", capabilityIssuer)
+                .WithEnvironment("IAM__TokenIssuanceCapability__Audience", capabilityAudience)
+                .WithEnvironment(
+                    $"IAM__TokenIssuanceCapability__PublicKeys__{capabilityMaterial.ActiveKeyId}",
+                    capabilityMaterial.PublicKey))
+            .SeedDatabase<IAMDatabaseSeeder>(
+                iamDatabase,
+                configureSeeder: seeder => seeder
+                    .WithEnvironment("AspireLocalServiceIdentity__Enabled", "true")
+                    .WithEnvironment("AspireTestAdmin__Enabled", "false"),
+                runAutomatically: true);
+
+        var authService = WithTestConfiguration(
+            builder.AddProject<Projects.Maliev_AuthService_Api>("AuthService")
+                .WithReference(authDatabase, "AuthDbContext")
+                .WaitFor(authDatabase)
+                .WithReference(redis)
+                .WaitFor(redis)
+                .WithReference(rabbitMq)
+                .WaitFor(rabbitMq)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithEnvironment("ServiceAuthentication__ClientId", LocalServiceIdentitySeedOptions.ClientId)
+                .WithEnvironment("ServiceAuthentication__ClientSecret", localIdentitySecret)
+                .WithEnvironment("Auth__TokenIssuanceCapability__ActiveKeyId", capabilityMaterial.ActiveKeyId)
+                .WithEnvironment("Auth__TokenIssuanceCapability__PrivateKey", capabilityPrivateKey))
+            // The canonical cache wiring intentionally omits IConnectionMultiplexer in Testing.
+            // Service-login rate limiting is fail-closed, so this bounded local profile runs
+            // the Auth child as Development while the AppHost itself remains Testing-gated.
+            .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+            .WithEnvironment("DOTNET_ENVIRONMENT", "Development");
+
+        authService.SeedDatabase<AuthServiceIdentityDatabaseSeeder>(
+            authDatabase,
+            configureSeeder: seeder => seeder
+                .WithEnvironment("CONNECTION_NAME", "AuthDbContext")
+                .WithEnvironment("AspireLocalServiceIdentity__Enabled", "true")
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__SecretHash",
+                    localIdentityMaterial.SecretHash)
+                .WithReference(iamDatabase, "IamDbContext")
+                .WaitFor(iamService),
+            runAutomatically: true);
+    }
+
+    /// <summary>
     /// Loads shared configuration from sharedsecrets.json and user secrets.
     /// </summary>
     public static SharedConfiguration LoadSharedConfiguration(IDistributedApplicationBuilder builder)
     {
+        var environmentName = builder.Environment.EnvironmentName;
+
         // Load shared secrets from sharedsecrets.json and user secrets
         builder.Configuration.AddJsonFile("sharedsecrets.json", optional: true);
         builder.Configuration.AddEnvironmentVariables();
@@ -158,12 +282,14 @@ static partial class Program
 
         IResourceBuilder<ParameterResource>? localIdentitySecret = null;
         string? localIdentitySecretHash = null;
-        if (IsLocalEnvironment(builder.Environment.EnvironmentName))
+        LocalTokenIssuanceCapabilityMaterial? tokenIssuanceCapability = null;
+        if (IsLocalEnvironment(environmentName))
         {
             var localIdentityMaterial = LocalServiceIdentitySeedMaterial.Create();
             localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
             builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = localIdentityMaterial.RawSecret;
             localIdentitySecretHash = localIdentityMaterial.SecretHash;
+            tokenIssuanceCapability = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
         }
 
         var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
@@ -212,6 +338,7 @@ static partial class Program
             IamLiveCheckCredentialHash: iamLiveCheckCredentialHashParameter,
             AuthServiceLocalClientSecret: localIdentitySecret,
             AuthServiceLocalClientSecretHash: localIdentitySecretHash,
+            TokenIssuanceCapability: tokenIssuanceCapability,
             AspireTestAdminEnabled: aspireTestAdminEnabled,
             AspireTestAdminPassword: aspireTestAdminPassword,
             CorsAllowedOrigins: corsAllowedOrigins,
@@ -391,6 +518,25 @@ static partial class Program
     {
         var environmentName = builder.Environment.EnvironmentName;
         var isLocalEnvironment = IsLocalEnvironment(environmentName);
+        var localTokenIssuanceCapability = isLocalEnvironment
+            ? config.TokenIssuanceCapability ?? throw new InvalidOperationException(
+                "Local token-issuance capability material is required in Development or Testing.")
+            : null;
+        if (!isLocalEnvironment && config.TokenIssuanceCapability is not null)
+        {
+            throw new InvalidOperationException(
+                "Local token-issuance capability material cannot be wired outside Development or Testing.");
+        }
+
+        IResourceBuilder<ParameterResource>? localTokenIssuanceCapabilityPrivateKey = null;
+        if (localTokenIssuanceCapability is not null)
+        {
+            localTokenIssuanceCapabilityPrivateKey = builder.AddParameter(
+                "AuthTokenIssuanceCapabilityPrivateKey",
+                secret: true);
+            builder.Configuration["Parameters:AuthTokenIssuanceCapabilityPrivateKey"] =
+                localTokenIssuanceCapability.PrivateKeyPem;
+        }
 
         void ConfigureAspireTestAdminSeeder(IResourceBuilder<ExecutableResource> seeder)
         {
@@ -422,6 +568,13 @@ static partial class Program
                 databases.IAM,
                 configureSeeder: ConfigureAspireTestAdminSeeder,
                 runAutomatically: isLocalEnvironment);
+
+        if (localTokenIssuanceCapability is not null)
+        {
+            iamService.WithEnvironment(
+                $"IAM__TokenIssuanceCapability__PublicKeys__{localTokenIssuanceCapability.ActiveKeyId}",
+                localTokenIssuanceCapability.PublicKey);
+        }
 
         // Note: CountryService must be declared before CustomerService to be referenced
         var countryService = WithSharedSecrets(
@@ -554,6 +707,17 @@ static partial class Program
             .WithEnvironment("GoogleIdentity__Customer__Audiences__quote-engine__0", config.GoogleClientId)
             .WithEnvironment("WebAuthn__RPId", "localhost")
             .WithEnvironment("WebAuthn__AllowedOrigins", "https://localhost:56139");
+
+        if (localTokenIssuanceCapability is not null)
+        {
+            authService
+                .WithEnvironment(
+                    "Auth__TokenIssuanceCapability__ActiveKeyId",
+                    localTokenIssuanceCapability.ActiveKeyId)
+                .WithEnvironment(
+                    "Auth__TokenIssuanceCapability__PrivateKey",
+                    localTokenIssuanceCapabilityPrivateKey!);
+        }
 
         if (isLocalEnvironment &&
             config.AuthServiceLocalClientSecret is not null &&
@@ -1413,6 +1577,7 @@ public record SharedConfiguration(
     IResourceBuilder<ParameterResource> IamLiveCheckCredentialHash,
     IResourceBuilder<ParameterResource>? AuthServiceLocalClientSecret,
     string? AuthServiceLocalClientSecretHash,
+    LocalTokenIssuanceCapabilityMaterial? TokenIssuanceCapability,
     IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
     IResourceBuilder<ParameterResource> AspireTestAdminPassword,
     IResourceBuilder<ParameterResource> CorsAllowedOrigins,

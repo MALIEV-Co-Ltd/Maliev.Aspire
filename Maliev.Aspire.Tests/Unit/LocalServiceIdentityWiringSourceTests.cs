@@ -6,6 +6,36 @@ namespace Maliev.Aspire.Tests.Unit;
 public sealed class LocalServiceIdentityWiringSourceTests
 {
     /// <summary>
+    /// AppHost must isolate the ephemeral capability private key to Auth and its public ring to IAM.
+    /// </summary>
+    [Fact]
+    public void AppHost_WiresTokenIssuanceCapabilityOnlyToAuthAndIamInLocalEnvironments()
+    {
+        var source = File.ReadAllText(FindSource("Maliev.Aspire.AppHost", "AppHost.cs"));
+        var compactSource = string.Concat(source.Where(character => !char.IsWhiteSpace(character)));
+
+        Assert.Contains("LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName)", source, StringComparison.Ordinal);
+        Assert.Contains("if (isLocalEnvironment)", source, StringComparison.Ordinal);
+        Assert.Contains("\"Auth__TokenIssuanceCapability__ActiveKeyId\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"Auth__TokenIssuanceCapability__PrivateKey\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"AuthTokenIssuanceCapabilityPrivateKey\"", source, StringComparison.Ordinal);
+        Assert.Contains("localTokenIssuanceCapabilityPrivateKey!", source, StringComparison.Ordinal);
+        Assert.Contains("localTokenIssuanceCapability.PrivateKeyPem", source, StringComparison.Ordinal);
+        Assert.Contains("$\"IAM__TokenIssuanceCapability__PublicKeys__{localTokenIssuanceCapability.ActiveKeyId}\"", source, StringComparison.Ordinal);
+        Assert.Contains("localTokenIssuanceCapability.PublicKey", source, StringComparison.Ordinal);
+        Assert.Equal(2, CountOccurrences(source, "\"Auth__TokenIssuanceCapability__PrivateKey\""));
+        Assert.Equal(2, CountOccurrences(source, "IAM__TokenIssuanceCapability__PublicKeys__"));
+        Assert.DoesNotContain(
+            "Auth__TokenIssuanceCapability__PrivateKey\", config.JwtPrivateKey",
+            source,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "\"Auth__TokenIssuanceCapability__PrivateKey\",localTokenIssuanceCapability.PrivateKeyPem",
+            compactSource,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// AppHost must generate the material only for local environments and pass plaintext only to AuthService.
     /// </summary>
     [Fact]
@@ -25,12 +55,12 @@ public sealed class LocalServiceIdentityWiringSourceTests
         var rawSecretEnvironmentOccurrences = CountOccurrences(
             source,
             "\"ServiceAuthentication__ClientSecret\"");
-        Assert.Equal(1, rawSecretEnvironmentOccurrences);
+        Assert.Equal(2, rawSecretEnvironmentOccurrences);
 
         var verifierEnvironmentOccurrences = CountOccurrences(
             source,
             "\"AspireLocalServiceIdentity__SecretHash\"");
-        Assert.Equal(1, verifierEnvironmentOccurrences);
+        Assert.Equal(2, verifierEnvironmentOccurrences);
     }
 
     /// <summary>
@@ -46,6 +76,8 @@ public sealed class LocalServiceIdentityWiringSourceTests
 
         Assert.Contains("runAutomatically", source, StringComparison.Ordinal);
         Assert.Contains("ServiceAuthentication__ClientSecret", source, StringComparison.Ordinal);
+        Assert.Contains("Auth__TokenIssuanceCapability__PrivateKey", source, StringComparison.Ordinal);
+        Assert.Contains("IAM__TokenIssuanceCapability__PublicKeys__", source, StringComparison.Ordinal);
         Assert.Contains("context.EnvironmentVariables.Remove", source, StringComparison.Ordinal);
     }
 

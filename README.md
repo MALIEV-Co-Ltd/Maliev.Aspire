@@ -107,6 +107,8 @@ dotnet test Maliev.Aspire.Tests
 - **AppHost Tests**: Verifies that the orchestration graph is built correctly.
 - **Integration Tests**: Validates cross-service connectivity within the Aspire environment.
 
+The local Auth-to-IAM token-issuance capability uses an AppHost-generated ephemeral RSA key pair. See the [rotation runbook](docs/token-issuance-capability-rotation.md) for key isolation and the overlap-before-retirement procedure.
+
 ---
 
 ## 📦 Managing Services

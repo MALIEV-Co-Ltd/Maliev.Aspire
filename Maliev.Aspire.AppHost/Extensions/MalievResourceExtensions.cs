@@ -141,6 +141,17 @@ public static class MalievResourceExtensions
             context.EnvironmentVariables.Remove("ASPNETCORE_URLS");
             context.EnvironmentVariables.Remove("ASPNETCORE_HTTPS_PORT");
             context.EnvironmentVariables.Remove("ServiceAuthentication__ClientSecret");
+            context.EnvironmentVariables.Remove("Auth__TokenIssuanceCapability__ActiveKeyId");
+            context.EnvironmentVariables.Remove("Auth__TokenIssuanceCapability__PrivateKey");
+            var isolatedCapabilityKeys = context.EnvironmentVariables.Keys
+                .Where(key => key.StartsWith(
+                    "IAM__TokenIssuanceCapability__PublicKeys__",
+                    StringComparison.Ordinal))
+                .ToArray();
+            foreach (var key in isolatedCapabilityKeys)
+            {
+                context.EnvironmentVariables.Remove(key);
+            }
         });
     }
 
