@@ -315,6 +315,38 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
         Assert.Equal(1, transport.RequestCount);
     }
 
+    /// <summary>Verifies an orphaned failed refresh is observed and cleared without another caller.</summary>
+    [Fact]
+    public async Task GetTokenAsync_AllWaitersCancelThenRefreshFails_ProactivelyClearsRefresh()
+    {
+        var attempt = 0;
+        var failedResponse = new TaskCompletionSource<HttpResponseMessage>();
+        var transport = new StubHttpMessageHandler((_, _) =>
+        {
+            return Interlocked.Increment(ref attempt) == 1
+                ? failedResponse.Task
+                : Task.FromResult(CreateSuccessResponse(CreateServiceToken()));
+        });
+        var provider = CreateProvider(transport);
+        using var canceled = new CancellationTokenSource();
+
+        var orphanedWaiter = provider.GetTokenAsync(canceled.Token);
+        await WaitUntilAsync(() => transport.RequestCount == 1);
+        var refreshTask = Assert.IsAssignableFrom<Task>(GetActiveRefresh(provider));
+        canceled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => orphanedWaiter);
+        failedResponse.SetResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        await WaitUntilAsync(() => GetActiveRefresh(provider) is null);
+
+        Assert.True(refreshTask.IsFaulted);
+
+        var recovered = await provider.GetTokenAsync();
+
+        Assert.False(string.IsNullOrWhiteSpace(recovered));
+        Assert.Equal(2, transport.RequestCount);
+    }
+
     /// <summary>Verifies an orphaned failed refresh is not replayed to the next caller.</summary>
     [Fact]
     public async Task GetTokenAsync_AllWaitersCancelThenRefreshFails_NextCallerStartsFreshExchange()
@@ -332,9 +364,7 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
 
         var orphanedWaiter = provider.GetTokenAsync(canceled.Token);
         await WaitUntilAsync(() => transport.RequestCount == 1);
-        var refreshTask = Assert.IsAssignableFrom<Task>(typeof(AuthServiceTokenProvider)
-            .GetField("_activeRefresh", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .GetValue(provider));
+        var refreshTask = Assert.IsAssignableFrom<Task>(GetActiveRefresh(provider));
         canceled.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => orphanedWaiter);
         failedResponse.SetResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
@@ -699,6 +729,11 @@ public sealed class AuthServiceTokenExchangeTests : IDisposable
             _time,
             NullLogger<AuthServiceTokenProvider>.Instance);
     }
+
+    private static object? GetActiveRefresh(AuthServiceTokenProvider provider) =>
+        typeof(AuthServiceTokenProvider)
+            .GetField("_activeRefresh", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(provider);
 
     private IHost CreateExchangeHost(
         string publicKey,

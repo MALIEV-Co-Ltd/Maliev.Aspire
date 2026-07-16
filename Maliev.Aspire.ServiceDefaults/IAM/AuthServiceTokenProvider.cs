@@ -153,7 +153,23 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider, IDispo
                 _activeRefresh = null;
             }
 
-            refreshTask = _activeRefresh ??= ExchangeAndValidateAsync();
+            if (_activeRefresh is null)
+            {
+                var newRefresh = ExchangeAndValidateAsync();
+                _activeRefresh = newRefresh;
+                _ = newRefresh.ContinueWith(
+                    static (completedRefresh, state) =>
+                        ((AuthServiceTokenProvider)state!).ObserveAndClearFailedRefresh(completedRefresh),
+                    this,
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnFaulted,
+                    TaskScheduler.Default);
+                refreshTask = newRefresh;
+            }
+            else
+            {
+                refreshTask = _activeRefresh;
+            }
         }
 
         try
@@ -177,6 +193,18 @@ public sealed class AuthServiceTokenProvider : IAuthServiceTokenProvider, IDispo
                         _activeRefresh = null;
                     }
                 }
+            }
+        }
+    }
+
+    private void ObserveAndClearFailedRefresh(Task<CacheEntry> completedRefresh)
+    {
+        _ = completedRefresh.Exception;
+        lock (_stateLock)
+        {
+            if (ReferenceEquals(_activeRefresh, completedRefresh))
+            {
+                _activeRefresh = null;
             }
         }
     }
