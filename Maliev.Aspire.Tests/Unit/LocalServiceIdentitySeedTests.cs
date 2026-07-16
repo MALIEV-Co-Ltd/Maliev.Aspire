@@ -43,10 +43,11 @@ public sealed class LocalServiceIdentitySeedTests
         var auth = catalog[LocalServiceIdentityProfileCatalog.AuthService.WorkloadId];
         var contact = catalog[LocalServiceIdentityProfileCatalog.ContactService.WorkloadId];
         var search = catalog["search-service"];
+        var registry = catalog["registry-service"];
         Assert.NotEqual(auth.RawSecret, contact.RawSecret);
         Assert.NotEqual(auth.SecretHash, contact.SecretHash);
-        Assert.Equal(3, new[] { auth, contact, search }.Select(item => item.RawSecret).Distinct().Count());
-        Assert.Equal(3, new[] { auth, contact, search }.Select(item => item.SecretHash).Distinct().Count());
+        Assert.Equal(4, new[] { auth, contact, search, registry }.Select(item => item.RawSecret).Distinct().Count());
+        Assert.Equal(4, new[] { auth, contact, search, registry }.Select(item => item.SecretHash).Distinct().Count());
         Assert.Throws<NotSupportedException>(() =>
         {
             ((IDictionary<string, LocalServiceIdentitySeedMaterial>)catalog).Add(
@@ -105,8 +106,26 @@ public sealed class LocalServiceIdentitySeedTests
         Assert.Equal("roles.workloads.search-service.v1", search.RoleId);
         Assert.DoesNotContain('*', search.RoleId);
         Assert.DoesNotContain("platform.owner", search.RoleId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// RegistryService uses the deterministic IAM profile whose sole authority is live permission checking.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactRegistryServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var registry = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "registry-service");
+
+        Assert.Equal("service-registry-service", registry.ClientId);
+        Assert.Equal("RegistryService", registry.ServiceName);
+        Assert.Equal(1, registry.ProfileVersion);
+        Assert.Equal("roles.workloads.registry-service.v1", registry.RoleId);
+        Assert.DoesNotContain('*', registry.RoleId);
+        Assert.DoesNotContain("platform.owner", registry.RoleId, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
-            ["auth-service", "contact-service", "search-service"],
+            ["auth-service", "contact-service", "search-service", "registry-service"],
             LocalServiceIdentityProfileCatalog.All.Select(profile => profile.WorkloadId).ToArray());
     }
 
@@ -170,7 +189,8 @@ public sealed class LocalServiceIdentitySeedTests
                 ["AspireLocalServiceIdentity:Enabled"] = enabled.ToString(),
                 ["AspireLocalServiceIdentity:Profiles:auth-service:SecretHash"] = hash,
                 ["AspireLocalServiceIdentity:Profiles:contact-service:SecretHash"] = hash,
-                ["AspireLocalServiceIdentity:Profiles:search-service:SecretHash"] = hash
+                ["AspireLocalServiceIdentity:Profiles:search-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:registry-service:SecretHash"] = hash
             })
             .Build();
 }
