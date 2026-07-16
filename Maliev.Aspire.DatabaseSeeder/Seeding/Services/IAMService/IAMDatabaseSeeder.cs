@@ -1,9 +1,12 @@
 using Maliev.Aspire.DatabaseSeeder.Seeding.Core;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
+using Maliev.IAMService.Application.DTOs.Requests;
+using Maliev.IAMService.Application.Workloads;
 using Maliev.IAMService.Domain.Entities;
 using Maliev.IAMService.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Maliev.Aspire.DatabaseSeeder.Seeding.Services.IAMService;
@@ -16,7 +19,11 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
     private const string PlatformOwnerRoleId = "roles.platform.owner";
     private const string AutomationRoleName = "Aspire Automation";
     private const string LimitedRoleName = "Aspire Limited Employee";
+    private const string LocalProvisionerEmail = "aspire-workload-provisioner@local.maliev.invalid";
+    private const string LocalProvisionerRoleName = "Aspire Workload Provisioner";
     private readonly IConfiguration _configuration;
+    private readonly IHostEnvironment _hostEnvironment;
+    private readonly IWorkloadPrincipalProvisioner _workloadPrincipalProvisioner;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IAMDatabaseSeeder"/> class.
@@ -24,22 +31,50 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
     /// <param name="context">The IAM database context.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="configuration">Application configuration.</param>
+    /// <param name="hostEnvironment">Current host environment.</param>
+    /// <param name="workloadPrincipalProvisioner">Canonical workload provisioner.</param>
     public IAMDatabaseSeeder(
         IAMDbContext context,
         ILogger<IAMDatabaseSeeder> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IHostEnvironment hostEnvironment,
+        IWorkloadPrincipalProvisioner workloadPrincipalProvisioner)
         : base(context, logger)
     {
         _configuration = configuration;
+        _hostEnvironment = hostEnvironment;
+        _workloadPrincipalProvisioner = workloadPrincipalProvisioner;
     }
 
     /// <inheritdoc />
     protected override async Task SeedAsync(CancellationToken cancellationToken = default)
     {
+        var localIdentityEnabled = LocalServiceIdentitySeedOptions.IsEnabled(
+            _configuration,
+            _hostEnvironment.EnvironmentName);
+        if (localIdentityEnabled)
+        {
+            await EnsureLocalWorkloadProvisionerAsync(cancellationToken);
+            await _workloadPrincipalProvisioner.ProvisionAsync(
+                LocalServiceIdentitySeedOptions.WorkloadId,
+                new ProvisionWorkloadPrincipalRequest
+                {
+                    ProfileVersion = LocalServiceIdentitySeedOptions.ProfileVersion,
+                    OperationId = LocalServiceIdentitySeedOptions.ProvisionOperationId
+                },
+                LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+                cancellationToken);
+
+            Logger.LogInformation(
+                "Provisioned exact Aspire-local IAM workload profile {WorkloadId} v{ProfileVersion}.",
+                LocalServiceIdentitySeedOptions.WorkloadId,
+                LocalServiceIdentitySeedOptions.ProfileVersion);
+        }
+
         var options = AspireTestAdminSeedOptions.FromConfiguration(_configuration);
         if (!options.Enabled)
         {
-            Logger.LogInformation("Aspire local test administrator seeding is disabled. Skipping IAM seed.");
+            Logger.LogInformation("Aspire local test administrator seeding is disabled.");
             return;
         }
 
@@ -56,6 +91,177 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
             "Successfully seeded Aspire local IAM browser principals {AdminEmail} and {LimitedEmail}.",
             options.Email,
             options.LimitedEmail);
+    }
+
+    private async Task EnsureLocalWorkloadProvisionerAsync(CancellationToken cancellationToken)
+    {
+        await EnsureLocalPermissionAsync(
+            LocalServiceIdentitySeedOptions.ProvisionPermission,
+            "Allows the Aspire-local bootstrap actor to provision declared workload profiles.",
+            cancellationToken);
+        await EnsureLocalPermissionAsync(
+            LocalServiceIdentitySeedOptions.WorkloadPermission,
+            "Allows AuthService to resolve authoritative IAM permissions during service login.",
+            cancellationToken);
+
+        var conflictingEmail = await Context.Principals
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                principal => principal.Email == LocalProvisionerEmail &&
+                    principal.PrincipalId != LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+                cancellationToken);
+        if (conflictingEmail is not null)
+        {
+            throw new InvalidOperationException(
+                "The Aspire-local workload provisioner email belongs to another principal.");
+        }
+
+        var actor = await Context.Principals.SingleOrDefaultAsync(
+            principal => principal.PrincipalId == LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+            cancellationToken);
+        if (actor is not null &&
+            (!string.Equals(actor.PrincipalType, "user", StringComparison.Ordinal) ||
+             actor.WorkloadId is not null ||
+             !string.Equals(actor.Email, LocalProvisionerEmail, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                "The Aspire-local workload provisioner principal has incompatible identity state.");
+        }
+
+        var role = await Context.Roles
+            .Include(candidate => candidate.RolePermissions)
+            .SingleOrDefaultAsync(
+                candidate => candidate.RoleId == LocalServiceIdentitySeedOptions.ProvisionerRoleId,
+                cancellationToken);
+        if (role is not null &&
+            (!role.IsCustom ||
+             !string.Equals(role.ServiceName, "aspire", StringComparison.Ordinal) ||
+             role.RolePermissions.Count != 1 ||
+             !string.Equals(
+                 role.RolePermissions.Single().PermissionId,
+                 LocalServiceIdentitySeedOptions.ProvisionPermission,
+                 StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                "The Aspire-local workload provisioner role has authority outside its exact contract.");
+        }
+
+        if (await Context.PrincipalPermissionBindings.AnyAsync(
+                binding => binding.PrincipalId == LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+                cancellationToken) ||
+            await Context.ServiceAccountApiKeys.AnyAsync(
+                key => key.PrincipalId == LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+                cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "The Aspire-local workload provisioner has unexpected direct authority or API keys.");
+        }
+
+        var bindings = await Context.PrincipalRoleBindings
+            .Where(binding => binding.PrincipalId == LocalServiceIdentitySeedOptions.ProvisionerPrincipalId)
+            .ToListAsync(cancellationToken);
+        if (bindings.Count > 0 &&
+            (bindings.Count != 1 ||
+             !string.Equals(
+                 bindings[0].RoleId,
+                 LocalServiceIdentitySeedOptions.ProvisionerRoleId,
+                 StringComparison.Ordinal) ||
+             bindings[0].ResourcePath is not null ||
+             bindings[0].ExpiresAt is not null))
+        {
+            throw new InvalidOperationException(
+                "The Aspire-local workload provisioner binding has authority outside its exact contract.");
+        }
+
+        var now = DateTime.UtcNow;
+        if (actor is null)
+        {
+            actor = new Principal
+            {
+                PrincipalId = LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+                PrincipalType = "user",
+                Email = LocalProvisionerEmail,
+                DisplayName = LocalProvisionerRoleName,
+                IsActive = true,
+                LinkedService = "AspireLocalIdentitySeeder",
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            Context.Principals.Add(actor);
+        }
+        else
+        {
+            actor.DisplayName = LocalProvisionerRoleName;
+            actor.IsActive = true;
+            actor.LinkedService = "AspireLocalIdentitySeeder";
+            actor.UpdatedAt = now;
+        }
+
+        if (role is null)
+        {
+            role = new Role
+            {
+                RoleId = LocalServiceIdentitySeedOptions.ProvisionerRoleId,
+                RoleName = LocalProvisionerRoleName,
+                ServiceName = "aspire",
+                Description = "Local-only role with the single workload provisioning permission.",
+                IsCustom = true,
+                CreatedBy = LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+                CreatedAt = now,
+                UpdatedAt = now,
+                RolePermissions =
+                [
+                    new RolePermission
+                    {
+                        RoleId = LocalServiceIdentitySeedOptions.ProvisionerRoleId,
+                        PermissionId = LocalServiceIdentitySeedOptions.ProvisionPermission,
+                        AddedAt = now
+                    }
+                ]
+            };
+            Context.Roles.Add(role);
+        }
+
+        if (bindings.Count == 0)
+        {
+            Context.PrincipalRoleBindings.Add(new PrincipalRoleBinding
+            {
+                BindingId = Guid.NewGuid(),
+                PrincipalId = LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+                RoleId = LocalServiceIdentitySeedOptions.ProvisionerRoleId,
+                ResourcePath = null,
+                GrantedBy = LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+                GrantedAt = now,
+                ExpiresAt = null
+            });
+        }
+
+        await Context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task EnsureLocalPermissionAsync(
+        string permissionId,
+        string description,
+        CancellationToken cancellationToken)
+    {
+        if (await Context.Permissions.AnyAsync(
+                permission => permission.PermissionId == permissionId,
+                cancellationToken))
+        {
+            return;
+        }
+
+        var parts = permissionId.Split('.');
+        Context.Permissions.Add(new Permission
+        {
+            PermissionId = permissionId,
+            ServiceName = parts[0],
+            ResourceType = parts[1],
+            Action = parts[2],
+            Description = description,
+            RegisteredAt = DateTime.UtcNow
+        });
+        await Context.SaveChangesAsync(cancellationToken);
     }
 
     private async Task EnsurePrincipalAsync(
