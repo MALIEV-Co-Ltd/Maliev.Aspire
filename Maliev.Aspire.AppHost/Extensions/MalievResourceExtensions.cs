@@ -11,6 +11,23 @@ namespace Maliev.Aspire.AppHost.Extensions;
 public static class MalievResourceExtensions
 {
     /// <summary>
+    /// Removes private-key and HMAC signing material from a verifier-only workload resource.
+    /// </summary>
+    /// <param name="resource">Verifier-only workload resource.</param>
+    /// <returns>The same resource builder.</returns>
+    public static IResourceBuilder<TResource> WithoutJwtSigningMaterial<TResource>(
+        this IResourceBuilder<TResource> resource)
+        where TResource : IResourceWithEnvironment
+    {
+        resource.WithEnvironment(context =>
+        {
+            context.EnvironmentVariables.Remove("Jwt__PrivateKey");
+            context.EnvironmentVariables.Remove("Jwt__SecurityKey");
+        });
+        return resource;
+    }
+
+    /// <summary>
     /// Adds a dashboard HTTP health check outside Testing. Aspire system tests use targeted
     /// fixture liveness waits to avoid probing every local service concurrently.
     /// </summary>

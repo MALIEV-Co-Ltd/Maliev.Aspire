@@ -55,20 +55,23 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
         if (localIdentityEnabled)
         {
             await EnsureLocalWorkloadProvisionerAsync(cancellationToken);
-            await _workloadPrincipalProvisioner.ProvisionAsync(
-                LocalServiceIdentitySeedOptions.WorkloadId,
-                new ProvisionWorkloadPrincipalRequest
-                {
-                    ProfileVersion = LocalServiceIdentitySeedOptions.ProfileVersion,
-                    OperationId = LocalServiceIdentitySeedOptions.ProvisionOperationId
-                },
-                LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
-                cancellationToken);
+            foreach (var profile in LocalServiceIdentityProfileCatalog.All)
+            {
+                await _workloadPrincipalProvisioner.ProvisionAsync(
+                    profile.WorkloadId,
+                    new ProvisionWorkloadPrincipalRequest
+                    {
+                        ProfileVersion = profile.ProfileVersion,
+                        OperationId = profile.ProvisionOperationId
+                    },
+                    LocalServiceIdentitySeedOptions.ProvisionerPrincipalId,
+                    cancellationToken);
 
-            Logger.LogInformation(
-                "Provisioned exact Aspire-local IAM workload profile {WorkloadId} v{ProfileVersion}.",
-                LocalServiceIdentitySeedOptions.WorkloadId,
-                LocalServiceIdentitySeedOptions.ProfileVersion);
+                Logger.LogInformation(
+                    "Provisioned exact Aspire-local IAM workload profile {WorkloadId} v{ProfileVersion}.",
+                    profile.WorkloadId,
+                    profile.ProfileVersion);
+            }
         }
 
         var options = AspireTestAdminSeedOptions.FromConfiguration(_configuration);
@@ -99,10 +102,22 @@ public class IAMDatabaseSeeder : DatabaseSeeder<IAMDbContext>
             LocalServiceIdentitySeedOptions.ProvisionPermission,
             "Allows the Aspire-local bootstrap actor to provision declared workload profiles.",
             cancellationToken);
-        await EnsureLocalPermissionAsync(
-            LocalServiceIdentitySeedOptions.WorkloadPermission,
-            "Allows AuthService to resolve authoritative IAM permissions during service login.",
-            cancellationToken);
+        foreach (var localProfile in LocalServiceIdentityProfileCatalog.All)
+        {
+            var profile = WorkloadAccessProfileCatalog.Default.Get(
+                localProfile.WorkloadId,
+                localProfile.ProfileVersion);
+            var permissionIds = profile.Permissions
+                .Concat(profile.AdditionalGrants.SelectMany(grant => grant.Permissions))
+                .Distinct(StringComparer.Ordinal);
+            foreach (var permissionId in permissionIds)
+            {
+                await EnsureLocalPermissionAsync(
+                    permissionId,
+                    $"Aspire-local workload permission for {localProfile.WorkloadId}.",
+                    cancellationToken);
+            }
+        }
 
         var conflictingEmail = await Context.Principals
             .AsNoTracking()

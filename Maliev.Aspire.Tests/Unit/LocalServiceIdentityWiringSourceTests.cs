@@ -43,24 +43,48 @@ public sealed class LocalServiceIdentityWiringSourceTests
     {
         var source = File.ReadAllText(FindSource("Maliev.Aspire.AppHost", "AppHost.cs"));
 
-        Assert.Contains("LocalServiceIdentitySeedMaterial.Create()", source, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentitySeedMaterial.CreateCatalog()", source, StringComparison.Ordinal);
         Assert.Contains("IsLocalEnvironment(environmentName)", source, StringComparison.Ordinal);
         Assert.Contains("\"ServiceAuthentication__ClientId\"", source, StringComparison.Ordinal);
         Assert.Contains("\"ServiceAuthentication__ClientSecret\"", source, StringComparison.Ordinal);
-        Assert.Contains("LocalServiceIdentitySeedOptions.ClientId", source, StringComparison.Ordinal);
-        Assert.Contains("localIdentitySecret", source, StringComparison.Ordinal);
-        Assert.Contains("\"AspireLocalServiceIdentity__SecretHash\"", source, StringComparison.Ordinal);
-        Assert.Contains("localIdentityMaterial.SecretHash", source, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.AuthService.ClientId", source, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.ContactService.ClientId", source, StringComparison.Ordinal);
+        Assert.Contains("localIdentitySecrets", source, StringComparison.Ordinal);
+        Assert.Contains("AspireLocalServiceIdentity__Profiles__auth-service__SecretHash", source, StringComparison.Ordinal);
+        Assert.Contains("AspireLocalServiceIdentity__Profiles__contact-service__SecretHash", source, StringComparison.Ordinal);
+        Assert.Contains("localIdentitySecretHashes", source, StringComparison.Ordinal);
 
-        var rawSecretEnvironmentOccurrences = CountOccurrences(
+        Assert.Contains("AuthServiceLocalClientSecret", source, StringComparison.Ordinal);
+        Assert.Contains("ContactServiceLocalClientSecret", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "config.LocalServiceIdentitySecrets[",
             source,
-            "\"ServiceAuthentication__ClientSecret\"");
-        Assert.Equal(2, rawSecretEnvironmentOccurrences);
+            StringComparison.Ordinal);
 
         var verifierEnvironmentOccurrences = CountOccurrences(
             source,
-            "\"AspireLocalServiceIdentity__SecretHash\"");
-        Assert.Equal(2, verifierEnvironmentOccurrences);
+            "__SecretHash\"");
+        Assert.Equal(4, verifierEnvironmentOccurrences);
+    }
+
+    /// <summary>
+    /// ContactService must exchange its own credential with AuthService and retain verifier-only JWT settings.
+    /// </summary>
+    [Fact]
+    public void AppHost_WiresContactToAuthAndRemovesLocalSigningMaterial()
+    {
+        var source = File.ReadAllText(FindSource("Maliev.Aspire.AppHost", "AppHost.cs"));
+
+        var contactStart = source.IndexOf("var contactService =", StringComparison.Ordinal);
+        var currencyStart = source.IndexOf("var currencyService =", contactStart, StringComparison.Ordinal);
+        Assert.True(contactStart >= 0 && currencyStart > contactStart);
+        var contactBlock = source[contactStart..currencyStart];
+        Assert.Contains("WithReference(authService)", contactBlock, StringComparison.Ordinal);
+        Assert.Contains("WaitFor(authService)", contactBlock, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.ContactService.ClientId", contactBlock, StringComparison.Ordinal);
+        Assert.Contains("WithoutJwtSigningMaterial()", contactBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("Jwt__PrivateKey", contactBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("Jwt__SecurityKey", contactBlock, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -118,11 +142,11 @@ public sealed class LocalServiceIdentityWiringSourceTests
             "AuthService",
             "AuthServiceIdentityDatabaseSeeder.cs"));
 
-        Assert.Contains("options.SecretHash", source, StringComparison.Ordinal);
+        Assert.Contains("options.GetSecretHash(profile)", source, StringComparison.Ordinal);
         Assert.Contains("ServiceCredentialVersionStatus.Active", source, StringComparison.Ordinal);
         Assert.Contains("Context.ServiceCredentialVersions", source, StringComparison.Ordinal);
-        Assert.Contains("LocalServiceIdentitySeedOptions.WorkloadPermission", source, StringComparison.Ordinal);
-        Assert.Contains("LocalServiceIdentitySeedOptions.RoleId", source, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.All", source, StringComparison.Ordinal);
+        Assert.Contains("WorkloadAccessProfileCatalog.Default.Get", source, StringComparison.Ordinal);
         Assert.Contains("IsolationLevel.Serializable", source, StringComparison.Ordinal);
         Assert.Contains("pg_advisory_xact_lock", source, StringComparison.Ordinal);
         Assert.DoesNotContain("RawSecret", source, StringComparison.Ordinal);
