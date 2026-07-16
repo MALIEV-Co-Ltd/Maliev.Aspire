@@ -45,10 +45,11 @@ public sealed class LocalServiceIdentitySeedTests
         var search = catalog["search-service"];
         var registry = catalog["registry-service"];
         var country = catalog["country-service"];
+        var currency = catalog["currency-service"];
         Assert.NotEqual(auth.RawSecret, contact.RawSecret);
         Assert.NotEqual(auth.SecretHash, contact.SecretHash);
-        Assert.Equal(5, new[] { auth, contact, search, registry, country }.Select(item => item.RawSecret).Distinct().Count());
-        Assert.Equal(5, new[] { auth, contact, search, registry, country }.Select(item => item.SecretHash).Distinct().Count());
+        Assert.Equal(6, new[] { auth, contact, search, registry, country, currency }.Select(item => item.RawSecret).Distinct().Count());
+        Assert.Equal(6, new[] { auth, contact, search, registry, country, currency }.Select(item => item.SecretHash).Distinct().Count());
         Assert.Throws<NotSupportedException>(() =>
         {
             ((IDictionary<string, LocalServiceIdentitySeedMaterial>)catalog).Add(
@@ -144,8 +145,26 @@ public sealed class LocalServiceIdentitySeedTests
         Assert.DoesNotContain('*', country.RoleId);
         Assert.DoesNotContain("platform.owner", country.RoleId, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
-            ["auth-service", "contact-service", "search-service", "registry-service", "country-service"],
+            ["auth-service", "contact-service", "search-service", "registry-service", "country-service", "currency-service"],
             LocalServiceIdentityProfileCatalog.All.Select(profile => profile.WorkloadId).ToArray());
+    }
+
+    /// <summary>
+    /// CurrencyService uses the deterministic IAM profile whose sole authority is live permission checking.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactCurrencyServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var currency = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "currency-service");
+
+        Assert.Equal("service-currency-service", currency.ClientId);
+        Assert.Equal("CurrencyService", currency.ServiceName);
+        Assert.Equal(1, currency.ProfileVersion);
+        Assert.Equal("roles.workloads.currency-service.v1", currency.RoleId);
+        Assert.DoesNotContain('*', currency.RoleId);
+        Assert.DoesNotContain("platform.owner", currency.RoleId, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -210,7 +229,8 @@ public sealed class LocalServiceIdentitySeedTests
                 ["AspireLocalServiceIdentity:Profiles:contact-service:SecretHash"] = hash,
                 ["AspireLocalServiceIdentity:Profiles:search-service:SecretHash"] = hash,
                 ["AspireLocalServiceIdentity:Profiles:registry-service:SecretHash"] = hash,
-                ["AspireLocalServiceIdentity:Profiles:country-service:SecretHash"] = hash
+                ["AspireLocalServiceIdentity:Profiles:country-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:currency-service:SecretHash"] = hash
             })
             .Build();
 }

@@ -74,9 +74,18 @@ public static class LocalServiceIdentityProfileCatalog
         "roles.workloads.country-service.v1",
         new Guid("8988ee04-d399-4bd5-aea3-2735ac869b01"));
 
+    /// <summary>Gets the CurrencyService identity.</summary>
+    public static LocalServiceIdentityProfile CurrencyService { get; } = new(
+        "currency-service",
+        "service-currency-service",
+        "CurrencyService",
+        1,
+        "roles.workloads.currency-service.v1",
+        new Guid("586657c2-5a03-4745-bdd2-ffc8180a0cf2"));
+
     /// <summary>Gets all profiles in deterministic provisioning order.</summary>
     public static IReadOnlyList<LocalServiceIdentityProfile> All { get; } =
-        Array.AsReadOnly([AuthService, ContactService, SearchService, RegistryService, CountryService]);
+        Array.AsReadOnly([AuthService, ContactService, SearchService, RegistryService, CountryService, CurrencyService]);
 }
 
 /// <summary>
