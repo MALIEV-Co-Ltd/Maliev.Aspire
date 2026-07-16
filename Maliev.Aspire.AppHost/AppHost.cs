@@ -137,10 +137,14 @@ static partial class Program
             LocalServiceIdentityProfileCatalog.AuthService.WorkloadId];
         var contactIdentityMaterial = localIdentityMaterials[
             LocalServiceIdentityProfileCatalog.ContactService.WorkloadId];
+        var searchIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.SearchService.WorkloadId];
         var localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = authIdentityMaterial.RawSecret;
         var contactIdentitySecret = builder.AddParameter("ContactServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:ContactServiceLocalClientSecret"] = contactIdentityMaterial.RawSecret;
+        var searchIdentitySecret = builder.AddParameter("SearchServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:SearchServiceLocalClientSecret"] = searchIdentityMaterial.RawSecret;
         var capabilityMaterial = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
         var capabilityPrivateKey = builder.AddParameter(
             "AuthTokenIssuanceCapabilityPrivateKey",
@@ -251,6 +255,9 @@ static partial class Program
                 .WithEnvironment(
                     "AspireLocalServiceIdentity__Profiles__contact-service__SecretHash",
                     contactIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__search-service__SecretHash",
+                    searchIdentityMaterial.SecretHash)
                 .WithReference(iamDatabase, "IamDbContext")
                 .WaitFor(iamService),
             runAutomatically: true);
@@ -817,6 +824,10 @@ static partial class Program
                         "AspireLocalServiceIdentity__Profiles__contact-service__SecretHash",
                         config.LocalServiceIdentitySecretHashes[
                             LocalServiceIdentityProfileCatalog.ContactService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__search-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.SearchService.WorkloadId])
                     .WithReference(databases.IAM, "IamDbContext")
                     .WaitFor(iamService),
                 runAutomatically: true);

@@ -137,6 +137,63 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     }
 
     /// <summary>
+    /// SearchService credentials must be isolated from every other local workload and issue only
+    /// the canonical live-permission-check authority before Search runtime wiring is enabled.
+    /// </summary>
+    [Fact]
+    public async Task SearchServiceCredential_HostedAuthIamBoundary_IsolatedAndBounded()
+    {
+        var authSecret = await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret");
+        var contactSecret = await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret");
+        var searchSecret = await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret");
+        using var authClient = await fixture.CreateLiveAuthClientAsync();
+
+        var credentials = new[]
+        {
+            (ClientId: "service-auth-service", Secret: authSecret),
+            (ClientId: "service-contact-service", Secret: contactSecret),
+            (ClientId: "service-search-service", Secret: searchSecret)
+        };
+        foreach (var credential in credentials)
+        {
+            foreach (var crossedSecret in credentials
+                         .Where(candidate => candidate.ClientId != credential.ClientId)
+                         .Select(candidate => candidate.Secret))
+            {
+                using var rejected = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+                {
+                    client_id = credential.ClientId,
+                    client_secret = crossedSecret
+                });
+                Assert.Equal(HttpStatusCode.Unauthorized, rejected.StatusCode);
+            }
+        }
+
+        using var login = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-search-service",
+            client_secret = searchSecret
+        });
+        var loginBody = await login.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        using var loginJson = JsonDocument.Parse(loginBody);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(
+            loginJson.RootElement.GetProperty("access_token").GetString());
+
+        Assert.Equal("service-search-service", token.Claims.Single(claim => claim.Type == "client_id").Value);
+        Assert.Equal("SearchService", token.Claims.Single(claim => claim.Type == "service_name").Value);
+        Assert.Equal(
+            ["iam.auth.check-permission"],
+            token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        Assert.Equal(
+            ["roles.workloads.search-service.v1"],
+            token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
+        Assert.DoesNotContain(token.Claims, claim => claim.Value == "*");
+        Assert.DoesNotContain(token.Claims, claim =>
+            claim.Value.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// The evaluated bounded model must isolate capability material and keep live-check credentials independent.
     /// </summary>
     [Fact]
@@ -145,6 +202,10 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         var model = fixture.GetModel();
         var authSecret = await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret");
         var contactSecret = await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret");
+        var searchSecret = await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret");
+        Assert.DoesNotContain(
+            model.Resources,
+            resource => string.Equals(resource.Name, "SearchService", StringComparison.Ordinal));
         var authSecretBytes = Encoding.UTF8.GetBytes(authSecret);
         var authDerivedVerifierDigest = SHA256.HashData(authSecretBytes);
         var authDerivedVerifier = Convert.ToBase64String(authDerivedVerifierDigest);
@@ -220,6 +281,10 @@ public sealed class TokenIssuanceCapabilitySystemTests(
             {
                 Assert.DoesNotContain(environment, pair => Equals(pair.Value, contactSecret));
             }
+
+            // Search runtime is intentionally absent until its central-exchange wiring lands.
+            // Its raw credential must therefore remain unprojected to every process resource.
+            Assert.DoesNotContain(environment, pair => Equals(pair.Value, searchSecret));
         }
 
         Assert.NotNull(iamVerifier);
