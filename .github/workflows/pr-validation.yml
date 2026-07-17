@@ -15,6 +15,7 @@ on:
       - 'Maliev.Aspire.DatabaseSeeder/Seeding/Services/IAMService/IAMDatabaseSeeder.cs'
       - 'Maliev.Aspire.LocalIdentity.Tests/**'
       - 'Maliev.Aspire.Tests/**'
+      - '.github/scripts/resolve-servicedefaults-version.sh'
       - '.github/workflows/**'
       - '*.slnx'
 
