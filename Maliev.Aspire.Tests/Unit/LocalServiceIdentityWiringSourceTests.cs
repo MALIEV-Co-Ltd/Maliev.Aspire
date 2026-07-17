@@ -52,6 +52,7 @@ public sealed class LocalServiceIdentityWiringSourceTests
         Assert.Contains("LocalServiceIdentityProfileCatalog.AccountingService.ClientId", source, StringComparison.Ordinal);
         Assert.Contains("LocalServiceIdentityProfileCatalog.PricingService.ClientId", source, StringComparison.Ordinal);
         Assert.Contains("LocalServiceIdentityProfileCatalog.MaterialService.ClientId", source, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.LifecycleService.ClientId", source, StringComparison.Ordinal);
         Assert.Contains("localIdentitySecrets", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__auth-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__contact-service__SecretHash", source, StringComparison.Ordinal);
@@ -62,6 +63,7 @@ public sealed class LocalServiceIdentityWiringSourceTests
         Assert.Contains("AspireLocalServiceIdentity__Profiles__accounting-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__pricing-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__material-service__SecretHash", source, StringComparison.Ordinal);
+        Assert.Contains("AspireLocalServiceIdentity__Profiles__lifecycle-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("localIdentitySecretHashes", source, StringComparison.Ordinal);
 
         Assert.Contains("AuthServiceLocalClientSecret", source, StringComparison.Ordinal);
@@ -74,7 +76,7 @@ public sealed class LocalServiceIdentityWiringSourceTests
         var verifierEnvironmentOccurrences = CountOccurrences(
             source,
             "__SecretHash\"");
-        Assert.Equal(18, verifierEnvironmentOccurrences);
+        Assert.Equal(20, verifierEnvironmentOccurrences);
     }
 
     /// <summary>
@@ -169,6 +171,34 @@ public sealed class LocalServiceIdentityWiringSourceTests
         Assert.Contains("materialService = materialService", supplierBlock, StringComparison.Ordinal);
         Assert.Contains("WithReference(supplierService)", supplierBlock, StringComparison.Ordinal);
         Assert.Contains("WaitFor(supplierService)", supplierBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// LifecycleService must wait for Auth, exchange only its own local credential, and retain verifier-only JWT settings.
+    /// </summary>
+    [Fact]
+    public void AppHost_WiresLifecycleToAuthWithoutLocalSigningMaterial()
+    {
+        var source = File.ReadAllText(FindSource("Maliev.Aspire.AppHost", "AppHost.cs"));
+
+        var lifecycleStart = source.IndexOf("var lifecycleService =", StringComparison.Ordinal);
+        var performanceStart = source.IndexOf("var performanceService =", lifecycleStart, StringComparison.Ordinal);
+        Assert.True(lifecycleStart >= 0 && performanceStart > lifecycleStart);
+        var lifecycleBlock = source[lifecycleStart..performanceStart];
+        Assert.Contains("WithReference(authService)", lifecycleBlock, StringComparison.Ordinal);
+        Assert.Contains("WaitFor(authService)", lifecycleBlock, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.LifecycleService.ClientId", lifecycleBlock, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.LifecycleService.WorkloadId", lifecycleBlock, StringComparison.Ordinal);
+        Assert.Contains("WithoutJwtSigningMaterial()", lifecycleBlock, StringComparison.Ordinal);
+        Assert.Contains(
+            "if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)",
+            lifecycleBlock,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            1,
+            CountOccurrences(source, "LocalServiceIdentityProfileCatalog.LifecycleService.ClientId"));
+        Assert.DoesNotContain("Jwt__PrivateKey", lifecycleBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("Jwt__SecurityKey", lifecycleBlock, StringComparison.Ordinal);
     }
 
     /// <summary>

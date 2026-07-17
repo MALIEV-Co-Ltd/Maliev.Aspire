@@ -151,6 +151,8 @@ static partial class Program
             LocalServiceIdentityProfileCatalog.PricingService.WorkloadId];
         var materialIdentityMaterial = localIdentityMaterials[
             LocalServiceIdentityProfileCatalog.MaterialService.WorkloadId];
+        var lifecycleIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.LifecycleService.WorkloadId];
         var localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = authIdentityMaterial.RawSecret;
         var contactIdentitySecret = builder.AddParameter("ContactServiceLocalClientSecret", secret: true);
@@ -169,6 +171,8 @@ static partial class Program
         builder.Configuration["Parameters:PricingServiceLocalClientSecret"] = pricingIdentityMaterial.RawSecret;
         var materialIdentitySecret = builder.AddParameter("MaterialServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:MaterialServiceLocalClientSecret"] = materialIdentityMaterial.RawSecret;
+        var lifecycleIdentitySecret = builder.AddParameter("LifecycleServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:LifecycleServiceLocalClientSecret"] = lifecycleIdentityMaterial.RawSecret;
         var capabilityMaterial = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
         var capabilityPrivateKey = builder.AddParameter(
             "AuthTokenIssuanceCapabilityPrivateKey",
@@ -300,6 +304,9 @@ static partial class Program
                 .WithEnvironment(
                     "AspireLocalServiceIdentity__Profiles__material-service__SecretHash",
                     materialIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__lifecycle-service__SecretHash",
+                    lifecycleIdentityMaterial.SecretHash)
                 .WithReference(iamDatabase, "IamDbContext")
                 .WaitFor(iamService),
             runAutomatically: true);
@@ -894,6 +901,10 @@ static partial class Program
                         "AspireLocalServiceIdentity__Profiles__material-service__SecretHash",
                         config.LocalServiceIdentitySecretHashes[
                             LocalServiceIdentityProfileCatalog.MaterialService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__lifecycle-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.LifecycleService.WorkloadId])
                     .WithReference(databases.IAM, "IamDbContext")
                     .WaitFor(iamService),
                 runAutomatically: true);
@@ -1028,13 +1039,28 @@ static partial class Program
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
+                .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
                 .WaitFor(iamService)
                 .WithTestingSafeHttpHealthCheck("/lifecycle/aspire-liveness"),
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .WithoutJwtSigningMaterial();
+
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            lifecycleService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.LifecycleService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.LifecycleService.WorkloadId]);
+        }
 
         var performanceService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PerformanceService_Api>("PerformanceService")
