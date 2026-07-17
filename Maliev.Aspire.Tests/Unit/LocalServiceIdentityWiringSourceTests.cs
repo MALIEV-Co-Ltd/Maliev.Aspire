@@ -50,6 +50,7 @@ public sealed class LocalServiceIdentityWiringSourceTests
         Assert.Contains("LocalServiceIdentityProfileCatalog.AuthService.ClientId", source, StringComparison.Ordinal);
         Assert.Contains("LocalServiceIdentityProfileCatalog.ContactService.ClientId", source, StringComparison.Ordinal);
         Assert.Contains("LocalServiceIdentityProfileCatalog.AccountingService.ClientId", source, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.PricingService.ClientId", source, StringComparison.Ordinal);
         Assert.Contains("localIdentitySecrets", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__auth-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__contact-service__SecretHash", source, StringComparison.Ordinal);
@@ -58,6 +59,7 @@ public sealed class LocalServiceIdentityWiringSourceTests
         Assert.Contains("AspireLocalServiceIdentity__Profiles__country-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__currency-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("AspireLocalServiceIdentity__Profiles__accounting-service__SecretHash", source, StringComparison.Ordinal);
+        Assert.Contains("AspireLocalServiceIdentity__Profiles__pricing-service__SecretHash", source, StringComparison.Ordinal);
         Assert.Contains("localIdentitySecretHashes", source, StringComparison.Ordinal);
 
         Assert.Contains("AuthServiceLocalClientSecret", source, StringComparison.Ordinal);
@@ -70,7 +72,7 @@ public sealed class LocalServiceIdentityWiringSourceTests
         var verifierEnvironmentOccurrences = CountOccurrences(
             source,
             "__SecretHash\"");
-        Assert.Equal(14, verifierEnvironmentOccurrences);
+        Assert.Equal(16, verifierEnvironmentOccurrences);
     }
 
     /// <summary>
@@ -112,6 +114,27 @@ public sealed class LocalServiceIdentityWiringSourceTests
         Assert.Contains("WithoutJwtSigningMaterial()", accountingBlock, StringComparison.Ordinal);
         Assert.DoesNotContain("Jwt__PrivateKey", accountingBlock, StringComparison.Ordinal);
         Assert.DoesNotContain("Jwt__SecurityKey", accountingBlock, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// PricingService must exchange its own credential with AuthService and retain verifier-only JWT settings.
+    /// </summary>
+    [Fact]
+    public void AppHost_WiresPricingToAuthAndRemovesLocalSigningMaterial()
+    {
+        var source = File.ReadAllText(FindSource("Maliev.Aspire.AppHost", "AppHost.cs"));
+
+        var pricingStart = source.IndexOf("var pricingService =", StringComparison.Ordinal);
+        var orderStart = source.IndexOf("var orderService =", pricingStart, StringComparison.Ordinal);
+        Assert.True(pricingStart >= 0 && orderStart > pricingStart);
+        var pricingBlock = source[pricingStart..orderStart];
+        Assert.Contains("WithReference(authService)", pricingBlock, StringComparison.Ordinal);
+        Assert.Contains("WaitFor(authService)", pricingBlock, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.PricingService.ClientId", pricingBlock, StringComparison.Ordinal);
+        Assert.Contains("LocalServiceIdentityProfileCatalog.PricingService.WorkloadId", pricingBlock, StringComparison.Ordinal);
+        Assert.Contains("WithoutJwtSigningMaterial()", pricingBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("Jwt__PrivateKey", pricingBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("Jwt__SecurityKey", pricingBlock, StringComparison.Ordinal);
     }
 
     /// <summary>

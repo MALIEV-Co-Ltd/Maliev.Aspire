@@ -147,6 +147,8 @@ static partial class Program
             LocalServiceIdentityProfileCatalog.CurrencyService.WorkloadId];
         var accountingIdentityMaterial = localIdentityMaterials[
             LocalServiceIdentityProfileCatalog.AccountingService.WorkloadId];
+        var pricingIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.PricingService.WorkloadId];
         var localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = authIdentityMaterial.RawSecret;
         var contactIdentitySecret = builder.AddParameter("ContactServiceLocalClientSecret", secret: true);
@@ -161,6 +163,8 @@ static partial class Program
         builder.Configuration["Parameters:CurrencyServiceLocalClientSecret"] = currencyIdentityMaterial.RawSecret;
         var accountingIdentitySecret = builder.AddParameter("AccountingServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:AccountingServiceLocalClientSecret"] = accountingIdentityMaterial.RawSecret;
+        var pricingIdentitySecret = builder.AddParameter("PricingServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:PricingServiceLocalClientSecret"] = pricingIdentityMaterial.RawSecret;
         var capabilityMaterial = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
         var capabilityPrivateKey = builder.AddParameter(
             "AuthTokenIssuanceCapabilityPrivateKey",
@@ -286,6 +290,9 @@ static partial class Program
                 .WithEnvironment(
                     "AspireLocalServiceIdentity__Profiles__accounting-service__SecretHash",
                     accountingIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__pricing-service__SecretHash",
+                    pricingIdentityMaterial.SecretHash)
                 .WithReference(iamDatabase, "IamDbContext")
                 .WaitFor(iamService),
             runAutomatically: true);
@@ -872,6 +879,10 @@ static partial class Program
                         "AspireLocalServiceIdentity__Profiles__accounting-service__SecretHash",
                         config.LocalServiceIdentitySecretHashes[
                             LocalServiceIdentityProfileCatalog.AccountingService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__pricing-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.PricingService.WorkloadId])
                     .WithReference(databases.IAM, "IamDbContext")
                     .WaitFor(iamService),
                 runAutomatically: true);
@@ -1137,13 +1148,28 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(materialService)
                 .WithReference(currencyService)
+                .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
                 .WaitFor(iamService)
                 .WithTestingSafeHttpHealthCheck("/pricing/aspire-liveness"),
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .WithoutJwtSigningMaterial();
+
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            pricingService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.PricingService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.PricingService.WorkloadId]);
+        }
 
         var orderService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_OrderService_Api>("OrderService")
