@@ -10,16 +10,26 @@ on:
       - 'Maliev.Aspire.ServiceDefaults/**'
       - 'Maliev.Aspire.ServiceDefaults.Tests/**'
       - 'Maliev.Aspire.AppHost/**'
+      - 'Maliev.Aspire.DatabaseSeeder/Seeding/Services/Shared/LocalServiceIdentitySeedOptions.cs'
+      - 'Maliev.Aspire.DatabaseSeeder/Seeding/Services/AuthService/AuthServiceIdentityDatabaseSeeder.cs'
+      - 'Maliev.Aspire.DatabaseSeeder/Seeding/Services/IAMService/IAMDatabaseSeeder.cs'
+      - 'Maliev.Aspire.LocalIdentity.Tests/**'
       - 'Maliev.Aspire.Tests/**'
       - '.github/workflows/**'
       - '*.slnx'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 env:
   DOTNET_VERSION: '10.0.x'
   SERVICE_DEFAULTS_PATH: 'Maliev.Aspire.ServiceDefaults/Maliev.Aspire.ServiceDefaults.csproj'
   SERVICE_DEFAULTS_TESTS_PATH: 'Maliev.Aspire.ServiceDefaults.Tests/Maliev.Aspire.ServiceDefaults.Tests.csproj'
-  NUGET_USERNAME: ${{ github.actor }}
-  NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
+  LOCAL_IDENTITY_TESTS_PATH: 'Maliev.Aspire.LocalIdentity.Tests/Maliev.Aspire.LocalIdentity.Tests.csproj'
 
 jobs:
   prep:
@@ -58,6 +68,48 @@ jobs:
 
       - name: Build ServiceDefaults
         run: dotnet build ${{ env.SERVICE_DEFAULTS_PATH }} --configuration Release --no-restore /p:TreatWarningsAsErrors=true /p:SharedLibraryVersion=${{ needs.prep.outputs.version_format }}
+
+  local-identity-contract:
+    name: Local Identity Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-local-identity-${{ hashFiles('Maliev.Aspire.LocalIdentity.Tests/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-local-identity-
+
+      - name: Restore local identity contract tests
+        run: dotnet restore ${{ env.LOCAL_IDENTITY_TESTS_PATH }} --locked-mode
+
+      - name: Run local identity contract tests
+        run: |
+          dotnet test ${{ env.LOCAL_IDENTITY_TESTS_PATH }} \
+            --configuration Release \
+            --no-restore \
+            --logger "trx;LogFileName=local-identity-results.trx" \
+            --results-directory ./TestResults/LocalIdentity
+
+      - name: Upload local identity test results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: local-identity-test-results-${{ github.run_attempt }}
+          path: ./TestResults/LocalIdentity/
+          if-no-files-found: error
+          retention-days: 7
 
   # Full Maliev.Aspire.Tests execution requires the sibling service fleet and remains a local-only system gate.
   service-defaults-tests:
