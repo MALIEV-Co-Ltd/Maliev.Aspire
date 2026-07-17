@@ -575,6 +575,81 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     }
 
     /// <summary>
+    /// LifecycleService credentials must be independent from all nine preceding local workloads and
+    /// issue only live IAM permission-check authority.
+    /// </summary>
+    [Fact]
+    public async Task LifecycleServiceCredential_HostedAuthIamBoundary_TenIdentitiesAreIsolatedAndBounded()
+    {
+        var credentials = new[]
+        {
+            (ClientId: "service-auth-service", Secret: await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret")),
+            (ClientId: "service-contact-service", Secret: await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret")),
+            (ClientId: "service-search-service", Secret: await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret")),
+            (ClientId: "service-registry-service", Secret: await fixture.GetSecretParameterValueAsync("RegistryServiceLocalClientSecret")),
+            (ClientId: "service-country-service", Secret: await fixture.GetSecretParameterValueAsync("CountryServiceLocalClientSecret")),
+            (ClientId: "service-currency-service", Secret: await fixture.GetSecretParameterValueAsync("CurrencyServiceLocalClientSecret")),
+            (ClientId: "service-accounting-service", Secret: await fixture.GetSecretParameterValueAsync("AccountingServiceLocalClientSecret")),
+            (ClientId: "service-pricing-service", Secret: await fixture.GetSecretParameterValueAsync("PricingServiceLocalClientSecret")),
+            (ClientId: "service-material-service", Secret: await fixture.GetSecretParameterValueAsync("MaterialServiceLocalClientSecret")),
+            (ClientId: "service-lifecycle-service", Secret: await fixture.GetSecretParameterValueAsync("LifecycleServiceLocalClientSecret"))
+        };
+        Assert.Equal(10, credentials.Select(credential => credential.Secret).Distinct().Count());
+        using var authClient = await fixture.CreateLiveAuthClientAsync();
+
+        using var lifecycleLogin = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-lifecycle-service",
+            client_secret = credentials[^1].Secret
+        });
+        var loginBody = await lifecycleLogin.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, lifecycleLogin.StatusCode);
+        using var loginJson = JsonDocument.Parse(loginBody);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(
+            loginJson.RootElement.GetProperty("access_token").GetString());
+
+        Assert.Equal("20202020-2020-2020-2020-202020202020", token.Subject);
+        Assert.Equal("service-lifecycle-service", token.Claims.Single(claim => claim.Type == "client_id").Value);
+        Assert.Equal("LifecycleService", token.Claims.Single(claim => claim.Type == "service_name").Value);
+        Assert.Equal(
+            ["iam.auth.check-permission"],
+            token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        Assert.Equal(
+            ["roles.workloads.lifecycle-service.v1"],
+            token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
+        Assert.DoesNotContain(token.Claims, claim => claim.Value == "*");
+        Assert.DoesNotContain(token.Claims, claim =>
+            claim.Value.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
+
+        var lifecycleCredential = credentials[^1];
+        var rejectedCrossIdentityAttempts = 0;
+        foreach (var precedingCredential in credentials[..^1])
+        {
+            using var precedingClientWithLifecycleSecret = await authClient.PostAsJsonAsync(
+                "/auth/v1/service/login",
+                new
+                {
+                    client_id = precedingCredential.ClientId,
+                    client_secret = lifecycleCredential.Secret
+                });
+            Assert.Equal(HttpStatusCode.Unauthorized, precedingClientWithLifecycleSecret.StatusCode);
+            rejectedCrossIdentityAttempts++;
+
+            using var lifecycleClientWithPrecedingSecret = await authClient.PostAsJsonAsync(
+                "/auth/v1/service/login",
+                new
+                {
+                    client_id = lifecycleCredential.ClientId,
+                    client_secret = precedingCredential.Secret
+                });
+            Assert.Equal(HttpStatusCode.Unauthorized, lifecycleClientWithPrecedingSecret.StatusCode);
+            rejectedCrossIdentityAttempts++;
+        }
+
+        Assert.Equal(18, rejectedCrossIdentityAttempts);
+    }
+
+    /// <summary>
     /// The evaluated bounded model must isolate capability material and keep live-check credentials independent.
     /// </summary>
     [Fact]

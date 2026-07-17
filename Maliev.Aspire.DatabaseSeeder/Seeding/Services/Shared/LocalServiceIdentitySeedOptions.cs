@@ -110,9 +110,18 @@ public static class LocalServiceIdentityProfileCatalog
         "roles.workloads.material-service.v1",
         new Guid("0271432b-ea96-46fa-b8eb-3fb5b48b53db"));
 
+    /// <summary>Gets the LifecycleService identity.</summary>
+    public static LocalServiceIdentityProfile LifecycleService { get; } = new(
+        "lifecycle-service",
+        "service-lifecycle-service",
+        "LifecycleService",
+        1,
+        "roles.workloads.lifecycle-service.v1",
+        new Guid("8c0c8fa4-f62a-46f2-9aad-307e9027ae06"));
+
     /// <summary>Gets all profiles in deterministic provisioning order.</summary>
     public static IReadOnlyList<LocalServiceIdentityProfile> All { get; } =
-        Array.AsReadOnly([AuthService, ContactService, SearchService, RegistryService, CountryService, CurrencyService, AccountingService, PricingService, MaterialService]);
+        Array.AsReadOnly([AuthService, ContactService, SearchService, RegistryService, CountryService, CurrencyService, AccountingService, PricingService, MaterialService, LifecycleService]);
 }
 
 /// <summary>

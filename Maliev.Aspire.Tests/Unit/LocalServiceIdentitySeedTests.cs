@@ -50,10 +50,11 @@ public sealed class LocalServiceIdentitySeedTests
         var accounting = catalog["accounting-service"];
         var pricing = catalog["pricing-service"];
         var material = catalog["material-service"];
+        var lifecycle = catalog["lifecycle-service"];
         Assert.NotEqual(auth.RawSecret, contact.RawSecret);
         Assert.NotEqual(auth.SecretHash, contact.SecretHash);
-        Assert.Equal(9, new[] { auth, contact, search, registry, country, currency, accounting, pricing, material }.Select(item => item.RawSecret).Distinct().Count());
-        Assert.Equal(9, new[] { auth, contact, search, registry, country, currency, accounting, pricing, material }.Select(item => item.SecretHash).Distinct().Count());
+        Assert.Equal(10, new[] { auth, contact, search, registry, country, currency, accounting, pricing, material, lifecycle }.Select(item => item.RawSecret).Distinct().Count());
+        Assert.Equal(10, new[] { auth, contact, search, registry, country, currency, accounting, pricing, material, lifecycle }.Select(item => item.SecretHash).Distinct().Count());
         Assert.Throws<NotSupportedException>(() =>
         {
             ((IDictionary<string, LocalServiceIdentitySeedMaterial>)catalog).Add(
@@ -149,7 +150,7 @@ public sealed class LocalServiceIdentitySeedTests
         Assert.DoesNotContain('*', country.RoleId);
         Assert.DoesNotContain("platform.owner", country.RoleId, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
-            ["auth-service", "contact-service", "search-service", "registry-service", "country-service", "currency-service", "accounting-service", "pricing-service", "material-service"],
+            ["auth-service", "contact-service", "search-service", "registry-service", "country-service", "currency-service", "accounting-service", "pricing-service", "material-service", "lifecycle-service"],
             LocalServiceIdentityProfileCatalog.All.Select(profile => profile.WorkloadId).ToArray());
     }
 
@@ -245,6 +246,32 @@ public sealed class LocalServiceIdentitySeedTests
     }
 
     /// <summary>
+    /// LifecycleService uses the deterministic IAM profile whose sole authority is live permission checking.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactLifecycleServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var lifecycle = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "lifecycle-service");
+
+        Assert.Equal("service-lifecycle-service", lifecycle.ClientId);
+        Assert.Equal("LifecycleService", lifecycle.ServiceName);
+        Assert.Equal(1, lifecycle.ProfileVersion);
+        Assert.Equal("roles.workloads.lifecycle-service.v1", lifecycle.RoleId);
+        Assert.Equal(new Guid("8c0c8fa4-f62a-46f2-9aad-307e9027ae06"), lifecycle.ProvisionOperationId);
+        Assert.DoesNotContain('*', lifecycle.RoleId);
+        Assert.DoesNotContain("platform.owner", lifecycle.RoleId, StringComparison.OrdinalIgnoreCase);
+
+        var accessProfile = WorkloadAccessProfileCatalog.Default.Get(
+            lifecycle.WorkloadId,
+            lifecycle.ProfileVersion);
+        Assert.Equal(new Guid("20202020-2020-2020-2020-202020202020"), accessProfile.PrincipalId);
+        Assert.Equal(["iam.auth.check-permission"], accessProfile.Permissions);
+        Assert.Empty(accessProfile.AdditionalGrants);
+    }
+
+    /// <summary>
     /// Enabling local seeding outside Development or Testing must fail closed.
     /// </summary>
     [Theory]
@@ -310,7 +337,8 @@ public sealed class LocalServiceIdentitySeedTests
                 ["AspireLocalServiceIdentity:Profiles:currency-service:SecretHash"] = hash,
                 ["AspireLocalServiceIdentity:Profiles:accounting-service:SecretHash"] = hash,
                 ["AspireLocalServiceIdentity:Profiles:pricing-service:SecretHash"] = hash,
-                ["AspireLocalServiceIdentity:Profiles:material-service:SecretHash"] = hash
+                ["AspireLocalServiceIdentity:Profiles:material-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:lifecycle-service:SecretHash"] = hash
             })
             .Build();
 }
