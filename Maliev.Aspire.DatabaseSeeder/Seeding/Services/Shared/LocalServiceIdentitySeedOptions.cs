@@ -92,9 +92,18 @@ public static class LocalServiceIdentityProfileCatalog
         "roles.workloads.accounting-service.v1",
         new Guid("dddd4167-4be2-4c1d-9e21-491c7e68978d"));
 
+    /// <summary>Gets the PricingService identity.</summary>
+    public static LocalServiceIdentityProfile PricingService { get; } = new(
+        "pricing-service",
+        "service-pricing-service",
+        "PricingService",
+        1,
+        "roles.workloads.pricing-service.v1",
+        new Guid("c30cbefd-706c-4d7c-8b75-4ac564b96ebd"));
+
     /// <summary>Gets all profiles in deterministic provisioning order.</summary>
     public static IReadOnlyList<LocalServiceIdentityProfile> All { get; } =
-        Array.AsReadOnly([AuthService, ContactService, SearchService, RegistryService, CountryService, CurrencyService, AccountingService]);
+        Array.AsReadOnly([AuthService, ContactService, SearchService, RegistryService, CountryService, CurrencyService, AccountingService, PricingService]);
 }
 
 /// <summary>

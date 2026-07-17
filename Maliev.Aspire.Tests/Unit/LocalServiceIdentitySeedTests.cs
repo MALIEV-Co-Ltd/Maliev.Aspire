@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
+using Maliev.IAMService.Application.Workloads;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 
@@ -47,10 +48,11 @@ public sealed class LocalServiceIdentitySeedTests
         var country = catalog["country-service"];
         var currency = catalog["currency-service"];
         var accounting = catalog["accounting-service"];
+        var pricing = catalog["pricing-service"];
         Assert.NotEqual(auth.RawSecret, contact.RawSecret);
         Assert.NotEqual(auth.SecretHash, contact.SecretHash);
-        Assert.Equal(7, new[] { auth, contact, search, registry, country, currency, accounting }.Select(item => item.RawSecret).Distinct().Count());
-        Assert.Equal(7, new[] { auth, contact, search, registry, country, currency, accounting }.Select(item => item.SecretHash).Distinct().Count());
+        Assert.Equal(8, new[] { auth, contact, search, registry, country, currency, accounting, pricing }.Select(item => item.RawSecret).Distinct().Count());
+        Assert.Equal(8, new[] { auth, contact, search, registry, country, currency, accounting, pricing }.Select(item => item.SecretHash).Distinct().Count());
         Assert.Throws<NotSupportedException>(() =>
         {
             ((IDictionary<string, LocalServiceIdentitySeedMaterial>)catalog).Add(
@@ -146,7 +148,7 @@ public sealed class LocalServiceIdentitySeedTests
         Assert.DoesNotContain('*', country.RoleId);
         Assert.DoesNotContain("platform.owner", country.RoleId, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
-            ["auth-service", "contact-service", "search-service", "registry-service", "country-service", "currency-service", "accounting-service"],
+            ["auth-service", "contact-service", "search-service", "registry-service", "country-service", "currency-service", "accounting-service", "pricing-service"],
             LocalServiceIdentityProfileCatalog.All.Select(profile => profile.WorkloadId).ToArray());
     }
 
@@ -184,6 +186,33 @@ public sealed class LocalServiceIdentitySeedTests
         Assert.Equal("roles.workloads.accounting-service.v1", accounting.RoleId);
         Assert.DoesNotContain('*', accounting.RoleId);
         Assert.DoesNotContain("platform.owner", accounting.RoleId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// PricingService uses the deterministic IAM profile required to read its exact downstream inputs.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactPricingServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var pricing = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "pricing-service");
+
+        Assert.Equal("service-pricing-service", pricing.ClientId);
+        Assert.Equal("PricingService", pricing.ServiceName);
+        Assert.Equal(1, pricing.ProfileVersion);
+        Assert.Equal("roles.workloads.pricing-service.v1", pricing.RoleId);
+        Assert.Equal(new Guid("c30cbefd-706c-4d7c-8b75-4ac564b96ebd"), pricing.ProvisionOperationId);
+        Assert.DoesNotContain('*', pricing.RoleId);
+        Assert.DoesNotContain("platform.owner", pricing.RoleId, StringComparison.OrdinalIgnoreCase);
+
+        var accessProfile = WorkloadAccessProfileCatalog.Default.Get(
+            pricing.WorkloadId,
+            pricing.ProfileVersion);
+        Assert.Equal(new Guid("18181818-1818-1818-1818-181818181818"), accessProfile.PrincipalId);
+        Assert.Equal(
+            ["iam.auth.check-permission", "material.materials.read", "job.jobs.read", "currency.rates.read"],
+            accessProfile.Permissions);
     }
 
     /// <summary>
@@ -250,7 +279,8 @@ public sealed class LocalServiceIdentitySeedTests
                 ["AspireLocalServiceIdentity:Profiles:registry-service:SecretHash"] = hash,
                 ["AspireLocalServiceIdentity:Profiles:country-service:SecretHash"] = hash,
                 ["AspireLocalServiceIdentity:Profiles:currency-service:SecretHash"] = hash,
-                ["AspireLocalServiceIdentity:Profiles:accounting-service:SecretHash"] = hash
+                ["AspireLocalServiceIdentity:Profiles:accounting-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:pricing-service:SecretHash"] = hash
             })
             .Build();
 }
