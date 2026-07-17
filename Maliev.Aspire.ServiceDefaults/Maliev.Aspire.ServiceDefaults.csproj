@@ -20,13 +20,15 @@
     <!-- Suppress prerelease dependency warning - OpenTelemetry.Exporter.Prometheus.AspNetCore beta is required for .NET 10.0 -->
     <NoWarn>$(NoWarn);NU5104</NoWarn>
     <SharedLibraryVersion Condition="'$(SharedLibraryVersion)' == ''">1.0.*-*</SharedLibraryVersion>
+    <UsePackageReferences Condition="'$(UsePackageReferences)' == '' and '$(GITHUB_ACTIONS)' == 'true'">true</UsePackageReferences>
+    <UsePackageReferences Condition="'$(UsePackageReferences)' == ''">false</UsePackageReferences>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(GITHUB_ACTIONS)' != 'true'">
+  <ItemGroup Condition="'$(UsePackageReferences)' != 'true'">
     <ProjectReference Include="..\..\Maliev.MessagingContracts\generated\csharp\Maliev.MessagingContracts.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+  <ItemGroup Condition="'$(UsePackageReferences)' == 'true'">
     <PackageReference Include="Maliev.MessagingContracts" Version="$(SharedLibraryVersion)" />
   </ItemGroup>
 
