@@ -535,8 +535,10 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         Assert.Equal("service-material-service", token.Claims.Single(claim => claim.Type == "client_id").Value);
         Assert.Equal("MaterialService", token.Claims.Single(claim => claim.Type == "service_name").Value);
         Assert.Equal(
-            ["iam.auth.check-permission", "supplier.suppliers.read"],
+            ["iam.auth.check-permission", "supplier.supplier-references.read"],
             token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        Assert.DoesNotContain(token.Claims, claim =>
+            claim.Type == "permissions" && claim.Value == "supplier.suppliers.read");
         Assert.Equal(
             ["roles.workloads.material-service.v1"],
             token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
