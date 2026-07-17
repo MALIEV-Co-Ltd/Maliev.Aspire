@@ -50,19 +50,43 @@ public sealed class ServiceDefaultsPublishWorkflowContractTests
     }
 
     /// <summary>
-    /// PRs must never publish, and the workflow must delegate all version decisions to the tested resolver.
+    /// Only develop pushes and published releases may publish; manual publication must not exist.
     /// </summary>
     [Fact]
-    public void Triggers_ExcludePullRequestsAndUseTheVersionResolver()
+    public void Triggers_AllowDevelopPushAndPublishedReleaseOnly()
+    {
+        var source = ReadWorkflow();
+        var pushStart = source.IndexOf("\n  push:\n", StringComparison.Ordinal);
+        var releaseStart = source.IndexOf("\n  release:\n", pushStart, StringComparison.Ordinal);
+        Assert.True(pushStart >= 0 && releaseStart > pushStart);
+        var pushBlock = source[pushStart..releaseStart];
+
+        Assert.DoesNotContain("\n  pull_request:", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  workflow_dispatch:", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("github.event.inputs", source, StringComparison.Ordinal);
+        Assert.Contains("branches:\n      - develop", pushBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("- main", pushBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain("- staging", pushBlock, StringComparison.Ordinal);
+        Assert.Contains("types: [published]", source, StringComparison.Ordinal);
+        Assert.Contains("resolve-servicedefaults-version.sh", source, StringComparison.Ordinal);
+        Assert.Contains("github.event.release.tag_name", source, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Stable release publication must prove the tagged commit is already contained in main.
+    /// </summary>
+    [Fact]
+    public void StableRelease_RequiresFullHistoryAndMainAncestry()
     {
         var source = ReadWorkflow();
 
-        Assert.DoesNotContain("\n  pull_request:", source, StringComparison.Ordinal);
-        Assert.Contains("types: [published]", source, StringComparison.Ordinal);
-        Assert.Contains("required: true", source, StringComparison.Ordinal);
-        Assert.Contains("resolve-servicedefaults-version.sh", source, StringComparison.Ordinal);
-        Assert.Contains("github.event.release.tag_name", source, StringComparison.Ordinal);
-        Assert.Contains("github.event.inputs.version", source, StringComparison.Ordinal);
+        Assert.Contains("fetch-depth: 0", source, StringComparison.Ordinal);
+        Assert.Contains("git fetch --no-tags origin main:refs/remotes/origin/main", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "git merge-base --is-ancestor \"$GITHUB_SHA\" refs/remotes/origin/main",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains("if [[ \"$EVENT_NAME\" == \"release\" ]]", source, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -108,20 +132,17 @@ public sealed class ServiceDefaultsPublishWorkflowContractTests
     }
 
     /// <summary>
-    /// Supported push, release, and manual inputs must normalize to exact package versions.
+    /// Supported develop and release inputs must normalize to exact package versions.
     /// </summary>
     [Theory]
-    [InlineData("push", "develop", "", "", "91", "1", "0123456789abcdef0123456789abcdef01234567", "1.0.91-alpha.1.01234567")]
-    [InlineData("push", "staging", "", "", "91", "2", "abcdef0123456789abcdef0123456789abcdef01", "1.0.91-beta.2.abcdef01")]
-    [InlineData("push", "main", "", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01", "1.0.91")]
-    [InlineData("release", "", "release/v2.3.4", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01", "2.3.4")]
-    [InlineData("workflow_dispatch", "", "", "2.3.4", "91", "1", "abcdef0123456789abcdef0123456789abcdef01", "2.3.4")]
-    [InlineData("workflow_dispatch", "", "", "v2.3.4", "91", "1", "abcdef0123456789abcdef0123456789abcdef01", "2.3.4")]
+    [InlineData("push", "develop", "", "91", "1", "0123456789abcdef0123456789abcdef01234567", "1.0.91-alpha.1.01234567")]
+    [InlineData("release", "", "release/v0.0.0", "91", "1", "abcdef0123456789abcdef0123456789abcdef01", "0.0.0")]
+    [InlineData("release", "", "release/v2.3.4", "91", "1", "abcdef0123456789abcdef0123456789abcdef01", "2.3.4")]
+    [InlineData("release", "", "release/v10.20.30", "91", "1", "abcdef0123456789abcdef0123456789abcdef01", "10.20.30")]
     public void VersionResolver_ValidInputsReturnExactVersion(
         string eventName,
         string refName,
         string releaseTag,
-        string manualVersion,
         string runNumber,
         string runAttempt,
         string commitSha,
@@ -131,7 +152,6 @@ public sealed class ServiceDefaultsPublishWorkflowContractTests
             eventName,
             refName,
             releaseTag,
-            manualVersion,
             runNumber,
             runAttempt,
             commitSha);
@@ -142,22 +162,23 @@ public sealed class ServiceDefaultsPublishWorkflowContractTests
     }
 
     /// <summary>
-    /// Malformed tags, manual versions, unsupported branches, and stable reruns must fail closed.
+    /// Malformed tags, manual events, unsupported branches, and stable reruns must fail closed.
     /// </summary>
     [Theory]
-    [InlineData("release", "", "v2.3.4", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
-    [InlineData("release", "", "release/v02.3.4", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
-    [InlineData("workflow_dispatch", "", "", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
-    [InlineData("workflow_dispatch", "", "", "release/v2.3.4", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
-    [InlineData("workflow_dispatch", "", "", "2.3.4-alpha", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
-    [InlineData("push", "feature/test", "", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
-    [InlineData("push", "main", "", "", "91", "2", "abcdef0123456789abcdef0123456789abcdef01")]
-    [InlineData("push", "develop", "", "", "91", "1", "not-a-commit-sha")]
+    [InlineData("release", "", "v2.3.4", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
+    [InlineData("release", "", "release/v02.3.4", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
+    [InlineData("release", "", "release/v2.3.4-alpha", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
+    [InlineData("release", "", "release/v2.3.4+build", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
+    [InlineData("workflow_dispatch", "", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
+    [InlineData("push", "staging", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
+    [InlineData("push", "main", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
+    [InlineData("push", "feature/test", "", "91", "1", "abcdef0123456789abcdef0123456789abcdef01")]
+    [InlineData("release", "", "release/v2.3.4", "91", "2", "abcdef0123456789abcdef0123456789abcdef01")]
+    [InlineData("push", "develop", "", "91", "1", "not-a-commit-sha")]
     public void VersionResolver_InvalidInputsFailClosed(
         string eventName,
         string refName,
         string releaseTag,
-        string manualVersion,
         string runNumber,
         string runAttempt,
         string commitSha)
@@ -166,7 +187,6 @@ public sealed class ServiceDefaultsPublishWorkflowContractTests
             eventName,
             refName,
             releaseTag,
-            manualVersion,
             runNumber,
             runAttempt,
             commitSha);
@@ -182,8 +202,8 @@ public sealed class ServiceDefaultsPublishWorkflowContractTests
     public void VersionResolver_DevelopmentRerunIsUniqueAndTraceable()
     {
         const string sha = "abcdef0123456789abcdef0123456789abcdef01";
-        var first = RunVersionResolver("push", "develop", "", "", "91", "1", sha);
-        var rerun = RunVersionResolver("push", "develop", "", "", "91", "2", sha);
+        var first = RunVersionResolver("push", "develop", "", "91", "1", sha);
+        var rerun = RunVersionResolver("push", "develop", "", "91", "2", sha);
 
         Assert.Equal(0, first.ExitCode);
         Assert.Equal(0, rerun.ExitCode);
@@ -196,7 +216,6 @@ public sealed class ServiceDefaultsPublishWorkflowContractTests
         string eventName,
         string refName,
         string releaseTag,
-        string manualVersion,
         string runNumber,
         string runAttempt,
         string commitSha)
@@ -214,7 +233,6 @@ public sealed class ServiceDefaultsPublishWorkflowContractTests
         startInfo.ArgumentList.Add(eventName);
         startInfo.ArgumentList.Add(refName);
         startInfo.ArgumentList.Add(releaseTag);
-        startInfo.ArgumentList.Add(manualVersion);
         startInfo.ArgumentList.Add(runNumber);
         startInfo.ArgumentList.Add(runAttempt);
         startInfo.ArgumentList.Add(commitSha);
