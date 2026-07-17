@@ -239,8 +239,9 @@ public sealed class LocalServiceIdentitySeedTests
             material.ProfileVersion);
         Assert.Equal(new Guid("19191919-1919-1919-1919-191919191919"), accessProfile.PrincipalId);
         Assert.Equal(
-            ["iam.auth.check-permission", "supplier.suppliers.read"],
+            ["iam.auth.check-permission", "supplier.supplier-references.read"],
             accessProfile.Permissions);
+        Assert.DoesNotContain("supplier.suppliers.read", accessProfile.Permissions);
     }
 
     /// <summary>
