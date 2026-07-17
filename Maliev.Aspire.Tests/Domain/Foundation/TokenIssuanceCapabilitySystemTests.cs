@@ -500,6 +500,79 @@ public sealed class TokenIssuanceCapabilitySystemTests(
     }
 
     /// <summary>
+    /// MaterialService credentials must be independent from all eight preceding local workloads and
+    /// issue only permission-check and Supplier read authority.
+    /// </summary>
+    [Fact]
+    public async Task MaterialServiceCredential_HostedAuthIamBoundary_NineIdentitiesAreIsolatedAndBounded()
+    {
+        var credentials = new[]
+        {
+            (ClientId: "service-auth-service", Secret: await fixture.GetSecretParameterValueAsync("AuthServiceLocalClientSecret")),
+            (ClientId: "service-contact-service", Secret: await fixture.GetSecretParameterValueAsync("ContactServiceLocalClientSecret")),
+            (ClientId: "service-search-service", Secret: await fixture.GetSecretParameterValueAsync("SearchServiceLocalClientSecret")),
+            (ClientId: "service-registry-service", Secret: await fixture.GetSecretParameterValueAsync("RegistryServiceLocalClientSecret")),
+            (ClientId: "service-country-service", Secret: await fixture.GetSecretParameterValueAsync("CountryServiceLocalClientSecret")),
+            (ClientId: "service-currency-service", Secret: await fixture.GetSecretParameterValueAsync("CurrencyServiceLocalClientSecret")),
+            (ClientId: "service-accounting-service", Secret: await fixture.GetSecretParameterValueAsync("AccountingServiceLocalClientSecret")),
+            (ClientId: "service-pricing-service", Secret: await fixture.GetSecretParameterValueAsync("PricingServiceLocalClientSecret")),
+            (ClientId: "service-material-service", Secret: await fixture.GetSecretParameterValueAsync("MaterialServiceLocalClientSecret"))
+        };
+        Assert.Equal(9, credentials.Select(credential => credential.Secret).Distinct().Count());
+        using var authClient = await fixture.CreateLiveAuthClientAsync();
+
+        using var materialLogin = await authClient.PostAsJsonAsync("/auth/v1/service/login", new
+        {
+            client_id = "service-material-service",
+            client_secret = credentials[^1].Secret
+        });
+        var loginBody = await materialLogin.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, materialLogin.StatusCode);
+        using var loginJson = JsonDocument.Parse(loginBody);
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(
+            loginJson.RootElement.GetProperty("access_token").GetString());
+
+        Assert.Equal("service-material-service", token.Claims.Single(claim => claim.Type == "client_id").Value);
+        Assert.Equal("MaterialService", token.Claims.Single(claim => claim.Type == "service_name").Value);
+        Assert.Equal(
+            ["iam.auth.check-permission", "supplier.suppliers.read"],
+            token.Claims.Where(claim => claim.Type == "permissions").Select(claim => claim.Value));
+        Assert.Equal(
+            ["roles.workloads.material-service.v1"],
+            token.Claims.Where(claim => claim.Type == "roles").Select(claim => claim.Value));
+        Assert.DoesNotContain(token.Claims, claim => claim.Value == "*");
+        Assert.DoesNotContain(token.Claims, claim =>
+            claim.Value.Contains("platform.owner", StringComparison.OrdinalIgnoreCase));
+
+        var materialCredential = credentials[^1];
+        var rejectedCrossIdentityAttempts = 0;
+        foreach (var precedingCredential in credentials[..^1])
+        {
+            using var precedingClientWithMaterialSecret = await authClient.PostAsJsonAsync(
+                "/auth/v1/service/login",
+                new
+                {
+                    client_id = precedingCredential.ClientId,
+                    client_secret = materialCredential.Secret
+                });
+            Assert.Equal(HttpStatusCode.Unauthorized, precedingClientWithMaterialSecret.StatusCode);
+            rejectedCrossIdentityAttempts++;
+
+            using var materialClientWithPrecedingSecret = await authClient.PostAsJsonAsync(
+                "/auth/v1/service/login",
+                new
+                {
+                    client_id = materialCredential.ClientId,
+                    client_secret = precedingCredential.Secret
+                });
+            Assert.Equal(HttpStatusCode.Unauthorized, materialClientWithPrecedingSecret.StatusCode);
+            rejectedCrossIdentityAttempts++;
+        }
+
+        Assert.Equal(16, rejectedCrossIdentityAttempts);
+    }
+
+    /// <summary>
     /// The evaluated bounded model must isolate capability material and keep live-check credentials independent.
     /// </summary>
     [Fact]
@@ -514,6 +587,7 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         var currencySecret = await fixture.GetSecretParameterValueAsync("CurrencyServiceLocalClientSecret");
         var accountingSecret = await fixture.GetSecretParameterValueAsync("AccountingServiceLocalClientSecret");
         var pricingSecret = await fixture.GetSecretParameterValueAsync("PricingServiceLocalClientSecret");
+        var materialSecret = await fixture.GetSecretParameterValueAsync("MaterialServiceLocalClientSecret");
         Assert.DoesNotContain(
             model.Resources,
             resource => string.Equals(resource.Name, "SearchService", StringComparison.Ordinal));
@@ -529,6 +603,9 @@ public sealed class TokenIssuanceCapabilitySystemTests(
         Assert.DoesNotContain(
             model.Resources,
             resource => string.Equals(resource.Name, "PricingService", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            model.Resources,
+            resource => string.Equals(resource.Name, "MaterialService", StringComparison.Ordinal));
         var authSecretBytes = Encoding.UTF8.GetBytes(authSecret);
         var authDerivedVerifierDigest = SHA256.HashData(authSecretBytes);
         var authDerivedVerifier = Convert.ToBase64String(authDerivedVerifierDigest);
@@ -628,6 +705,10 @@ public sealed class TokenIssuanceCapabilitySystemTests(
             // This bounded capability host intentionally excludes Pricing runtime wiring.
             // Its raw credential must therefore remain unprojected to every process resource here.
             Assert.DoesNotContain(environment, pair => Equals(pair.Value, pricingSecret));
+
+            // This bounded capability host intentionally excludes Material runtime wiring.
+            // Seeder processes must receive only its verifier, never the raw credential.
+            Assert.DoesNotContain(environment, pair => Equals(pair.Value, materialSecret));
         }
 
         Assert.NotNull(iamVerifier);

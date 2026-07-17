@@ -101,9 +101,18 @@ public static class LocalServiceIdentityProfileCatalog
         "roles.workloads.pricing-service.v1",
         new Guid("c30cbefd-706c-4d7c-8b75-4ac564b96ebd"));
 
+    /// <summary>Gets the MaterialService identity.</summary>
+    public static LocalServiceIdentityProfile MaterialService { get; } = new(
+        "material-service",
+        "service-material-service",
+        "MaterialService",
+        1,
+        "roles.workloads.material-service.v1",
+        new Guid("0271432b-ea96-46fa-b8eb-3fb5b48b53db"));
+
     /// <summary>Gets all profiles in deterministic provisioning order.</summary>
     public static IReadOnlyList<LocalServiceIdentityProfile> All { get; } =
-        Array.AsReadOnly([AuthService, ContactService, SearchService, RegistryService, CountryService, CurrencyService, AccountingService, PricingService]);
+        Array.AsReadOnly([AuthService, ContactService, SearchService, RegistryService, CountryService, CurrencyService, AccountingService, PricingService, MaterialService]);
 }
 
 /// <summary>

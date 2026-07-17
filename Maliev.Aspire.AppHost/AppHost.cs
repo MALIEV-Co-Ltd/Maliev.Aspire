@@ -149,6 +149,8 @@ static partial class Program
             LocalServiceIdentityProfileCatalog.AccountingService.WorkloadId];
         var pricingIdentityMaterial = localIdentityMaterials[
             LocalServiceIdentityProfileCatalog.PricingService.WorkloadId];
+        var materialIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.MaterialService.WorkloadId];
         var localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = authIdentityMaterial.RawSecret;
         var contactIdentitySecret = builder.AddParameter("ContactServiceLocalClientSecret", secret: true);
@@ -165,6 +167,8 @@ static partial class Program
         builder.Configuration["Parameters:AccountingServiceLocalClientSecret"] = accountingIdentityMaterial.RawSecret;
         var pricingIdentitySecret = builder.AddParameter("PricingServiceLocalClientSecret", secret: true);
         builder.Configuration["Parameters:PricingServiceLocalClientSecret"] = pricingIdentityMaterial.RawSecret;
+        var materialIdentitySecret = builder.AddParameter("MaterialServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:MaterialServiceLocalClientSecret"] = materialIdentityMaterial.RawSecret;
         var capabilityMaterial = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
         var capabilityPrivateKey = builder.AddParameter(
             "AuthTokenIssuanceCapabilityPrivateKey",
@@ -293,6 +297,9 @@ static partial class Program
                 .WithEnvironment(
                     "AspireLocalServiceIdentity__Profiles__pricing-service__SecretHash",
                     pricingIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__material-service__SecretHash",
+                    materialIdentityMaterial.SecretHash)
                 .WithReference(iamDatabase, "IamDbContext")
                 .WaitFor(iamService),
             runAutomatically: true);
@@ -883,6 +890,10 @@ static partial class Program
                         "AspireLocalServiceIdentity__Profiles__pricing-service__SecretHash",
                         config.LocalServiceIdentitySecretHashes[
                             LocalServiceIdentityProfileCatalog.PricingService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__material-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.MaterialService.WorkloadId])
                     .WithReference(databases.IAM, "IamDbContext")
                     .WaitFor(iamService),
                 runAutomatically: true);
@@ -1131,13 +1142,28 @@ static partial class Program
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
+                .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
                 .WaitFor(iamService)
                 .WithTestingSafeHttpHealthCheck("/material/aspire-liveness"),
             config,
             grafana,
             otelCollector,
-            environmentName);
+            environmentName)
+            .WithoutJwtSigningMaterial();
+
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            materialService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.MaterialService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.MaterialService.WorkloadId]);
+        }
 
         var pricingService = WithSharedSecrets(
             builder.AddProject<Projects.Maliev_PricingService_Api>("PricingService")
@@ -1317,6 +1343,10 @@ static partial class Program
             grafana,
             otelCollector,
             environmentName);
+
+        materialService = materialService
+            .WithReference(supplierService)
+            .WaitFor(supplierService);
 
         purchaseOrderService = purchaseOrderService
             .WithReference(supplierService)
