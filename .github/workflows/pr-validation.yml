@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: pr-validation-${{ github.event.pull_request.number }}
@@ -56,14 +57,14 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NUGET_USERNAME: ${{ github.actor }}
-      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
+      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT || github.token }}
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -80,10 +81,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -108,7 +109,7 @@ jobs:
 
       - name: Upload local identity test results
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: local-identity-test-results-${{ github.run_attempt }}
           path: ./TestResults/LocalIdentity/
@@ -123,14 +124,14 @@ jobs:
     timeout-minutes: 20
     env:
       NUGET_USERNAME: ${{ github.actor }}
-      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
+      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT || github.token }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -146,7 +147,7 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results
           path: ./TestResults/
@@ -162,7 +163,7 @@ jobs:
 
       - name: Upload Coverage Report
         if: success()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report
           path: ./CoverageReport/
@@ -173,14 +174,14 @@ jobs:
     needs: [prep, build-and-test]
     env:
       NUGET_USERNAME: ${{ github.actor }}
-      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
+      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT || github.token }}
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
