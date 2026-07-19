@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Maliev.Aspire.ServiceDefaults.Tests.Publishing;
 
 /// <summary>
@@ -23,6 +25,24 @@ public sealed class PrValidationWorkflowContractTests
         Assert.Contains("permissions:\n  contents: read\n  packages: read", source, StringComparison.Ordinal);
         Assert.Equal(3, CountOccurrences(source, "NUGET_PASSWORD: ${{ secrets.GITOPS_PAT || github.token }}"));
         Assert.DoesNotContain("NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}", source, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// First-party actions upgraded by Dependabot must remain pinned to immutable commits.
+    /// </summary>
+    [Fact]
+    public void UpgradedFirstPartyActions_ArePinnedAcrossWorkflows()
+    {
+        var workflowDirectory = Path.Combine(RepositoryRoot, ".github", "workflows");
+        var references = Directory.EnumerateFiles(workflowDirectory, "*.yml")
+            .SelectMany(path => Regex.Matches(
+                File.ReadAllText(path),
+                "uses: actions/(checkout|setup-dotnet|upload-artifact)@([^\\s#]+)"))
+            .Select(match => match.Groups[2].Value)
+            .ToArray();
+
+        Assert.NotEmpty(references);
+        Assert.All(references, reference => Assert.Matches("^[0-9a-f]{40}$", reference));
     }
 
     private static int CountOccurrences(string source, string value)
