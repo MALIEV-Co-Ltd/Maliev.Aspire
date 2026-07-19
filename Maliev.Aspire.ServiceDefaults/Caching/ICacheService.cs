@@ -1,7 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-
 namespace Maliev.Aspire.ServiceDefaults.Caching;
 
 /// <summary>
@@ -49,4 +45,13 @@ public interface ICacheService
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>True if the key exists, otherwise false.</returns>
     Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Atomically increments a value in the cache.
+    /// </summary>
+    /// <param name="key">The cache key.</param>
+    /// <param name="ttl">The time-to-live for the cached value (only applied if the key is new).</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The new value after incrementing.</returns>
+    Task<long> IncrementAsync(string key, TimeSpan ttl, CancellationToken cancellationToken = default);
 }

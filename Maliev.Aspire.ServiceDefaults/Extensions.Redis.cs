@@ -1,9 +1,8 @@
+using Maliev.Aspire.ServiceDefaults.Caching;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
-using Maliev.Aspire.ServiceDefaults.Caching;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -26,6 +25,17 @@ public static class RedisExtensions
         string? instanceName = null,
         Action<ConfigurationOptions>? configureOptions = null)
     {
+        // Check if Redis is enabled via configuration
+        bool redisEnabled = builder.Configuration.GetValue<bool>("Redis:Enabled", true) &&
+                          builder.Configuration.GetValue<bool>("Cache:RedisEnabled", true);
+
+        // If Redis is explicitly disabled, we do NOT provide a fallback. 
+        // Services requiring ICacheService will fail to resolve it, which is the intended "fail fast" behavior.
+        if (!redisEnabled)
+        {
+            return builder;
+        }
+
         var redisConnectionString = builder.Configuration.GetConnectionString("redis");
 
         if (string.IsNullOrEmpty(redisConnectionString))
@@ -37,9 +47,19 @@ public static class RedisExtensions
             }
             else
             {
-                throw new InvalidOperationException(
-                    "Redis connection string 'redis' not configured. " +
-                    "Redis is required in all environments.");
+                // Log available connection strings for debugging
+                var connectionStrings = builder.Configuration.GetSection("ConnectionStrings");
+                var availableKeys = connectionStrings.GetChildren().Select(c => c.Key).ToList();
+
+                var errorMessage = "Redis connection string 'redis' not configured. " +
+                    $"Available connection strings: [{string.Join(", ", availableKeys)}]. " +
+                    "Redis is required in all environments unless explicitly disabled via Redis:Enabled=false or Cache:RedisEnabled=false.";
+
+                using var loggerFactory = LoggerFactory.Create(lb => lb.AddConsole());
+                var logger = loggerFactory.CreateLogger("RedisExtensions");
+                logger.LogCritical("FATAL: {ErrorMessage}", errorMessage);
+
+                throw new InvalidOperationException(errorMessage);
             }
         }
 
@@ -76,14 +96,14 @@ public static class RedisExtensions
         builder.Services.AddSingleton<ICacheService, RedisCacheService>();
 
         // Add Redis health check (skip in Testing as connection may not be valid yet)
-        if (!builder.Environment.IsEnvironment("Testing"))
+        if (!builder.Environment.IsEnvironment("Testing") && redisEnabled)
         {
             builder.Services.AddHealthChecks()
                 .AddRedis(
                     redisConnectionString,
                     name: "redis",
                     tags: ["ready"],
-                    timeout: TimeSpan.FromSeconds(20));
+                    timeout: TimeSpan.FromMinutes(2)); // Increased timeout to allow Redis container to start
         }
 
 

@@ -1,0 +1,344 @@
+using System.Security.Cryptography;
+using System.Text;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
+using Maliev.IAMService.Application.Workloads;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+
+namespace Maliev.Aspire.Tests.Unit;
+
+/// <summary>
+/// Security contract tests for the Aspire-local workload credential catalog.
+/// </summary>
+public sealed class LocalServiceIdentitySeedTests
+{
+    /// <summary>
+    /// Every AppHost construction must produce a new uniformly random 256-bit Base64Url secret.
+    /// </summary>
+    [Fact]
+    public void Create_GeneratesFreshBase64UrlEncoded256BitSecretAndUppercaseHash()
+    {
+        var first = LocalServiceIdentitySeedMaterial.Create();
+        var second = LocalServiceIdentitySeedMaterial.Create();
+
+        Assert.NotEqual(first.RawSecret, second.RawSecret);
+        Assert.Equal(43, first.RawSecret.Length);
+        Assert.All(first.RawSecret, character =>
+            Assert.True(char.IsAsciiLetterOrDigit(character) || character is '-' or '_'));
+
+        var expectedHash = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(first.RawSecret)));
+        Assert.Equal(expectedHash, first.SecretHash);
+        Assert.Matches("^[0-9A-F]{64}$", first.SecretHash);
+    }
+
+    /// <summary>
+    /// Every workload receives independent material and the returned catalog cannot be mutated.
+    /// </summary>
+    [Fact]
+    public void CreateCatalog_GeneratesDistinctMaterialForEveryImmutableProfile()
+    {
+        var catalog = LocalServiceIdentitySeedMaterial.CreateCatalog();
+
+        Assert.Equal(LocalServiceIdentityProfileCatalog.All.Count, catalog.Count);
+        var auth = catalog[LocalServiceIdentityProfileCatalog.AuthService.WorkloadId];
+        var contact = catalog[LocalServiceIdentityProfileCatalog.ContactService.WorkloadId];
+        var search = catalog["search-service"];
+        var registry = catalog["registry-service"];
+        var country = catalog["country-service"];
+        var currency = catalog["currency-service"];
+        var accounting = catalog["accounting-service"];
+        var pricing = catalog["pricing-service"];
+        var material = catalog["material-service"];
+        var lifecycle = catalog["lifecycle-service"];
+        Assert.NotEqual(auth.RawSecret, contact.RawSecret);
+        Assert.NotEqual(auth.SecretHash, contact.SecretHash);
+        Assert.Equal(10, new[] { auth, contact, search, registry, country, currency, accounting, pricing, material, lifecycle }.Select(item => item.RawSecret).Distinct().Count());
+        Assert.Equal(10, new[] { auth, contact, search, registry, country, currency, accounting, pricing, material, lifecycle }.Select(item => item.SecretHash).Distinct().Count());
+        Assert.Throws<NotSupportedException>(() =>
+        {
+            ((IDictionary<string, LocalServiceIdentitySeedMaterial>)catalog).Add(
+                "unexpected-service",
+                LocalServiceIdentitySeedMaterial.Create());
+        });
+    }
+
+    /// <summary>
+    /// The local workload is bound to the exact server-owned IAM profile and never wildcard authority.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactAuthServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var auth = LocalServiceIdentityProfileCatalog.AuthService;
+        Assert.Equal("auth-service", auth.WorkloadId);
+        Assert.Equal("service-auth-service", auth.ClientId);
+        Assert.Equal("AuthService", auth.ServiceName);
+        Assert.Equal(1, auth.ProfileVersion);
+        Assert.Equal("roles.workloads.auth-service.v1", auth.RoleId);
+        Assert.Equal("iam.workload-principals.provision", LocalServiceIdentitySeedOptions.ProvisionPermission);
+        Assert.DoesNotContain('*', auth.RoleId);
+        Assert.DoesNotContain("platform.owner", auth.RoleId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// ContactService uses the deterministic IAM profile and cannot gain wildcard or administrator authority.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactContactServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var contact = LocalServiceIdentityProfileCatalog.ContactService;
+
+        Assert.Equal("contact-service", contact.WorkloadId);
+        Assert.Equal("service-contact-service", contact.ClientId);
+        Assert.Equal("ContactService", contact.ServiceName);
+        Assert.Equal(1, contact.ProfileVersion);
+        Assert.Equal("roles.workloads.contact-service.v1", contact.RoleId);
+        Assert.DoesNotContain('*', contact.RoleId);
+        Assert.DoesNotContain("platform.owner", contact.RoleId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// SearchService uses the deterministic IAM profile whose sole authority is live permission checking.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactSearchServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var search = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "search-service");
+
+        Assert.Equal("service-search-service", search.ClientId);
+        Assert.Equal("SearchService", search.ServiceName);
+        Assert.Equal(1, search.ProfileVersion);
+        Assert.Equal("roles.workloads.search-service.v1", search.RoleId);
+        Assert.DoesNotContain('*', search.RoleId);
+        Assert.DoesNotContain("platform.owner", search.RoleId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// RegistryService uses the deterministic IAM profile whose sole authority is live permission checking.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactRegistryServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var registry = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "registry-service");
+
+        Assert.Equal("service-registry-service", registry.ClientId);
+        Assert.Equal("RegistryService", registry.ServiceName);
+        Assert.Equal(1, registry.ProfileVersion);
+        Assert.Equal("roles.workloads.registry-service.v1", registry.RoleId);
+        Assert.DoesNotContain('*', registry.RoleId);
+        Assert.DoesNotContain("platform.owner", registry.RoleId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// CountryService uses the deterministic IAM profile whose sole authority is live permission checking.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactCountryServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var country = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "country-service");
+
+        Assert.Equal("service-country-service", country.ClientId);
+        Assert.Equal("CountryService", country.ServiceName);
+        Assert.Equal(1, country.ProfileVersion);
+        Assert.Equal("roles.workloads.country-service.v1", country.RoleId);
+        Assert.DoesNotContain('*', country.RoleId);
+        Assert.DoesNotContain("platform.owner", country.RoleId, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            ["auth-service", "contact-service", "search-service", "registry-service", "country-service", "currency-service", "accounting-service", "pricing-service", "material-service", "lifecycle-service"],
+            LocalServiceIdentityProfileCatalog.All.Select(profile => profile.WorkloadId).ToArray());
+    }
+
+    /// <summary>
+    /// CurrencyService uses the deterministic IAM profile whose sole authority is live permission checking.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactCurrencyServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var currency = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "currency-service");
+
+        Assert.Equal("service-currency-service", currency.ClientId);
+        Assert.Equal("CurrencyService", currency.ServiceName);
+        Assert.Equal(1, currency.ProfileVersion);
+        Assert.Equal("roles.workloads.currency-service.v1", currency.RoleId);
+        Assert.DoesNotContain('*', currency.RoleId);
+        Assert.DoesNotContain("platform.owner", currency.RoleId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// AccountingService uses the deterministic IAM profile whose sole authority is live permission checking.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactAccountingServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var accounting = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "accounting-service");
+
+        Assert.Equal("service-accounting-service", accounting.ClientId);
+        Assert.Equal("AccountingService", accounting.ServiceName);
+        Assert.Equal(1, accounting.ProfileVersion);
+        Assert.Equal("roles.workloads.accounting-service.v1", accounting.RoleId);
+        Assert.DoesNotContain('*', accounting.RoleId);
+        Assert.DoesNotContain("platform.owner", accounting.RoleId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// PricingService uses the deterministic IAM profile required to read its exact downstream inputs.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactPricingServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var pricing = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "pricing-service");
+
+        Assert.Equal("service-pricing-service", pricing.ClientId);
+        Assert.Equal("PricingService", pricing.ServiceName);
+        Assert.Equal(1, pricing.ProfileVersion);
+        Assert.Equal("roles.workloads.pricing-service.v1", pricing.RoleId);
+        Assert.Equal(new Guid("c30cbefd-706c-4d7c-8b75-4ac564b96ebd"), pricing.ProvisionOperationId);
+        Assert.DoesNotContain('*', pricing.RoleId);
+        Assert.DoesNotContain("platform.owner", pricing.RoleId, StringComparison.OrdinalIgnoreCase);
+
+        var accessProfile = WorkloadAccessProfileCatalog.Default.Get(
+            pricing.WorkloadId,
+            pricing.ProfileVersion);
+        Assert.Equal(new Guid("18181818-1818-1818-1818-181818181818"), accessProfile.PrincipalId);
+        Assert.Equal(
+            ["iam.auth.check-permission", "material.materials.read", "job.jobs.read", "currency.rates.read"],
+            accessProfile.Permissions);
+    }
+
+    /// <summary>
+    /// MaterialService uses only live permission checking and Supplier read authority.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactMaterialServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var material = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "material-service");
+
+        Assert.Equal("service-material-service", material.ClientId);
+        Assert.Equal("MaterialService", material.ServiceName);
+        Assert.Equal(1, material.ProfileVersion);
+        Assert.Equal("roles.workloads.material-service.v1", material.RoleId);
+        Assert.Equal(new Guid("0271432b-ea96-46fa-b8eb-3fb5b48b53db"), material.ProvisionOperationId);
+        Assert.DoesNotContain('*', material.RoleId);
+        Assert.DoesNotContain("platform.owner", material.RoleId, StringComparison.OrdinalIgnoreCase);
+
+        var accessProfile = WorkloadAccessProfileCatalog.Default.Get(
+            material.WorkloadId,
+            material.ProfileVersion);
+        Assert.Equal(new Guid("19191919-1919-1919-1919-191919191919"), accessProfile.PrincipalId);
+        Assert.Equal(
+            ["iam.auth.check-permission", "supplier.supplier-references.read"],
+            accessProfile.Permissions);
+        Assert.DoesNotContain("supplier.suppliers.read", accessProfile.Permissions);
+    }
+
+    /// <summary>
+    /// LifecycleService uses the deterministic IAM profile whose sole authority is live permission checking.
+    /// </summary>
+    [Fact]
+    public void Contract_UsesExactLifecycleServiceV1ProfileWithoutWildcardOrPlatformOwner()
+    {
+        var lifecycle = Assert.Single(
+            LocalServiceIdentityProfileCatalog.All,
+            profile => profile.WorkloadId == "lifecycle-service");
+
+        Assert.Equal("service-lifecycle-service", lifecycle.ClientId);
+        Assert.Equal("LifecycleService", lifecycle.ServiceName);
+        Assert.Equal(1, lifecycle.ProfileVersion);
+        Assert.Equal("roles.workloads.lifecycle-service.v1", lifecycle.RoleId);
+        Assert.Equal(new Guid("8c0c8fa4-f62a-46f2-9aad-307e9027ae06"), lifecycle.ProvisionOperationId);
+        Assert.DoesNotContain('*', lifecycle.RoleId);
+        Assert.DoesNotContain("platform.owner", lifecycle.RoleId, StringComparison.OrdinalIgnoreCase);
+
+        var accessProfile = WorkloadAccessProfileCatalog.Default.Get(
+            lifecycle.WorkloadId,
+            lifecycle.ProfileVersion);
+        Assert.Equal(new Guid("20202020-2020-2020-2020-202020202020"), accessProfile.PrincipalId);
+        Assert.Equal(["iam.auth.check-permission"], accessProfile.Permissions);
+        Assert.Empty(accessProfile.AdditionalGrants);
+    }
+
+    /// <summary>
+    /// Enabling local seeding outside Development or Testing must fail closed.
+    /// </summary>
+    [Theory]
+    [InlineData("Staging")]
+    [InlineData("Production")]
+    public void FromConfiguration_EnabledOutsideLocalEnvironment_Throws(string environmentName)
+    {
+        var configuration = BuildConfiguration(enabled: true, new string('A', 64));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            LocalServiceIdentitySeedOptions.FromConfiguration(configuration, environmentName));
+
+        Assert.Contains("Development or Testing", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The seeder accepts only a SHA-256 verifier and has no plaintext-secret option.
+    /// </summary>
+    [Fact]
+    public void Options_ExposeOnlyValidatedHashToDatabaseSeeder()
+    {
+        var configuration = BuildConfiguration(enabled: true, new string('A', 64));
+
+        var options = LocalServiceIdentitySeedOptions.FromConfiguration(
+            configuration,
+            Environments.Development);
+
+        Assert.True(options.Enabled);
+        Assert.Equal(
+            new string('A', 64),
+            options.GetSecretHash(LocalServiceIdentityProfileCatalog.AuthService));
+        Assert.DoesNotContain(
+            typeof(LocalServiceIdentitySeedOptions).GetProperties(),
+            property => property.Name.Contains("Raw", StringComparison.OrdinalIgnoreCase) ||
+                property.Name.Equals("ClientSecret", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Invalid or lowercase hashes must be rejected before any database write.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("abcd")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void FromConfiguration_InvalidHash_Throws(string hash)
+    {
+        var configuration = BuildConfiguration(enabled: true, hash);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            LocalServiceIdentitySeedOptions.FromConfiguration(configuration, "Testing"));
+    }
+
+    private static IConfiguration BuildConfiguration(bool enabled, string hash) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AspireLocalServiceIdentity:Enabled"] = enabled.ToString(),
+                ["AspireLocalServiceIdentity:Profiles:auth-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:contact-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:search-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:registry-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:country-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:currency-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:accounting-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:pricing-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:material-service:SecretHash"] = hash,
+                ["AspireLocalServiceIdentity:Profiles:lifecycle-service:SecretHash"] = hash
+            })
+            .Build();
+}

@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <UserSecretsId>82472bbe-c658-4916-bc6c-9b67ba086ee2</UserSecretsId>
+    <UserSecretsId>maliev-aspire</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,20 +16,33 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting.Python" Version="13.4.6" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.10" />
     <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.4.6" />
     <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.4.6" />
     <PackageReference Include="Aspire.Hosting.Redis" Version="13.4.6" />
+    <PackageReference Include="MessagePack" Version="2.5.302" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.10" />
+  </ItemGroup>
+
+  <!-- Force rebuild ServiceDefaults before building AppHost to ensure all services get latest DLL -->
+  <Target Name="EnsureServiceDefaultsBuilt" BeforeTargets="BeforeBuild">
+    <MSBuild Projects="..\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
+  </Target>
+
+  <ItemGroup>
+    <!-- Explicitly reference ServiceDefaults to ensure Visual Studio tracks it for rebuild -->
+    <ProjectReference Include="..\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" IsAspireProjectResource="false" />
 
     <ProjectReference Include="..\..\Maliev.AuthService\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CareerService\Maliev.CareerService.Api\Maliev.CareerService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ChatbotService\Maliev.ChatbotService.Api\Maliev.ChatbotService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CompensationService\Maliev.CompensationService.Api\Maliev.CompensationService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ComplianceService\Maliev.ComplianceService.Api\Maliev.ComplianceService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.CommerceService\Maliev.CommerceService.Api\Maliev.CommerceService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ContactService\Maliev.ContactService.Api\Maliev.ContactService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CountryService\Maliev.CountryService.Api\Maliev.CountryService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CurrencyService\Maliev.CurrencyService.Api\Maliev.CurrencyService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.CustomerService\Maliev.CustomerService.Api\Maliev.CustomerService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.DeliveryService\Maliev.DeliveryService.Api\Maliev.DeliveryService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.EmployeeService\Maliev.EmployeeService.Api\Maliev.EmployeeService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.InvoiceService\Maliev.InvoiceService.Api\Maliev.InvoiceService.Api.csproj" />
@@ -40,13 +53,29 @@
     <ProjectReference Include="..\..\Maliev.PaymentService\Maliev.PaymentService.Api\Maliev.PaymentService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PdfService\Maliev.PdfService.Api\Maliev.PdfService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.PerformanceService\Maliev.PerformanceService.Api\Maliev.PerformanceService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.PredictionService\Maliev.PredictionService.Api\Maliev.PredictionService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.PricingService\Maliev.PricingService.Api\Maliev.PricingService.Api.csproj" />
+
     <ProjectReference Include="..\..\Maliev.PurchaseOrderService\Maliev.PurchaseOrderService.Api\Maliev.PurchaseOrderService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.QuotationService\Maliev.QuotationService.Api\Maliev.QuotationService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.SearchService\Maliev.SearchService.Api\Maliev.SearchService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.SupplierService\Maliev.SupplierService.Api\Maliev.SupplierService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.AccountingService\Maliev.AccountingService.Api\Maliev.AccountingService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.ReceiptService\Maliev.ReceiptService.Api\Maliev.ReceiptService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.UploadService\Maliev.UploadService.Api\Maliev.UploadService.Api.csproj" />
     <ProjectReference Include="..\..\Maliev.NotificationService\Maliev.NotificationService.Api\Maliev.NotificationService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.RegistryService\Maliev.RegistryService.Api\Maliev.RegistryService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.FacilityService\Maliev.FacilityService.Api\Maliev.FacilityService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.InventoryService\Maliev.InventoryService.Api\Maliev.InventoryService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.JobService\Maliev.JobService.Api\Maliev.JobService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.ProjectService\Maliev.ProjectService.Api\Maliev.ProjectService.Api.csproj" />
+    <ProjectReference Include="..\..\Maliev.Intranet\Maliev.Intranet.Bff\Maliev.Intranet.Bff.csproj" />
+    <ProjectReference Include="..\..\Maliev.QuoteEngine\Maliev.QuoteEngine.Bff\Maliev.QuoteEngine.Bff.csproj" />
+    <ProjectReference Include="..\..\Maliev.Web\Maliev.Web.Bff\Maliev.Web.Bff.csproj" />
+
+    <!-- Service Data layers for direct database seeding -->
+    <ProjectReference Include="..\Maliev.Aspire.DatabaseSeeder\Maliev.Aspire.DatabaseSeeder.csproj" IsAspireProjectResource="false" />
+
   </ItemGroup>
 
 </Project>

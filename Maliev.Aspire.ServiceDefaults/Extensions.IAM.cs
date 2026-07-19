@@ -1,11 +1,10 @@
+using Maliev.Aspire.ServiceDefaults.Authorization;
+using Maliev.Aspire.ServiceDefaults.IAM;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Http.Resilience;
-using Microsoft.AspNetCore.Authorization;
-using Maliev.Aspire.ServiceDefaults.Authorization;
-using System.Diagnostics.CodeAnalysis;
-using Polly;
+using Microsoft.Extensions.Logging;
 
 namespace Maliev.Aspire.ServiceDefaults;
 
@@ -15,33 +14,59 @@ namespace Maliev.Aspire.ServiceDefaults;
 public static class IAMExtensions
 {
     /// <summary>
-    /// Adds and configures a resilient IAM client.
+    /// Adds and configures a resilient IAM client with service account authentication.
     /// </summary>
-    public static IServiceCollection AddIAMClient(
+    public static IHttpClientBuilder AddIAMClient(
         this IServiceCollection services,
         IConfiguration configuration,
         string serviceName)
     {
-        services.AddHttpClient("IAMService", client =>
+        // Register the token provider so the handler can resolve it
+        services.TryAddSingleton<IServiceAccountTokenProvider>(sp =>
         {
-            var iamConfig = configuration.GetSection("IAM");
-            var baseUrl = iamConfig["BaseUrl"] ?? "http://maliev-iamservice-api";
+            var config = sp.GetRequiredService<IConfiguration>();
+            return new ServiceAccountTokenProvider(config, serviceName);
+        });
 
-            client.BaseAddress = new Uri(baseUrl);
-            client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);
+        // Register the handler in DI so it can be resolved by the HttpClient builder
+        services.TryAddTransient<ServiceAccountAuthenticationHandler>();
 
-            var timeout = iamConfig.GetValue<int?>("Timeout") ?? 30000;
-            client.Timeout = TimeSpan.FromMilliseconds(timeout);
+        var httpClientBuilder = services.AddHttpClient("IAMService").ConfigureHttpClient((sp, client) =>
+        {
+            var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("IAMClientConfig");
 
-            var token = iamConfig["ServiceAccountToken"];
-            if (!string.IsNullOrEmpty(token))
+            // Check if there's an explicit URL configured (for GKE deployment)
+            var explicitUrl = configuration["Services:IAMService:BaseUrl"];
+
+            // DEBUG: Log what we're reading from configuration
+            logger.LogDebug("[IAM Client Config] Services:IAMService:BaseUrl = '{ExplicitUrl}'", explicitUrl ?? "null");
+
+            if (!string.IsNullOrEmpty(explicitUrl))
             {
-                client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+                // Use explicit URL for GKE/production
+                logger.LogInformation("[IAM Client Config] Using explicit BaseAddress: {ExplicitUrl}", explicitUrl);
+                client.BaseAddress = new Uri(explicitUrl);
             }
-        })
-        .AddStandardResilienceHandler();
+            else
+            {
+                // Prefer HTTPS service-discovery endpoints so service-account tokens are
+                // not stripped by an HTTP -> HTTPS redirect.
+                logger.LogDebug("[IAM Client Config] Using service discovery with service name: https+http://IAMService");
+                client.BaseAddress = new Uri("https+http://IAMService");
+            }
 
-        return services;
+            client.DefaultRequestHeaders.Add("X-Service-Name", serviceName);
+            client.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .RedactLoggedHeaders(["X-Maliev-IAM-Live-Check-Key"]);
+
+        // Add the authentication handler only once
+        httpClientBuilder.AddHttpMessageHandler<ServiceAccountAuthenticationHandler>();
+
+        // Enable Aspire service discovery to resolve IAMService endpoint
+        httpClientBuilder.AddServiceDiscovery();
+
+        return httpClientBuilder;
     }
 
     /// <summary>

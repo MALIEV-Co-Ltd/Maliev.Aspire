@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -8,14 +8,20 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="AngleSharp" Version="1.5.2" />
     <PackageReference Include="Aspire.Hosting.Testing" Version="13.4.6" />
-    <PackageReference Include="coverlet.collector" Version="10.0.1" />
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Humanizer" Version="3.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.57.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="Testcontainers" Version="4.13.0" />
-    <PackageReference Include="WireMock.Net" Version="1.25.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.13.0" />
+    <PackageReference Include="WireMock.Net" Version="2.12.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <PrivateAssets>all</PrivateAssets>
@@ -28,8 +34,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Maliev.Aspire.AppHost\Maliev.Aspire.AppHost.csproj" />
+    <ProjectReference Include="..\Maliev.Aspire.DatabaseSeeder\Maliev.Aspire.DatabaseSeeder.csproj" />
     <ProjectReference Include="..\Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\Maliev.Intranet\Maliev.Intranet.Shared\Maliev.Intranet.Shared.csproj" />
+    <ProjectReference Include="..\..\Maliev.AuthService\Maliev.AuthService.Domain\Maliev.AuthService.Domain.csproj" />
+    <ProjectReference Include="..\..\Maliev.AuthService\Maliev.AuthService.Infrastructure\Maliev.AuthService.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
   </ItemGroup>
 
 </Project>

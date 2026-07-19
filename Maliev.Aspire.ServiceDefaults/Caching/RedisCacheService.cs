@@ -1,32 +1,35 @@
-using System;
-using System.Linq;
-using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
+using System.Text.Json;
 
 namespace Maliev.Aspire.ServiceDefaults.Caching;
 
 /// <summary>
-/// Standardized Redis implementation of ICacheService using IDistributedCache and IConnectionMultiplexer.
+/// Standardized Redis implementation of ICacheService using IConnectionMultiplexer directly.
 /// </summary>
 public class RedisCacheService : ICacheService
 {
-    private readonly IDistributedCache _cache;
     private readonly IConnectionMultiplexer _redis;
     private readonly ILogger<RedisCacheService> _logger;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly string _instanceName;
 
+    /// <summary>
+    /// Initializes a new instance of the RedisCacheService with the specified dependencies.
+    /// </summary>
+    /// <param name="redis">The Redis connection multiplexer.</param>
+    /// <param name="options">Redis cache configuration options.</param>
+    /// <param name="logger">Logger for cache operations.</param>
     public RedisCacheService(
-        IDistributedCache cache,
         IConnectionMultiplexer redis,
+        IOptions<RedisCacheOptions> options,
         ILogger<RedisCacheService> logger)
     {
-        _cache = cache;
         _redis = redis;
         _logger = logger;
+        _instanceName = options.Value.InstanceName ?? string.Empty;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -35,17 +38,33 @@ public class RedisCacheService : ICacheService
         };
     }
 
+    /// <summary>
+    /// Retrieves a value from the Redis cache by key.
+    /// </summary>
+    /// <typeparam name="T">The type of the cached value.</typeparam>
+    /// <param name="key">The cache key.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The cached value if found, otherwise null.</returns>
     public async Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default) where T : class
     {
         try
         {
-            var json = await _cache.GetStringAsync(key, cancellationToken);
-            if (string.IsNullOrEmpty(json))
+            var database = _redis.GetDatabase();
+            var prefixedKey = _instanceName + key;
+            var value = await database.StringGetAsync(prefixedKey);
+
+            if (value.IsNull)
             {
                 return null;
             }
 
-            return JsonSerializer.Deserialize<T>(json, _jsonOptions);
+            // If T is string, return directly to avoid double quotes from JSON serialization
+            if (typeof(T) == typeof(string))
+            {
+                return value.ToString() as T;
+            }
+
+            return JsonSerializer.Deserialize<T>(value.ToString()!, _jsonOptions);
         }
         catch (Exception ex)
         {
@@ -54,16 +73,32 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Stores a value in the Redis cache with the specified time-to-live.
+    /// </summary>
+    /// <typeparam name="T">The type of the value to cache.</typeparam>
+    /// <param name="key">The cache key.</param>
+    /// <param name="value">The value to cache.</param>
+    /// <param name="ttl">The time-to-live for the cached entry.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task SetAsync<T>(string key, T value, TimeSpan ttl, CancellationToken cancellationToken = default) where T : class
     {
         try
         {
-            var json = JsonSerializer.Serialize(value, _jsonOptions);
-            var options = new DistributedCacheEntryOptions
+            var database = _redis.GetDatabase();
+            var prefixedKey = _instanceName + key;
+
+            string json;
+            if (value is string s)
             {
-                AbsoluteExpirationRelativeToNow = ttl
-            };
-            await _cache.SetStringAsync(key, json, options, cancellationToken);
+                json = s;
+            }
+            else
+            {
+                json = JsonSerializer.Serialize(value, _jsonOptions);
+            }
+
+            await database.StringSetAsync(prefixedKey, json, ttl);
         }
         catch (Exception ex)
         {
@@ -71,11 +106,18 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Removes a value from the Redis cache by key.
+    /// </summary>
+    /// <param name="key">The cache key to remove.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task RemoveAsync(string key, CancellationToken cancellationToken = default)
     {
         try
         {
-            await _cache.RemoveAsync(key, cancellationToken);
+            var database = _redis.GetDatabase();
+            var prefixedKey = _instanceName + key;
+            await database.KeyDeleteAsync(prefixedKey);
         }
         catch (Exception ex)
         {
@@ -83,6 +125,12 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Removes all cache entries matching the specified pattern from all Redis endpoints.
+    /// Uses SCAN to avoid blocking the Redis server.
+    /// </summary>
+    /// <param name="pattern">The key pattern to match (supports glob-style patterns).</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
     {
         if (!_redis.IsConnected)
@@ -94,14 +142,20 @@ public class RedisCacheService : ICacheService
         try
         {
             var endpoints = _redis.GetEndPoints();
-            var server = _redis.GetServer(endpoints.First());
             var database = _redis.GetDatabase();
+            var prefixedPattern = _instanceName + pattern;
 
-            var keys = server.Keys(pattern: pattern).ToArray();
-            if (keys.Length > 0)
+            // Use KeysAsync which uses SCAN to avoid blocking the server
+            foreach (var endpoint in endpoints)
             {
-                await database.KeyDeleteAsync(keys);
-                _logger.LogInformation("Removed {Count} keys matching pattern {Pattern} from Redis", keys.Length, pattern);
+                var server = _redis.GetServer(endpoint);
+
+                await foreach (var key in server.KeysAsync(pattern: prefixedPattern))
+                {
+                    await database.KeyDeleteAsync(key);
+                }
+
+                _logger.LogInformation("Finished removing keys matching pattern {Pattern} from Redis endpoint {Endpoint}", prefixedPattern, endpoint);
             }
         }
         catch (Exception ex)
@@ -110,17 +164,62 @@ public class RedisCacheService : ICacheService
         }
     }
 
+    /// <summary>
+    /// Checks whether a key exists in the Redis cache.
+    /// </summary>
+    /// <param name="key">The cache key to check.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>True if the key exists, otherwise false.</returns>
     public async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
     {
         try
         {
             var database = _redis.GetDatabase();
-            return await database.KeyExistsAsync(key);
+            var prefixedKey = _instanceName + key;
+            return await database.KeyExistsAsync(prefixedKey);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to check key existence in Redis: {Key}", key);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Atomically increments a counter in Redis and sets the time-to-live.
+    /// Uses a Lua script to ensure atomicity of the increment and expire operations.
+    /// </summary>
+    /// <param name="key">The cache key for the counter.</param>
+    /// <param name="ttl">The time-to-live for the key.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>The new value of the counter.</returns>
+    public async Task<long> IncrementAsync(string key, TimeSpan ttl, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var database = _redis.GetDatabase();
+            var prefixedKey = _instanceName + key;
+
+            // Use Lua script to ensure atomicity of INCR and EXPIRE
+            // Only set EXPIRE if the result of INCR is 1 (new key)
+            var script = @"
+                local newValue = redis.call('INCR', KEYS[1])
+                if newValue == 1 then
+                    redis.call('EXPIRE', KEYS[1], ARGV[1])
+                end
+                return newValue";
+
+            var result = await database.ScriptEvaluateAsync(
+                script,
+                [prefixedKey],
+                [(int)ttl.TotalSeconds]);
+
+            return (long)result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to increment cache key: {Key}", key);
+            return 0;
         }
     }
 }

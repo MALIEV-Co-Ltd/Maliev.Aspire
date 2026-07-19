@@ -3,18 +3,32 @@ using Microsoft.Extensions.Logging;
 
 namespace Maliev.Aspire.ServiceDefaults.Middleware;
 
+/// <summary>
+/// Middleware that assigns a correlation ID to each HTTP request for distributed tracing.
+/// The correlation ID is read from the X-Correlation-ID header if present, or generated as a new GUID.
+/// </summary>
 public class CorrelationIdMiddleware
 {
     private const string CorrelationIdHeaderName = "X-Correlation-ID";
     private readonly RequestDelegate _next;
     private readonly ILogger<CorrelationIdMiddleware> _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the CorrelationIdMiddleware.
+    /// </summary>
+    /// <param name="next">The next middleware in the pipeline.</param>
+    /// <param name="logger">The logger for correlation ID operations.</param>
     public CorrelationIdMiddleware(RequestDelegate next, ILogger<CorrelationIdMiddleware> logger)
     {
         _next = next;
         _logger = logger;
     }
 
+    /// <summary>
+    /// Processes the HTTP request and assigns or propagates a correlation ID.
+    /// </summary>
+    /// <param name="context">The HTTP context.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task InvokeAsync(HttpContext context)
     {
         var correlationId = GetOrCreateCorrelationId(context);

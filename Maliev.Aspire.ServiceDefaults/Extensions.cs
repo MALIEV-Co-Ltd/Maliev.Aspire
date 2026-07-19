@@ -4,12 +4,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Maliev.Aspire.ServiceDefaults.Telemetry;
+using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
-using OpenTelemetry.Logs;
-using Maliev.Aspire.ServiceDefaults.IAM;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -29,6 +28,49 @@ public static class Extensions
     /// <returns>The configured <see cref="IHostApplicationBuilder"/>.</returns>
     public static IHostApplicationBuilder AddServiceDefaults(this IHostApplicationBuilder builder)
     {
+        // Disable GSSAPI authentication globally to avoid SPNEGO negotiation noise in postgres-server logs.
+        // This resolves the "DETAIL: No credentials were supplied... SPNEGO cannot find mechanisms to negotiate" error.
+        Environment.SetEnvironmentVariable("NPGSQL_GSSAPI_AUTHENTICATION", "false");
+        Environment.SetEnvironmentVariable("PGGSSENCMODE", "disable");
+
+        // Disable MassTransit usage telemetry to prevent "Usage Telemetry:" JSON logs
+        Environment.SetEnvironmentVariable("MASSTRANSIT_USAGE_TELEMETRY", "false");
+
+        // Reduce log verbosity for noisy categories
+        // ASP.NET Core infrastructure (keep errors only)
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.DataProtection", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.ResponseCaching", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Mvc.Infrastructure", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Mvc.ModelBinding", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Authentication", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Antiforgery", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.StaticFiles", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.StaticAssets", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Warning); // Reduce startup/shutdown noise
+
+        // Health checks - Enabled for debugging
+        builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService", LogLevel.Warning);
+
+        // Service discovery and resilience (temporarily verbose for debugging)
+        builder.Logging.AddFilter("Microsoft.Extensions.ServiceDiscovery", LogLevel.Information);
+        builder.Logging.AddFilter("Polly", LogLevel.Error);
+
+        // Infrastructure components
+        builder.Logging.AddFilter("StackExchange.Redis", LogLevel.Warning); // Redis connection noise
+        builder.Logging.AddFilter("Npgsql", LogLevel.Warning); // PostgreSQL connection noise
+        builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Critical);
+
+        // MassTransit/RabbitMQ - Warning level for transport; Information for message processing
+        builder.Logging.AddFilter("MassTransit", LogLevel.Warning);
+        builder.Logging.AddFilter("MassTransit.Messages", LogLevel.Information);
+
+        // IAM and Authorization
+        builder.Logging.AddFilter("IAM.Handler.Factory", LogLevel.Warning);
+        builder.Logging.AddFilter("Microsoft.AspNetCore.Authorization", LogLevel.Warning);
+
         // --- OpenTelemetry ---
         builder.Logging.AddOpenTelemetry(logging =>
         {
@@ -42,30 +84,50 @@ public static class Extensions
         });
 
         var useOtlpExporter = !string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
+        var enableTracing = useOtlpExporter ||
+            builder.Configuration.GetValue("Observability:TracingEnabled", false);
+        var enableRuntimeMetrics = builder.Configuration.GetValue(
+            "Observability:RuntimeMetricsEnabled",
+            !builder.Environment.IsDevelopment());
 
-        builder.Services.AddOpenTelemetry()
+        var openTelemetry = builder.Services.AddOpenTelemetry()
             .WithMetrics(metrics =>
             {
                 metrics.AddAspNetCoreInstrumentation()
-                    .AddHttpClientInstrumentation()
-                    .AddRuntimeInstrumentation()
-                    .AddPrometheusExporter(); // Export metrics for Prometheus
+                    .AddHttpClientInstrumentation();
+
+                if (enableRuntimeMetrics)
+                {
+                    metrics.AddRuntimeInstrumentation();
+                }
+
+                metrics.AddPrometheusExporter(); // Export metrics for Prometheus
 
                 if (useOtlpExporter)
                 {
                     metrics.AddOtlpExporter();
                 }
-            })
-            .WithTracing(tracing =>
+            });
+
+        if (enableTracing)
+        {
+            openTelemetry.WithTracing(tracing =>
             {
-                tracing.AddAspNetCoreInstrumentation()
-                       .AddHttpClientInstrumentation();
+                tracing.AddAspNetCoreInstrumentation(options =>
+                {
+                    options.Filter = IsNotAspireLivenessRequest;
+                })
+                       .AddHttpClientInstrumentation()
+                       .AddSource("MassTransit") // Track messaging activities
+                       .AddSource("Npgsql")       // Track DB activities
+                       .AddProcessor(new UrlQueryRedactionProcessor());
 
                 if (useOtlpExporter)
                 {
                     tracing.AddOtlpExporter();
                 }
             });
+        }
 
 
         // --- Health Checks ---
@@ -73,34 +135,40 @@ public static class Extensions
             // Add a default liveness check to ensure app is responsive
             .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
 
-        // Configure HealthCheck publisher options for background checks if needed
+        // Configure HealthCheck publisher options for background checks
         builder.Services.Configure<HealthCheckPublisherOptions>(options =>
         {
-            options.Delay = TimeSpan.FromSeconds(5);
+            options.Delay = TimeSpan.FromSeconds(30); // Increased delay (10s -> 30s) to allow migrations and IAM registration to stabilize
             options.Period = TimeSpan.FromSeconds(30);
+            options.Timeout = TimeSpan.FromMinutes(3); // Increased timeout (2m -> 3m) for heavy startup load
         });
 
         // --- Service Discovery and Resilience ---
         builder.Services.AddServiceDiscovery();
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            // Turn on resilience by default
-            http.AddStandardResilienceHandler();
+            // Turn on resilience by default with optimized timeouts
+            http.AddStandardResilienceHandler(options =>
+            {
+                // Tuned timeouts: IAM registration can be slow but 100s is excessive
+                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(30);
+                options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(60);
+                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(65); // Must be >= 2 * AttemptTimeout
+            });
 
             // Turn on service discovery by default
             http.AddServiceDiscovery();
         });
 
-        // Specifically relax timeouts for IAM Service registration which can be heavy during startup
-        builder.Services.AddHttpClient("IAMService")
-            .AddStandardResilienceHandler(options =>
-            {
-                options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
-                options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(90);
-                options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(120); // Must be >= 2 * AttemptTimeout
-            });
-
         return builder;
+    }
+
+    private static bool IsNotAspireLivenessRequest(HttpContext context)
+    {
+        var path = context.Request.Path.Value;
+        return path is null || !path.EndsWith(
+            "/aspire-liveness",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -136,10 +204,21 @@ public static class Extensions
             throw new ArgumentException("Service prefix is required for MapDefaultEndpoints", nameof(servicePrefix));
         }
 
-        // Liveness endpoint - simple check that always returns healthy (for ingress)
-        app.MapGet($"/{servicePrefix}/liveness", () => "Healthy").AllowAnonymous();
+        // Aspire-specific liveness check (minimal, fast)
+        // Only checks if service process is running - optimized for Aspire orchestration
+        // This endpoint responds in < 10ms to avoid Aspire's hardcoded 3-second timeout
+        app.MapGet($"/{servicePrefix}/aspire-liveness", () => "Healthy")
+            .WithTags("aspire")
+            .AllowAnonymous();
 
-        // Readiness endpoint - checks all dependencies (for ingress)
+        // Liveness endpoint - simple check that always returns healthy (for Kubernetes ingress)
+        app.MapGet($"/{servicePrefix}/liveness", () => "Healthy")
+            .WithTags("kubernetes")
+            .AllowAnonymous();
+
+        // Readiness endpoint - comprehensive checks for all dependencies (for Kubernetes ingress)
+        // Performs thorough validation: Database, Redis, RabbitMQ, IAM registration
+        // May take 900-2600ms depending on infrastructure load
         app.MapHealthChecks($"/{servicePrefix}/readiness", new HealthCheckOptions
         {
             Predicate = _ => true, // All health checks must pass
@@ -164,7 +243,8 @@ public static class Extensions
                 });
                 await context.Response.WriteAsync(result);
             }
-        });
+        })
+        .WithTags("kubernetes");
 
         // OpenTelemetry Prometheus metrics endpoint at /{servicePrefix}/metrics
         app.MapPrometheusScrapingEndpoint($"/{servicePrefix}/metrics");

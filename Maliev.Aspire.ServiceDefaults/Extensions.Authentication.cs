@@ -1,9 +1,8 @@
+using Maliev.Aspire.ServiceDefaults;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
-using Maliev.Aspire.ServiceDefaults;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -14,6 +13,8 @@ namespace Microsoft.Extensions.Hosting;
 /// </summary>
 public static class AuthenticationExtensions
 {
+    private const string TestSymmetricSecurityKey = "test-key-at-least-32-characters-long-for-integration-tests";
+
     /// <summary>
     /// Adds JWT Bearer authentication with RSA public key validation.
     /// Reads configuration from:
@@ -33,47 +34,52 @@ public static class AuthenticationExtensions
         var issuer = builder.Configuration["Jwt:Issuer"];
         var audience = builder.Configuration["Jwt:Audience"];
 
+        if (builder.Environment.IsEnvironment("Testing"))
+        {
+            var testingSigningKeys = CreateTestingSigningKeys(publicKeyBase64, securityKey);
+
+            builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                .AddJwtBearer(options =>
+                {
+                    options.MapInboundClaims = false;
+                    // Testing uses JwtSecurityTokenHandler's SignatureValidator hook for local tokens.
+#pragma warning disable CS0618
+                    options.UseSecurityTokenValidators = true;
+#pragma warning restore CS0618
+
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuer = false,
+                        ValidateAudience = false,
+                        ValidateLifetime = false,
+                        ValidateIssuerSigningKey = false,
+                        IssuerSigningKeys = testingSigningKeys,
+                        NameClaimType = System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub,
+                        RoleClaimType = "role",
+                        SignatureValidator = delegate (string token, TokenValidationParameters parameters)
+                        {
+                            var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+                            return handler.ReadJwtToken(token);
+                        }
+                    };
+
+                    configureOptions?.Invoke(options);
+                });
+
+            builder.Services.AddPermissionAuthorization();
+            return builder;
+        }
+
         if (string.IsNullOrEmpty(publicKeyBase64))
         {
-            // Fallback to symmetric if provided (standard for integration tests)
-            if (!string.IsNullOrEmpty(securityKey))
+            if (!string.IsNullOrEmpty(securityKey) && IsSymmetricValidationAllowed(builder))
             {
                 return builder.AddJwtAuthenticationSymmetric(configureOptions);
             }
 
-            if (builder.Environment.IsEnvironment("Testing"))
-            {
-                // In testing, we don't need the public key here as it will be overridden 
-                // by the test factory's PostConfigureAll<JwtBearerOptions>.
-                // We still need to register authentication and authorization.
-                builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                    .AddJwtBearer(options =>
-                    {
-                        // Disable claim type mapping to keep original claim names like "sub" instead of URIs
-                        options.MapInboundClaims = false;
-
-                        // Minimal configuration for tests - will be overridden by PostConfigureAll in tests
-                        options.TokenValidationParameters = new TokenValidationParameters
-                        {
-                            ValidateIssuer = false,
-                            ValidateAudience = false,
-                            ValidateLifetime = false,
-                            ValidateIssuerSigningKey = false,
-                            SignatureValidator = delegate (string token, TokenValidationParameters parameters)
-                            {
-                                var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-                                return handler.ReadJwtToken(token);
-                            }
-                        };
-
-                        configureOptions?.Invoke(options);
-                    });
-
-                builder.Services.AddPermissionAuthorization();
-                return builder;
-            }
-
-            throw new InvalidOperationException("JWT PublicKey not configured. Set Jwt:PublicKey in configuration.");
+            throw new InvalidOperationException(
+                "JWT PublicKey not configured. Set Jwt:PublicKey in configuration. " +
+                "Symmetric Jwt:SecurityKey validation is allowed only in Development or Testing.");
         }
 
         // Decode Base64 PEM public key
@@ -94,8 +100,7 @@ public static class AuthenticationExtensions
             RoleClaimType = "role"
         };
 
-        // Check if we have a symmetric fallback key (e.g. for tests)
-        if (!string.IsNullOrEmpty(securityKey))
+        if (!string.IsNullOrEmpty(securityKey) && IsSymmetricValidationAllowed(builder))
         {
             var symmetricKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey));
             tokenValidationParameters.IssuerSigningKeys = new SecurityKey[]
@@ -116,9 +121,16 @@ public static class AuthenticationExtensions
                 options.MapInboundClaims = false;
                 options.TokenValidationParameters = tokenValidationParameters;
 
+                // Development convenience: Allow HTTP metadata if not in Production
+                if (!builder.Environment.IsProduction())
+                {
+                    options.RequireHttpsMetadata = false;
+                }
+
                 // Apply custom configuration if provided
                 configureOptions?.Invoke(options);
             });
+
 
         builder.Services.AddPermissionAuthorization();
 
@@ -142,6 +154,13 @@ public static class AuthenticationExtensions
         var securityKey = builder.Configuration["Jwt:SecurityKey"];
         var issuer = builder.Configuration["Jwt:Issuer"];
         var audience = builder.Configuration["Jwt:Audience"];
+
+        if (!IsSymmetricValidationAllowed(builder))
+        {
+            throw new InvalidOperationException(
+                "Symmetric JWT validation is allowed only in Development or Testing. " +
+                "Configure Jwt:PublicKey and use AddJwtAuthentication() for shared service authentication.");
+        }
 
         if (string.IsNullOrEmpty(securityKey))
         {
@@ -177,5 +196,48 @@ public static class AuthenticationExtensions
         builder.Services.AddPermissionAuthorization();
 
         return builder;
+    }
+
+    private static bool IsSymmetricValidationAllowed(IHostApplicationBuilder builder)
+    {
+        if (builder.Environment.IsEnvironment("Testing"))
+        {
+            return true;
+        }
+
+        if (!builder.Environment.IsDevelopment())
+        {
+            return false;
+        }
+
+        return builder.Configuration.GetValue("Jwt:AllowSymmetricValidation", true);
+    }
+
+    private static IReadOnlyCollection<SecurityKey> CreateTestingSigningKeys(
+        string? publicKeyBase64,
+        string? securityKey)
+    {
+        var keys = new List<SecurityKey>
+        {
+            new SymmetricSecurityKey(Encoding.UTF8.GetBytes(TestSymmetricSecurityKey))
+            {
+                KeyId = "test-symmetric-key"
+            }
+        };
+
+        if (!string.IsNullOrWhiteSpace(securityKey))
+        {
+            keys.Add(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(publicKeyBase64))
+        {
+            var publicKeyPem = Encoding.UTF8.GetString(Convert.FromBase64String(publicKeyBase64));
+            var rsa = RSA.Create();
+            rsa.ImportFromPem(publicKeyPem);
+            keys.Add(new RsaSecurityKey(rsa));
+        }
+
+        return keys;
     }
 }

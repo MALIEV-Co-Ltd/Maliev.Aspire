@@ -1,25 +1,47 @@
+using Maliev.Aspire.ServiceDefaults;
+using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Maliev.Aspire.ServiceDefaults.IAM;
-using Polly;
-using Microsoft.AspNetCore.Http;
-using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Microsoft.Extensions.Hosting;
 
 // Standardized HTTP client extensions for Maliev microservices.
+/// <summary>
+/// Provides extension methods for registering and configuring HTTP clients for MALIEV microservices
+/// with standardized service discovery, resilience patterns, and service account authentication.
+/// </summary>
 public static class HttpClientExtensions
 {
     /// <summary>
-    /// Adds IAM service HTTP client with standard resilience.
+    /// Adds IAM service HTTP client with standard resilience and service account authentication.
     /// </summary>
+    /// <param name="builder">The application builder.</param>
+    /// <param name="serviceName">Optional explicit service name. If null, reads from "ServiceName" config.</param>
     public static IHostApplicationBuilder AddIAMServiceClient(
-        this IHostApplicationBuilder builder)
+        this IHostApplicationBuilder builder,
+        string? serviceName = null)
     {
-        // Register both typed and named client
-        builder.AddServiceClient<IIamServiceClient, IamServiceClient>("IAM");
-        builder.AddServiceClient("IAMService");
+        ArgumentNullException.ThrowIfNull(builder);
+        IamClientRegistrationGuard.EnsureLegacyClientCanRegister(builder.Services);
+
+        // Require explicit name via parameter or configuration
+        // REMOVED multiple fallbacks to ensure standardized configuration
+        var finalServiceName = serviceName
+            ?? builder.Configuration["ServiceName"]
+            ?? throw new InvalidOperationException("Service name must be provided to AddIAMServiceClient via the 'serviceName' parameter or configuration key 'ServiceName'.");
+
+        if (!IamClientRegistrationGuard.TryReserveLegacyClient(builder.Services))
+        {
+            return builder;
+        }
+
+        // Register the named client "IAMService" with full configuration (resilience + service account auth)
+        // This uses the AddIAMClient extension which configures auth handler and service discovery
+        builder.Services.AddIAMClient(builder.Configuration, finalServiceName);
+
+        // Register the IamServiceClient which uses IHttpClientFactory to create "IAMService" clients
+        builder.Services.AddScoped<IIamServiceClient, IamServiceClient>();
 
         return builder;
     }
@@ -81,8 +103,60 @@ public static class HttpClientExtensions
     }
 
     /// <summary>
-    /// Adds a typed service HTTP client with standardized Triple Fallback discovery and resilience.
+    /// Adds a typed service HTTP client with standardized discovery, resilience and Service Account authentication.
     /// </summary>
+    /// <typeparam name="TInterface">The HTTP client interface type.</typeparam>
+    /// <typeparam name="TImplementation">The HTTP client implementation type.</typeparam>
+    /// <param name="builder">The application builder.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <param name="sourceServiceName">Optional source service name for authentication (defaults to configured ServiceName).</param>
+    /// <returns>The HTTP client builder.</returns>
+    public static IHttpClientBuilder AddAuthenticatedServiceClient<TInterface, TImplementation>(
+        this IHostApplicationBuilder builder,
+        string serviceName,
+        string? sourceServiceName = null)
+        where TInterface : class
+        where TImplementation : class, TInterface
+    {
+        // Ensure ServiceAccountAuthenticationHandler is registered (idempotent - TryAdd)
+        builder.Services.TryAddTransient<ServiceAccountAuthenticationHandler>();
+
+        // Register the typed client using the named configuration
+        // Note: We do NOT call AddIAMClient here because that would overwrite the "IAMService"
+        // named client registration if AddIAMServiceClient was already called.
+        // The IAMService named client (base address, auth handler chain) is shared across all
+        // authenticated service clients and is only registered once via AddIAMServiceClient.
+        return builder.Services.AddHttpClient<TInterface, TImplementation>(serviceName, (sp, client) =>
+        {
+            // Check if there's an explicit URL configured (for GKE deployment)
+            var explicitUrl = builder.Configuration[$"Services:{serviceName}:BaseUrl"];
+
+            if (!string.IsNullOrEmpty(explicitUrl))
+            {
+                // Use explicit URL for GKE/production
+                client.BaseAddress = new Uri(explicitUrl);
+            }
+            else
+            {
+                // Prefer HTTPS service-discovery endpoints so authenticated requests do not
+                // lose Authorization headers on an HTTP -> HTTPS redirect.
+                client.BaseAddress = new Uri($"https+http://{serviceName}");
+            }
+
+            client.Timeout = TimeSpan.FromSeconds(90);
+        })
+        .AddServiceDiscovery() // Resolves serviceName -> BaseAddress via Aspire
+        .AddHttpMessageHandler<ServiceAccountAuthenticationHandler>();
+    }
+
+    /// <summary>
+    /// Adds a typed service HTTP client with standardized discovery and resilience using .NET Aspire service discovery.
+    /// </summary>
+    /// <typeparam name="TInterface">The HTTP client interface type.</typeparam>
+    /// <typeparam name="TImplementation">The HTTP client implementation type.</typeparam>
+    /// <param name="builder">The application builder.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <returns>The HTTP client builder.</returns>
     public static IHttpClientBuilder AddServiceClient<TInterface, TImplementation>(
         this IHostApplicationBuilder builder,
         string serviceName)
@@ -93,8 +167,15 @@ public static class HttpClientExtensions
     }
 
     /// <summary>
-    /// Adds a typed service HTTP client with standardized Triple Fallback discovery and resilience.
+    /// Adds a typed service HTTP client with ENFORCED configuration pattern.
+    /// REQUIRED: Services:{ServiceName}:BaseUrl must be configured (no fallbacks).
     /// </summary>
+    /// <typeparam name="TInterface">The HTTP client interface type.</typeparam>
+    /// <typeparam name="TImplementation">The HTTP client implementation type.</typeparam>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <returns>The HTTP client builder.</returns>
     public static IHttpClientBuilder AddServiceClient<TInterface, TImplementation>(
         this IServiceCollection services,
         IConfiguration configuration,
@@ -104,26 +185,36 @@ public static class HttpClientExtensions
     {
         var httpClientBuilder = services.AddHttpClient<TInterface, TImplementation>((sp, client) =>
         {
-            var normalizedName = serviceName.ToLowerInvariant().Replace("service", "");
-            var dnsName = $"maliev-{normalizedName}service-api";
+            // Check if there's an explicit URL configured (for GKE deployment)
+            var explicitUrl = configuration[$"Services:{serviceName}:BaseUrl"];
 
-            // Triple Fallback URI logic
-            var url = configuration[$"{serviceName}:BaseUrl"]
-                ?? configuration.GetConnectionString(serviceName)
-                ?? $"http://{dnsName}";
+            if (!string.IsNullOrEmpty(explicitUrl))
+            {
+                // Use explicit URL for GKE/production
+                client.BaseAddress = new Uri(explicitUrl);
+            }
+            else
+            {
+                // Prefer HTTPS service-discovery endpoints so clients do not
+                // lose Authorization headers on an HTTP -> HTTPS redirect.
+                client.BaseAddress = new Uri($"https+http://{serviceName}");
+            }
 
-            client.BaseAddress = new Uri(url);
-            client.Timeout = TimeSpan.FromSeconds(60);
-        });
-
-        httpClientBuilder.AddStandardResilienceHandler();
+            client.Timeout = TimeSpan.FromSeconds(90);
+        })
+        .AddServiceDiscovery(); // Resolves serviceName -> BaseAddress via Aspire
 
         return httpClientBuilder;
     }
 
     /// <summary>
-    /// Adds generic service HTTP client with configurable name and URL.
+    /// Adds a generic named HTTP client with standardized discovery and resilience using .NET Aspire.
     /// </summary>
+    /// <param name="builder">The application builder.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <param name="baseUrl">Optional base URL override (for testing or direct URLs).</param>
+    /// <param name="configureClient">Optional action to configure the HTTP client.</param>
+    /// <returns>The HTTP client builder.</returns>
     public static IHttpClientBuilder AddServiceClient(
         this IHostApplicationBuilder builder,
         string serviceName,
@@ -134,8 +225,15 @@ public static class HttpClientExtensions
     }
 
     /// <summary>
-    /// Adds generic service HTTP client with configurable name and URL.
+    /// Adds a generic named HTTP client with ENFORCED configuration pattern.
+    /// REQUIRED: Services:{ServiceName}:BaseUrl must be configured (no fallbacks).
     /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configuration">The application configuration.</param>
+    /// <param name="serviceName">The name of the service to connect to.</param>
+    /// <param name="baseUrl">Optional base URL override.</param>
+    /// <param name="configureClient">Optional action to configure the HTTP client.</param>
+    /// <returns>The HTTP client builder.</returns>
     public static IHttpClientBuilder AddServiceClient(
         this IServiceCollection services,
         IConfiguration configuration,
@@ -145,21 +243,26 @@ public static class HttpClientExtensions
     {
         var httpClientBuilder = services.AddHttpClient(serviceName, (sp, client) =>
         {
-            var normalizedName = serviceName.ToLowerInvariant().Replace("service", "");
-            var dnsName = $"maliev-{normalizedName}service-api";
+            // Check if there's an explicit URL configured (for GKE deployment)
+            var explicitUrl = baseUrl ?? configuration[$"Services:{serviceName}:BaseUrl"];
 
-            var url = baseUrl
-                ?? configuration[$"{serviceName}:BaseUrl"]
-                ?? configuration.GetConnectionString(serviceName)
-                ?? $"http://{dnsName}";
+            if (!string.IsNullOrEmpty(explicitUrl))
+            {
+                // Use explicit URL for GKE/production
+                client.BaseAddress = new Uri(explicitUrl);
+            }
+            else
+            {
+                // Prefer HTTPS service-discovery endpoints so clients do not
+                // lose Authorization headers on an HTTP -> HTTPS redirect.
+                client.BaseAddress = new Uri($"https+http://{serviceName}");
+            }
 
-            client.BaseAddress = new Uri(url);
-            client.Timeout = TimeSpan.FromSeconds(60);
+            client.Timeout = TimeSpan.FromSeconds(90);
 
             configureClient?.Invoke(client);
-        });
-
-        httpClientBuilder.AddStandardResilienceHandler();
+        })
+        .AddServiceDiscovery(); // Resolves serviceName -> BaseAddress via Aspire
 
         return httpClientBuilder;
     }

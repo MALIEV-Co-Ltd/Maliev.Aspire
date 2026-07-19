@@ -1,0 +1,238 @@
+<Solution>
+  <Folder Name="/APIs/" />
+  <Folder Name="/APIs/Accounting Service/">
+    <Project Path="../Maliev.AccountingService/Maliev.AccountingService.Application/Maliev.AccountingService.Application.csproj" />
+    <Project Path="../Maliev.AccountingService/Maliev.AccountingService.Domain/Maliev.AccountingService.Domain.csproj" />
+    <Project Path="../Maliev.AccountingService/Maliev.AccountingService.Infrastructure/Maliev.AccountingService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.AccountingService\Maliev.AccountingService.Api\Maliev.AccountingService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Auth Service/">
+    <Project Path="../Maliev.AuthService/Maliev.AuthService.Application/Maliev.AuthService.Application.csproj" />
+    <Project Path="../Maliev.AuthService/Maliev.AuthService.Domain/Maliev.AuthService.Domain.csproj" />
+    <Project Path="../Maliev.AuthService/Maliev.AuthService.Infrastructure/Maliev.AuthService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.AuthService\Maliev.AuthService.Api\Maliev.AuthService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Career Service/">
+    <Project Path="../Maliev.CareerService/Maliev.CareerService.Application/Maliev.CareerService.Application.csproj" />
+    <Project Path="../Maliev.CareerService/Maliev.CareerService.Domain/Maliev.CareerService.Domain.csproj" />
+    <Project Path="../Maliev.CareerService/Maliev.CareerService.Infrastructure/Maliev.CareerService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.CareerService\Maliev.CareerService.Api\Maliev.CareerService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Chatbot Service/">
+    <Project Path="..\Maliev.ChatbotService\Maliev.ChatbotService.Api\Maliev.ChatbotService.Api.csproj" />
+    <Project Path="..\Maliev.ChatbotService\Maliev.ChatbotService.Application\Maliev.ChatbotService.Application.csproj" />
+    <Project Path="..\Maliev.ChatbotService\Maliev.ChatbotService.Domain\Maliev.ChatbotService.Domain.csproj" />
+    <Project Path="..\Maliev.ChatbotService\Maliev.ChatbotService.Infrastructure\Maliev.ChatbotService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Compensation Service/">
+    <Project Path="..\Maliev.CompensationService\Maliev.CompensationService.Api\Maliev.CompensationService.Api.csproj" />
+    <Project Path="..\Maliev.CompensationService\Maliev.CompensationService.Application\Maliev.CompensationService.Application.csproj" />
+    <Project Path="..\Maliev.CompensationService\Maliev.CompensationService.Domain\Maliev.CompensationService.Domain.csproj" />
+    <Project Path="..\Maliev.CompensationService\Maliev.CompensationService.Infrastructure\Maliev.CompensationService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Compliance Service/">
+    <Project Path="..\Maliev.ComplianceService\Maliev.ComplianceService.Api\Maliev.ComplianceService.Api.csproj" />
+    <Project Path="..\Maliev.ComplianceService\Maliev.ComplianceService.Application\Maliev.ComplianceService.Application.csproj" />
+    <Project Path="..\Maliev.ComplianceService\Maliev.ComplianceService.Domain\Maliev.ComplianceService.Domain.csproj" />
+    <Project Path="..\Maliev.ComplianceService\Maliev.ComplianceService.Infrastructure\Maliev.ComplianceService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Commerce Service/">
+    <Project Path="..\Maliev.CommerceService\Maliev.CommerceService.Api\Maliev.CommerceService.Api.csproj" />
+    <Project Path="..\Maliev.CommerceService\Maliev.CommerceService.Application\Maliev.CommerceService.Application.csproj" />
+    <Project Path="..\Maliev.CommerceService\Maliev.CommerceService.Domain\Maliev.CommerceService.Domain.csproj" />
+    <Project Path="..\Maliev.CommerceService\Maliev.CommerceService.Infrastructure\Maliev.CommerceService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Contact Service/">
+    <Project Path="../Maliev.ContactService/Maliev.ContactService.Application/Maliev.ContactService.Application.csproj" />
+    <Project Path="../Maliev.ContactService/Maliev.ContactService.Domain/Maliev.ContactService.Domain.csproj" />
+    <Project Path="../Maliev.ContactService/Maliev.ContactService.Infrastructure/Maliev.ContactService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.ContactService\Maliev.ContactService.Api\Maliev.ContactService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Country Service/">
+    <Project Path="../Maliev.CountryService/Maliev.CountryService.Application/Maliev.CountryService.Application.csproj" />
+    <Project Path="../Maliev.CountryService/Maliev.CountryService.Domain/Maliev.CountryService.Domain.csproj" />
+    <Project Path="../Maliev.CountryService/Maliev.CountryService.Infrastructure/Maliev.CountryService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.CountryService\Maliev.CountryService.Api\Maliev.CountryService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Currency Service/">
+    <Project Path="../Maliev.CurrencyService/Maliev.CurrencyService.Application/Maliev.CurrencyService.Application.csproj" />
+    <Project Path="../Maliev.CurrencyService/Maliev.CurrencyService.Domain/Maliev.CurrencyService.Domain.csproj" />
+    <Project Path="../Maliev.CurrencyService/Maliev.CurrencyService.Infrastructure/Maliev.CurrencyService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.CurrencyService\Maliev.CurrencyService.Api\Maliev.CurrencyService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Customer Service/">
+    <Project Path="../Maliev.CustomerService/Maliev.CustomerService.Application/Maliev.CustomerService.Application.csproj" />
+    <Project Path="../Maliev.CustomerService/Maliev.CustomerService.Domain/Maliev.CustomerService.Domain.csproj" />
+    <Project Path="../Maliev.CustomerService/Maliev.CustomerService.Infrastructure/Maliev.CustomerService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.CustomerService\Maliev.CustomerService.Api\Maliev.CustomerService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Delivery Service/">
+    <Project Path="../Maliev.DeliveryService/Maliev.DeliveryService.Api/Maliev.DeliveryService.Api.csproj" />
+    <Project Path="../Maliev.DeliveryService/Maliev.DeliveryService.Application/Maliev.DeliveryService.Application.csproj" />
+    <Project Path="../Maliev.DeliveryService/Maliev.DeliveryService.Domain/Maliev.DeliveryService.Domain.csproj" />
+    <Project Path="../Maliev.DeliveryService/Maliev.DeliveryService.Infrastructure/Maliev.DeliveryService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Employee Service/">
+    <Project Path="..\Maliev.EmployeeService\Maliev.EmployeeService.Api\Maliev.EmployeeService.Api.csproj" />
+    <Project Path="..\Maliev.EmployeeService\Maliev.EmployeeService.Application\Maliev.EmployeeService.Application.csproj" />
+    <Project Path="..\Maliev.EmployeeService\Maliev.EmployeeService.Domain\Maliev.EmployeeService.Domain.csproj" />
+    <Project Path="..\Maliev.EmployeeService\Maliev.EmployeeService.Infrastructure\Maliev.EmployeeService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Facility Service/">
+    <Project Path="..\Maliev.FacilityService\Maliev.FacilityService.Api\Maliev.FacilityService.Api.csproj" />
+    <Project Path="..\Maliev.FacilityService\Maliev.FacilityService.Application\Maliev.FacilityService.Application.csproj" />
+    <Project Path="..\Maliev.FacilityService\Maliev.FacilityService.Domain\Maliev.FacilityService.Domain.csproj" />
+    <Project Path="..\Maliev.FacilityService\Maliev.FacilityService.Infrastructure\Maliev.FacilityService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/IAM Service/">
+    <Project Path="../Maliev.IAMService/Maliev.IAMService.Application/Maliev.IAMService.Application.csproj" />
+    <Project Path="../Maliev.IAMService/Maliev.IAMService.Domain/Maliev.IAMService.Domain.csproj" />
+    <Project Path="../Maliev.IAMService/Maliev.IAMService.Infrastructure/Maliev.IAMService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.IAMService\Maliev.IAMService.Api\Maliev.IAMService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Inventory Service/">
+    <Project Path="../Maliev.InventoryService/Maliev.InventoryService.Api/Maliev.InventoryService.Api.csproj" />
+    <Project Path="../Maliev.InventoryService/Maliev.InventoryService.Application/Maliev.InventoryService.Application.csproj" />
+    <Project Path="../Maliev.InventoryService/Maliev.InventoryService.Domain/Maliev.InventoryService.Domain.csproj" />
+    <Project Path="../Maliev.InventoryService/Maliev.InventoryService.Infrastructure/Maliev.InventoryService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Invoice Service/">
+    <Project Path="../Maliev.InvoiceService/Maliev.InvoiceService.Application/Maliev.InvoiceService.Application.csproj" />
+    <Project Path="../Maliev.InvoiceService/Maliev.InvoiceService.Domain/Maliev.InvoiceService.Domain.csproj" />
+    <Project Path="../Maliev.InvoiceService/Maliev.InvoiceService.Infrastructure/Maliev.InvoiceService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.InvoiceService\Maliev.InvoiceService.Api\Maliev.InvoiceService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Job Service/">
+    <Project Path="../Maliev.JobService/Maliev.JobService.Api/Maliev.JobService.Api.csproj" />
+    <Project Path="../Maliev.JobService/Maliev.JobService.Application/Maliev.JobService.Application.csproj" />
+    <Project Path="../Maliev.JobService/Maliev.JobService.Domain/Maliev.JobService.Domain.csproj" />
+    <Project Path="../Maliev.JobService/Maliev.JobService.Infrastructure/Maliev.JobService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Leave Service/">
+    <Project Path="..\Maliev.LeaveService\Maliev.LeaveService.Api\Maliev.LeaveService.Api.csproj" />
+    <Project Path="..\Maliev.LeaveService\Maliev.LeaveService.Application\Maliev.LeaveService.Application.csproj" />
+    <Project Path="..\Maliev.LeaveService\Maliev.LeaveService.Domain\Maliev.LeaveService.Domain.csproj" />
+    <Project Path="..\Maliev.LeaveService\Maliev.LeaveService.Infrastructure\Maliev.LeaveService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Lifecycle Service/">
+    <Project Path="..\Maliev.LifecycleService\Maliev.LifecycleService.Api\Maliev.LifecycleService.Api.csproj" />
+    <Project Path="..\Maliev.LifecycleService\Maliev.LifecycleService.Application\Maliev.LifecycleService.Application.csproj" />
+    <Project Path="..\Maliev.LifecycleService\Maliev.LifecycleService.Domain\Maliev.LifecycleService.Domain.csproj" />
+    <Project Path="..\Maliev.LifecycleService\Maliev.LifecycleService.Infrastructure\Maliev.LifecycleService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Material Service/">
+    <Project Path="../Maliev.MaterialService/Maliev.MaterialService.Application/Maliev.MaterialService.Application.csproj" />
+    <Project Path="../Maliev.MaterialService/Maliev.MaterialService.Domain/Maliev.MaterialService.Domain.csproj" />
+    <Project Path="../Maliev.MaterialService/Maliev.MaterialService.Infrastructure/Maliev.MaterialService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.MaterialService\Maliev.MaterialService.Api\Maliev.MaterialService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Notification Service/">
+    <Project Path="../Maliev.NotificationService/Maliev.NotificationService.Application/Maliev.NotificationService.Application.csproj" />
+    <Project Path="../Maliev.NotificationService/Maliev.NotificationService.Domain/Maliev.NotificationService.Domain.csproj" />
+    <Project Path="../Maliev.NotificationService/Maliev.NotificationService.Infrastructure/Maliev.NotificationService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.NotificationService\Maliev.NotificationService.Api\Maliev.NotificationService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Order Service/">
+    <Project Path="../Maliev.OrderService/Maliev.OrderService.Application/Maliev.OrderService.Application.csproj" />
+    <Project Path="../Maliev.OrderService/Maliev.OrderService.Domain/Maliev.OrderService.Domain.csproj" />
+    <Project Path="../Maliev.OrderService/Maliev.OrderService.Infrastructure/Maliev.OrderService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.OrderService\Maliev.OrderService.Api\Maliev.OrderService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Payment Service/">
+    <Project Path="../Maliev.PaymentService/Maliev.PaymentService.Application/Maliev.PaymentService.Application.csproj" />
+    <Project Path="../Maliev.PaymentService/Maliev.PaymentService.Domain/Maliev.PaymentService.Domain.csproj" />
+    <Project Path="..\Maliev.PaymentService\Maliev.PaymentService.Api\Maliev.PaymentService.Api.csproj" />
+    <Project Path="..\Maliev.PaymentService\Maliev.PaymentService.Infrastructure\Maliev.PaymentService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Project Service/">
+    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Api/Maliev.ProjectService.Api.csproj" />
+    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Application/Maliev.ProjectService.Application.csproj" />
+    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Domain/Maliev.ProjectService.Domain.csproj" />
+    <Project Path="../Maliev.ProjectService/Maliev.ProjectService.Infrastructure/Maliev.ProjectService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/PDF Service/">
+    <Project Path="../Maliev.PdfService/Maliev.PdfService.Application/Maliev.PdfService.Application.csproj" />
+    <Project Path="../Maliev.PdfService/Maliev.PdfService.Domain/Maliev.PdfService.Domain.csproj" />
+    <Project Path="../Maliev.PdfService/Maliev.PdfService.Infrastructure/Maliev.PdfService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.PdfService\Maliev.PdfService.Api\Maliev.PdfService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Performance Service/">
+    <Project Path="..\Maliev.PerformanceService\Maliev.PerformanceService.Api\Maliev.PerformanceService.Api.csproj" />
+    <Project Path="..\Maliev.PerformanceService\Maliev.PerformanceService.Application\Maliev.PerformanceService.Application.csproj" />
+    <Project Path="..\Maliev.PerformanceService\Maliev.PerformanceService.Domain\Maliev.PerformanceService.Domain.csproj" />
+    <Project Path="..\Maliev.PerformanceService\Maliev.PerformanceService.Infrastructure\Maliev.PerformanceService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Prediction Service/">
+    <Project Path="../Maliev.PredictionService/Maliev.PredictionService.Api/Maliev.PredictionService.Api.csproj" />
+    <Project Path="../Maliev.PredictionService/Maliev.PredictionService.Application/Maliev.PredictionService.Application.csproj" />
+    <Project Path="../Maliev.PredictionService/Maliev.PredictionService.Domain/Maliev.PredictionService.Domain.csproj" />
+    <Project Path="../Maliev.PredictionService/Maliev.PredictionService.Infrastructure/Maliev.PredictionService.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Pricing Service/">
+    <Project Path="../Maliev.PricingService/Maliev.PricingService.Application/Maliev.PricingService.Application.csproj" />
+    <Project Path="../Maliev.PricingService/Maliev.PricingService.Domain/Maliev.PricingService.Domain.csproj" />
+    <Project Path="../Maliev.PricingService/Maliev.PricingService.Infrastructure/Maliev.PricingService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.PricingService\Maliev.PricingService.Api\Maliev.PricingService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Purchase Order Service/">
+    <Project Path="../Maliev.PurchaseOrderService/Maliev.PurchaseOrderService.Application/Maliev.PurchaseOrderService.Application.csproj" />
+    <Project Path="../Maliev.PurchaseOrderService/Maliev.PurchaseOrderService.Domain/Maliev.PurchaseOrderService.Domain.csproj" />
+    <Project Path="../Maliev.PurchaseOrderService/Maliev.PurchaseOrderService.Infrastructure/Maliev.PurchaseOrderService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.PurchaseOrderService\Maliev.PurchaseOrderService.Api\Maliev.PurchaseOrderService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Quotation Service/">
+    <Project Path="../Maliev.QuotationService/Maliev.QuotationService.Application/Maliev.QuotationService.Application.csproj" />
+    <Project Path="../Maliev.QuotationService/Maliev.QuotationService.Domain/Maliev.QuotationService.Domain.csproj" />
+    <Project Path="../Maliev.QuotationService/Maliev.QuotationService.Infrastructure/Maliev.QuotationService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.QuotationService\Maliev.QuotationService.Api\Maliev.QuotationService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Receipt Service/">
+    <Project Path="../Maliev.ReceiptService/Maliev.ReceiptService.Application/Maliev.ReceiptService.Application.csproj" />
+    <Project Path="../Maliev.ReceiptService/Maliev.ReceiptService.Domain/Maliev.ReceiptService.Domain.csproj" />
+    <Project Path="../Maliev.ReceiptService/Maliev.ReceiptService.Infrastructure/Maliev.ReceiptService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.ReceiptService\Maliev.ReceiptService.Api\Maliev.ReceiptService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Search Service/">
+    <Project Path="../Maliev.SearchService/Maliev.SearchService.Application/Maliev.SearchService.Application.csproj" />
+    <Project Path="../Maliev.SearchService/Maliev.SearchService.Domain/Maliev.SearchService.Domain.csproj" />
+    <Project Path="../Maliev.SearchService/Maliev.SearchService.Infrastructure/Maliev.SearchService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.SearchService\Maliev.SearchService.Api\Maliev.SearchService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Registry Service/">
+    <Project Path="../Maliev.RegistryService/Maliev.RegistryService.Application/Maliev.RegistryService.Application.csproj" />
+    <Project Path="../Maliev.RegistryService/Maliev.RegistryService.Domain/Maliev.RegistryService.Domain.csproj" />
+    <Project Path="../Maliev.RegistryService/Maliev.RegistryService.Infrastructure/Maliev.RegistryService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.RegistryService\Maliev.RegistryService.Api\Maliev.RegistryService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Supplier Service/">
+    <Project Path="../Maliev.SupplierService/Maliev.SupplierService.Application/Maliev.SupplierService.Application.csproj" />
+    <Project Path="../Maliev.SupplierService/Maliev.SupplierService.Domain/Maliev.SupplierService.Domain.csproj" />
+    <Project Path="../Maliev.SupplierService/Maliev.SupplierService.Infrastructure/Maliev.SupplierService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.SupplierService\Maliev.SupplierService.Api\Maliev.SupplierService.Api.csproj" />
+  </Folder>
+  <Folder Name="/APIs/Upload Service/">
+    <Project Path="../Maliev.UploadService/Maliev.UploadService.Application/Maliev.UploadService.Application.csproj" />
+    <Project Path="../Maliev.UploadService/Maliev.UploadService.Domain/Maliev.UploadService.Domain.csproj" />
+    <Project Path="../Maliev.UploadService/Maliev.UploadService.Infrastructure/Maliev.UploadService.Infrastructure.csproj" />
+    <Project Path="..\Maliev.UploadService\Maliev.UploadService.Api\Maliev.UploadService.Api.csproj" />
+  </Folder>
+  <Folder Name="/Frontends/" />
+  <Folder Name="/Frontends/Intranet/">
+    <Project Path="..\Maliev.Intranet\Maliev.Intranet.Bff\Maliev.Intranet.Bff.csproj" />
+    <Project Path="..\Maliev.Intranet\Maliev.Intranet.Client\Maliev.Intranet.Client.csproj" />
+    <Project Path="..\Maliev.Intranet\Maliev.Intranet.Shared\Maliev.Intranet.Shared.csproj" />
+  </Folder>
+  <Folder Name="/Frontends/Web/">
+    <Project Path="..\Maliev.Web\Maliev.Web.Bff\Maliev.Web.Bff.csproj" />
+    <Project Path="..\Maliev.Web\Maliev.Web.Client\Maliev.Web.Client.csproj" />
+    <Project Path="..\Maliev.Web\Maliev.Web.Shared\Maliev.Web.Shared.csproj" />
+  </Folder>
+  <Folder Name="/Messaging Contracts/">
+    <Project Path="..\Maliev.MessagingContracts\generated\csharp\Maliev.MessagingContracts.csproj" />
+  </Folder>
+  <Project Path="Maliev.Aspire.AppHost\Maliev.Aspire.AppHost.csproj" />
+  <Project Path="Maliev.Aspire.DatabaseSeeder\Maliev.Aspire.DatabaseSeeder.csproj" />
+  <Project Path="Maliev.Aspire.ServiceDefaults\Maliev.Aspire.ServiceDefaults.csproj" />
+  <Project Path="Maliev.Aspire.ServiceDefaults.Tests\Maliev.Aspire.ServiceDefaults.Tests.csproj" />
+  <Project Path="Maliev.Aspire.Tests\Maliev.Aspire.Tests.csproj" />
+</Solution>

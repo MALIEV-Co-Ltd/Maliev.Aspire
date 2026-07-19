@@ -2,15 +2,27 @@ using Microsoft.AspNetCore.Http;
 
 namespace Maliev.Aspire.ServiceDefaults.Middleware;
 
+/// <summary>
+/// Middleware that adds security headers to all HTTP responses including CSP, X-Frame-Options, and others.
+/// </summary>
 public class SecurityHeadersMiddleware
 {
     private readonly RequestDelegate _next;
 
+    /// <summary>
+    /// Initializes a new instance of the SecurityHeadersMiddleware.
+    /// </summary>
+    /// <param name="next">The next middleware in the pipeline.</param>
     public SecurityHeadersMiddleware(RequestDelegate next)
     {
         _next = next;
     }
 
+    /// <summary>
+    /// Processes the HTTP request and adds security headers to the response.
+    /// </summary>
+    /// <param name="context">The HTTP context.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task InvokeAsync(HttpContext context)
     {
         // Security headers

@@ -1,58 +1,484 @@
-using Aspire.Hosting.Python;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.CountryService;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.EmployeeService;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.AuthService;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.IAMService;
+using Maliev.Aspire.DatabaseSeeder.Seeding.Services.Shared;
+using Maliev.Aspire.AppHost;
+using Maliev.Aspire.AppHost.Extensions;
 using Maliev.Aspire.AppHost.OpenTelemetryCollector;
+using Maliev.Aspire.AppHost.Security;
+using Maliev.Aspire.ServiceDefaults.IAM;
 using Microsoft.Extensions.Configuration;
+using System.Collections.ObjectModel;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+
+// Disable GSSAPI negotiation globally for the AppHost process and its probes.
+// This silences the "SPNEGO cannot find mechanisms to negotiate" logs in postgres-server.
+Environment.SetEnvironmentVariable("NPGSQL_GSSAPI_AUTHENTICATION", "false");
+Environment.SetEnvironmentVariable("PGGSSENCMODE", "disable");
 
 var builder = DistributedApplication.CreateBuilder(args);
 
+if (builder.Configuration.GetValue<bool>("TokenIssuanceCapabilitySystemTest:Enabled"))
+{
+    Program.ConfigureTokenIssuanceCapabilitySystemTest(builder);
+    builder.Build().Run();
+    return;
+}
+
 var config = Program.LoadSharedConfiguration(builder);
+
+// ──────────────────────────────────────────────
+// 1. Frontends — registered first for dashboard display order
+// ──────────────────────────────────────────────
+var intranetBff = builder.AddProject<Projects.Maliev_Intranet_Bff>("IntranetBff")
+    .WithUrlForEndpoint("http", u => u.DisplayText = "Intranet (HTTP)")
+    .WithUrlForEndpoint("https", u => u.DisplayText = "Intranet (HTTPS)")
+    .WithTestingSafeHttpHealthCheck("/intranet/aspire-liveness");
+
+var quoteEngineBff = builder.AddProject<Projects.Maliev_QuoteEngine_Bff>("QuoteEngineBff")
+    .WithUrlForEndpoint("http", u => u.DisplayText = "Quote Engine (HTTP)")
+    .WithUrlForEndpoint("https", u => u.DisplayText = "Quote Engine (HTTPS)")
+    .WithTestingSafeHttpHealthCheck("/quote/aspire-liveness");
+
+var webBff = builder.AddProject<Projects.Maliev_Web_Bff>("WebBff")
+    .WithUrlForEndpoint("http", u => u.DisplayText = "Customer Web (HTTP)")
+    .WithUrlForEndpoint("https", u => u.DisplayText = "Customer Web (HTTPS)")
+    .WithTestingSafeHttpHealthCheck("/web/aspire-liveness");
+
+// ──────────────────────────────────────────────
+// 2. Infrastructure
+// ──────────────────────────────────────────────
 var infrastructure = Program.ConfigureInfrastructure(builder);
 var databases = Program.ConfigureDatabases(infrastructure.Postgres);
 
-// --- Monitoring (simple relative paths exactly like the sample) ---
-var prometheus = builder.AddContainer("prometheus", "prom/prometheus", "v3.0.1")
-    .WithBindMount("../prometheus", "/etc/prometheus", isReadOnly: true)
-    .WithArgs("--web.enable-otlp-receiver", "--config.file=/etc/prometheus/prometheus.yml")
-    .WithHttpEndpoint(targetPort: 9090)
-    .WithUrlForEndpoint("http", u => u.DisplayText = "Prometheus Dashboard");
+// ──────────────────────────────────────────────
+// 3. Monitoring (Prometheus, Grafana, OpenTelemetry)
+// ──────────────────────────────────────────────
+var prometheus = ConfigurePrometheus(builder);
+var grafana = ConfigureGrafana(builder, prometheus);
+var otelCollector = ConfigureOpenTelemetry(builder, prometheus);
 
-var grafana = builder.AddContainer("grafana", "grafana/grafana")
-    .WithBindMount("../grafana/config", "/etc/grafana", isReadOnly: true)
-    .WithBindMount("../grafana/dashboards", "/var/lib/grafana/dashboards", isReadOnly: true)
-    .WithEnvironment("PROMETHEUS_ENDPOINT", prometheus.GetEndpoint("http"))
-    .WithHttpEndpoint(targetPort: 3000)
-    .WithUrlForEndpoint("http", u => u.DisplayText = "Grafana Dashboard");
+// Local-dev memory optimization: Prometheus + Grafana are observability dashboards, not
+// services under test. In Development they are deferred to explicit (one-click) start from
+// the Aspire dashboard instead of auto-starting, freeing ~640 MB of always-on container RAM.
+// The OpenTelemetry collector is intentionally NOT deferred — GeometryService WaitFor()s it.
+if (builder.Environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase))
+{
+    prometheus.WithExplicitStart();
+    grafana.WithExplicitStart();
+}
 
-builder.AddOpenTelemetryCollector("otelcollector", "../otelcollector/config.yaml")
-    .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp");
-
-Program.ConfigureServices(builder, infrastructure, databases, config, grafana);
+// ──────────────────────────────────────────────
+// 4. Services + wire frontends internally
+// ──────────────────────────────────────────────
+Program.ConfigureServices(
+    builder, infrastructure, databases, config, grafana, otelCollector,
+    intranetBff, quoteEngineBff, webBff);
 
 builder.Build().Run();
 
+// --- Local Infrastructure Configuration Functions ---
+
+static IResourceBuilder<ContainerResource> ConfigurePrometheus(IDistributedApplicationBuilder builder)
+{
+    return builder.AddContainer("prometheus", "prom/prometheus", "v3.0.1")
+        .WithContainerFiles("/etc/prometheus", AppHostPathResolver.ResolveRequiredDirectoryPath("../prometheus"))
+        .WithArgs("--web.enable-otlp-receiver", "--config.file=/etc/prometheus/prometheus.yml")
+        .WithHttpEndpoint(targetPort: 9090)
+        .WithUrlForEndpoint("http", u => u.DisplayText = "Prometheus Dashboard")
+        .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "384m");
+}
+
+static IResourceBuilder<ContainerResource> ConfigureGrafana(
+    IDistributedApplicationBuilder builder,
+    IResourceBuilder<ContainerResource> prometheus)
+{
+    return builder.AddContainer("grafana", "grafana/grafana")
+        .WithContainerFiles("/etc/grafana", AppHostPathResolver.ResolveRequiredDirectoryPath("../grafana/config"))
+        .WithContainerFiles("/var/lib/grafana/dashboards", AppHostPathResolver.ResolveRequiredDirectoryPath("../grafana/dashboards"))
+        .WithEnvironment("PROMETHEUS_ENDPOINT", prometheus.GetEndpoint("http"))
+        .WithHttpEndpoint(targetPort: 3000)
+        .WithUrlForEndpoint("http", u => u.DisplayText = "Grafana Dashboard")
+        .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
+}
+
+static IResourceBuilder<ContainerResource> ConfigureOpenTelemetry(
+    IDistributedApplicationBuilder builder,
+    IResourceBuilder<ContainerResource> prometheus)
+{
+    return builder.AddOpenTelemetryCollector("otelcollector", "../otelcollector/config.yaml")
+        .WithEnvironment("PROMETHEUS_ENDPOINT", $"{prometheus.GetEndpoint("http")}/api/v1/otlp")
+        .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
+}
 /// <summary>
 /// Main program class containing configuration methods for the Aspire AppHost.
 /// </summary>
 static partial class Program
 {
     /// <summary>
+    /// Configures the bounded Testing-only Auth-to-IAM capability system-test host.
+    /// </summary>
+    /// <param name="builder">The distributed application builder.</param>
+    public static void ConfigureTokenIssuanceCapabilitySystemTest(IDistributedApplicationBuilder builder)
+    {
+        const string testingEnvironment = "Testing";
+        var environmentName = builder.Environment.EnvironmentName;
+        if (!string.Equals(environmentName, testingEnvironment, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The token-issuance capability system-test host is allowed only in Testing.");
+        }
+
+        var localIdentityMaterials = LocalServiceIdentitySeedMaterial.CreateCatalog();
+        var authIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.AuthService.WorkloadId];
+        var contactIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.ContactService.WorkloadId];
+        var searchIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.SearchService.WorkloadId];
+        var registryIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.RegistryService.WorkloadId];
+        var countryIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.CountryService.WorkloadId];
+        var currencyIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.CurrencyService.WorkloadId];
+        var accountingIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.AccountingService.WorkloadId];
+        var pricingIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.PricingService.WorkloadId];
+        var materialIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.MaterialService.WorkloadId];
+        var lifecycleIdentityMaterial = localIdentityMaterials[
+            LocalServiceIdentityProfileCatalog.LifecycleService.WorkloadId];
+        var localIdentitySecret = builder.AddParameter("AuthServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:AuthServiceLocalClientSecret"] = authIdentityMaterial.RawSecret;
+        var contactIdentitySecret = builder.AddParameter("ContactServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:ContactServiceLocalClientSecret"] = contactIdentityMaterial.RawSecret;
+        var searchIdentitySecret = builder.AddParameter("SearchServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:SearchServiceLocalClientSecret"] = searchIdentityMaterial.RawSecret;
+        var registryIdentitySecret = builder.AddParameter("RegistryServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:RegistryServiceLocalClientSecret"] = registryIdentityMaterial.RawSecret;
+        var countryIdentitySecret = builder.AddParameter("CountryServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:CountryServiceLocalClientSecret"] = countryIdentityMaterial.RawSecret;
+        var currencyIdentitySecret = builder.AddParameter("CurrencyServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:CurrencyServiceLocalClientSecret"] = currencyIdentityMaterial.RawSecret;
+        var accountingIdentitySecret = builder.AddParameter("AccountingServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:AccountingServiceLocalClientSecret"] = accountingIdentityMaterial.RawSecret;
+        var pricingIdentitySecret = builder.AddParameter("PricingServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:PricingServiceLocalClientSecret"] = pricingIdentityMaterial.RawSecret;
+        var materialIdentitySecret = builder.AddParameter("MaterialServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:MaterialServiceLocalClientSecret"] = materialIdentityMaterial.RawSecret;
+        var lifecycleIdentitySecret = builder.AddParameter("LifecycleServiceLocalClientSecret", secret: true);
+        builder.Configuration["Parameters:LifecycleServiceLocalClientSecret"] = lifecycleIdentityMaterial.RawSecret;
+        var capabilityMaterial = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
+        var capabilityPrivateKey = builder.AddParameter(
+            "AuthTokenIssuanceCapabilityPrivateKey",
+            secret: true);
+        builder.Configuration["Parameters:AuthTokenIssuanceCapabilityPrivateKey"] =
+            capabilityMaterial.PrivateKeyPem;
+        var livePermissionCheckCredential = RandomNumberGenerator.GetBytes(32);
+        var livePermissionCheckCredentialDigest = SHA256.HashData(livePermissionCheckCredential);
+        string livePermissionCheckCredentialHash;
+        try
+        {
+            livePermissionCheckCredentialHash = Convert.ToBase64String(
+                livePermissionCheckCredentialDigest);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(livePermissionCheckCredential);
+            CryptographicOperations.ZeroMemory(livePermissionCheckCredentialDigest);
+        }
+
+        using var fleetRsa = RSA.Create(2048);
+        var jwtPrivateKey = Convert.ToBase64String(fleetRsa.ExportPkcs8PrivateKey());
+        var jwtPublicKey = Convert.ToBase64String(
+            Encoding.UTF8.GetBytes(fleetRsa.ExportSubjectPublicKeyInfoPem()));
+        const string jwtSecurityKey = "aspire-capability-system-test-hmac-key-64-characters-minimum-value";
+        const string jwtIssuer = "https://auth.test.maliev.com";
+        const string jwtAudience = "https://api.test.maliev.com";
+        const string capabilityIssuer = "https://auth.maliev.com";
+        const string capabilityAudience = "https://iam.maliev.com/auth/token-issuance";
+
+        var postgres = builder.AddPostgres("postgres-server")
+            .WithImageTag("18-alpine")
+            .WithEnvironment("PGGSSENCMODE", "disable");
+        var redis = builder.AddRedis("redis");
+        var rabbitMq = builder.AddRabbitMQ("rabbitmq");
+        var iamDatabase = postgres.AddDatabase("iam-app-db");
+        var authDatabase = postgres.AddDatabase("auth-app-db");
+        var countryDatabase = postgres.AddDatabase("country-app-db");
+        var contactDatabase = postgres.AddDatabase("contact-app-db");
+
+        IResourceBuilder<ProjectResource> WithTestConfiguration(
+            IResourceBuilder<ProjectResource> project) =>
+            project
+                .WithEnvironment("ASPNETCORE_ENVIRONMENT", environmentName)
+                .WithEnvironment("DOTNET_ENVIRONMENT", environmentName)
+                .WithEnvironment("Jwt__SecurityKey", jwtSecurityKey)
+                .WithEnvironment("Jwt__PrivateKey", jwtPrivateKey)
+                .WithEnvironment("Jwt__PublicKey", jwtPublicKey)
+                .WithEnvironment("Jwt__Issuer", jwtIssuer)
+                .WithEnvironment("Jwt__Audience", jwtAudience)
+                .WithEnvironment("Authentication__Google__ClientId", "capability-system-test.apps.googleusercontent.com")
+                .WithEnvironment("CORS__AllowedOrigins", "https://localhost")
+                .WithEnvironment("NPGSQL_GSSAPI_AUTHENTICATION", "false")
+                .WithEnvironment("PGGSSENCMODE", "disable")
+                .WithEnvironment("Observability__TracingEnabled", "false")
+                .WithEnvironment("Observability__RuntimeMetricsEnabled", "false")
+                .WithEnvironment("MASSTRANSIT_INMEMORY", "true");
+
+        var iamService = WithTestConfiguration(
+            builder.AddProject<Projects.Maliev_IAMService_Api>("IAMService")
+                .WithReference(iamDatabase, "IamDbContext")
+                .WaitFor(iamDatabase)
+                .WithEnvironment(
+                    "IAM__LivePermissionChecks__CredentialHashes__IntranetBff",
+                    livePermissionCheckCredentialHash)
+                .WithEnvironment("IAM__TokenIssuanceCapability__Issuer", capabilityIssuer)
+                .WithEnvironment("IAM__TokenIssuanceCapability__Audience", capabilityAudience)
+                .WithEnvironment(
+                    $"IAM__TokenIssuanceCapability__PublicKeys__{capabilityMaterial.ActiveKeyId}",
+                    capabilityMaterial.PublicKey))
+            .SeedDatabase<IAMDatabaseSeeder>(
+                iamDatabase,
+                configureSeeder: seeder => seeder
+                    .WithEnvironment("AspireLocalServiceIdentity__Enabled", "true")
+                    .WithEnvironment("AspireTestAdmin__Enabled", "false"),
+                runAutomatically: true);
+
+        var authService = WithTestConfiguration(
+            builder.AddProject<Projects.Maliev_AuthService_Api>("AuthService")
+                .WithReference(authDatabase, "AuthDbContext")
+                .WaitFor(authDatabase)
+                .WithReference(redis)
+                .WaitFor(redis)
+                .WithReference(rabbitMq)
+                .WaitFor(rabbitMq)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.AuthService.ClientId)
+                .WithEnvironment("ServiceAuthentication__ClientSecret", localIdentitySecret)
+                .WithEnvironment("Auth__TokenIssuanceCapability__ActiveKeyId", capabilityMaterial.ActiveKeyId)
+                .WithEnvironment("Auth__TokenIssuanceCapability__PrivateKey", capabilityPrivateKey))
+            // The canonical cache wiring intentionally omits IConnectionMultiplexer in Testing.
+            // Service-login rate limiting is fail-closed, so this bounded local profile runs
+            // the Auth child as Development while the AppHost itself remains Testing-gated.
+            .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+            .WithEnvironment("DOTNET_ENVIRONMENT", "Development");
+
+        authService.SeedDatabase<AuthServiceIdentityDatabaseSeeder>(
+            authDatabase,
+            configureSeeder: seeder => seeder
+                .WithEnvironment("CONNECTION_NAME", "AuthDbContext")
+                .WithEnvironment("AspireLocalServiceIdentity__Enabled", "true")
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__auth-service__SecretHash",
+                    authIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__contact-service__SecretHash",
+                    contactIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__search-service__SecretHash",
+                    searchIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__registry-service__SecretHash",
+                    registryIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__country-service__SecretHash",
+                    countryIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__currency-service__SecretHash",
+                    currencyIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__accounting-service__SecretHash",
+                    accountingIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__pricing-service__SecretHash",
+                    pricingIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__material-service__SecretHash",
+                    materialIdentityMaterial.SecretHash)
+                .WithEnvironment(
+                    "AspireLocalServiceIdentity__Profiles__lifecycle-service__SecretHash",
+                    lifecycleIdentityMaterial.SecretHash)
+                .WithReference(iamDatabase, "IamDbContext")
+                .WaitFor(iamService),
+            runAutomatically: true);
+
+        var countryService = WithTestConfiguration(
+            builder.AddProject<Projects.Maliev_CountryService_Api>("CountryService")
+                .WithReference(countryDatabase, "CountryDbContext")
+                .WaitFor(countryDatabase)
+                .WithReference(rabbitMq)
+                .WaitFor(rabbitMq)
+                .WithReference(redis)
+                .WithReference(iamService)
+                .WaitFor(iamService))
+            .SeedDatabase<CountryDatabaseSeeder>(
+                countryDatabase,
+                runAutomatically: true);
+
+        WithTestConfiguration(
+                builder.AddProject<Projects.Maliev_ContactService_Api>("ContactService")
+                    .WithReference(contactDatabase, "ContactDbContext")
+                    .WaitFor(contactDatabase)
+                    .WithReference(rabbitMq)
+                    .WaitFor(rabbitMq)
+                    .WithReference(redis)
+                    .WithReference(countryService)
+                    .WaitFor(countryService)
+                    .WithReference(authService)
+                    .WaitFor(authService)
+                    .WithReference(iamService)
+                    .WaitFor(iamService))
+            .WithoutJwtSigningMaterial()
+            .WithEnvironment(
+                "ServiceAuthentication__ClientId",
+                LocalServiceIdentityProfileCatalog.ContactService.ClientId)
+            .WithEnvironment("ServiceAuthentication__ClientSecret", contactIdentitySecret);
+    }
+
+    /// <summary>
     /// Loads shared configuration from sharedsecrets.json and user secrets.
     /// </summary>
     public static SharedConfiguration LoadSharedConfiguration(IDistributedApplicationBuilder builder)
     {
+        var environmentName = builder.Environment.EnvironmentName;
+
         // Load shared secrets from sharedsecrets.json and user secrets
         builder.Configuration.AddJsonFile("sharedsecrets.json", optional: true);
+        builder.Configuration.AddEnvironmentVariables();
 
         // Define these as formal Aspire Parameters to show up in the Dashboard
+        var jwtSecurityKey = builder.AddParameterFromConfig("JwtSecurityKey", "Jwt:SecurityKey", secret: true);
+        var jwtPrivateKey = builder.AddParameterFromConfig("JwtPrivateKey", "Jwt:PrivateKey", secret: true);
         var jwtPublicKey = builder.AddParameterFromConfig("JwtPublicKey", "Jwt:PublicKey", secret: true);
         var jwtIssuer = builder.AddParameterFromConfig("JwtIssuer", "Jwt:Issuer");
         var jwtAudience = builder.AddParameterFromConfig("JwtAudience", "Jwt:Audience");
+
+        // Web, Intranet, and QuoteEngine render Google's official GIS button with one public
+        // client ID. AuthService receives the same ID as three exact application audiences;
+        // no sign-in client secret is distributed to the browser-facing services.
+        var googleClientId = builder.AddParameterFromConfig("GoogleClientId", "Authentication:Google:ClientId", secret: true);
+
+        // QuoteEngine's Google Drive connector uses its own dedicated OAuth client
+        // ("MALIEV QuoteEngine — Google Drive Connector", scope: drive.file only) so a leaked
+        // Drive credential can't be used to impersonate sign-in on Web/Intranet, and vice versa.
+        // GoogleDriveOAuthConfiguration falls back to Authentication:Google:* if these are unset.
+        var googleDriveClientId = builder.AddParameterFromConfig("GoogleDriveClientId", "GoogleDrive:ClientId", secret: true);
+        var googleDriveClientSecret = builder.AddParameterFromConfig("GoogleDriveClientSecret", "GoogleDrive:ClientSecret", secret: true);
+
+        // Local-only credential for authoritative Intranet permission checks. Generate a fresh
+        // value for each AppHost start unless the developer explicitly supplies one. Only the
+        // caller receives the raw value; IAM receives the SHA-256 verifier.
+        var configuredIamLiveCheckCredential =
+            builder.Configuration["IAM:LivePermissionChecks:IntranetBffCredential"];
+        var iamLiveCheckCredential = string.IsNullOrWhiteSpace(configuredIamLiveCheckCredential)
+            ? Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
+            : configuredIamLiveCheckCredential;
+        var iamLiveCheckCredentialHash = Convert.ToBase64String(
+            SHA256.HashData(Encoding.UTF8.GetBytes(iamLiveCheckCredential)));
+        var intranetBffIamLiveCheckCredential = builder.AddParameter(
+            "IntranetBffIamLiveCheckCredential",
+            secret: true);
+        builder.Configuration["Parameters:IntranetBffIamLiveCheckCredential"] = iamLiveCheckCredential;
+        var iamLiveCheckCredentialHashParameter = builder.AddParameter(
+            "IamLiveCheckCredentialHash",
+            secret: true);
+        builder.Configuration["Parameters:IamLiveCheckCredentialHash"] = iamLiveCheckCredentialHash;
+
+        IReadOnlyDictionary<string, IResourceBuilder<ParameterResource>>? localIdentitySecrets = null;
+        IReadOnlyDictionary<string, string>? localIdentitySecretHashes = null;
+        LocalTokenIssuanceCapabilityMaterial? tokenIssuanceCapability = null;
+        if (IsLocalEnvironment(environmentName))
+        {
+            var localIdentityMaterials = LocalServiceIdentitySeedMaterial.CreateCatalog();
+            var secretParameters = new Dictionary<string, IResourceBuilder<ParameterResource>>(
+                StringComparer.Ordinal);
+            foreach (var profile in LocalServiceIdentityProfileCatalog.All)
+            {
+                var parameterName = $"{profile.ServiceName}LocalClientSecret";
+                var parameter = builder.AddParameter(parameterName, secret: true);
+                builder.Configuration[$"Parameters:{parameterName}"] =
+                    localIdentityMaterials[profile.WorkloadId].RawSecret;
+                secretParameters.Add(profile.WorkloadId, parameter);
+            }
+
+            localIdentitySecrets = new ReadOnlyDictionary<string, IResourceBuilder<ParameterResource>>(
+                secretParameters);
+            localIdentitySecretHashes = new ReadOnlyDictionary<string, string>(
+                localIdentityMaterials.ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value.SecretHash,
+                    StringComparer.Ordinal));
+            tokenIssuanceCapability = LocalTokenIssuanceCapabilityMaterial.CreateForEnvironment(environmentName);
+        }
+
+        var aspireTestAdminEnabled = builder.AddParameter("AspireTestAdminEnabled");
+        builder.Configuration["Parameters:AspireTestAdminEnabled"] =
+            builder.Configuration["AspireTestAdmin:Enabled"] ?? "false";
+        var aspireTestAdminPassword = builder.AddParameter("AspireTestAdminPassword", secret: true);
+        builder.Configuration["Parameters:AspireTestAdminPassword"] =
+            builder.Configuration["AspireTestAdmin:Password"] ?? string.Empty;
 
         var corsAllowedOrigins = builder.AddParameter("CorsAllowedOrigins");
         // Convert the JSON array to a comma-separated string for easier environment injection
         var origins = builder.Configuration.GetSection("CORS:AllowedOrigins").Get<string[]>();
         builder.Configuration["Parameters:CorsAllowedOrigins"] = origins != null ? string.Join(",", origins) : string.Empty;
 
-        return new SharedConfiguration(jwtPublicKey, jwtIssuer, jwtAudience, corsAllowedOrigins);
+        // GCP credentials for UploadService (loaded from sharedsecrets.json)
+        var gcpProjectId = builder.AddParameterFromConfig("GcpProjectId", "GCP:ProjectId", secret: true);
+        var gcpServiceAccountKeyBase64 = builder.AddParameterFromConfig("GcpServiceAccountKeyBase64", "GCP:ServiceAccountKeyBase64", secret: true);
+
+        var webGoogleMapsApiKey = builder.AddParameterFromConfig("WebGoogleMapsApiKey", "GoogleMaps:BrowserApiKey", secret: true);
+
+        var businessRegistryDdbApiKey = builder.AddParameterFromConfig("BusinessRegistryDdbApiKey", "BusinessRegistry:DdbApiKey", secret: true);
+
+        var omisePublicKey = builder.AddParameterFromConfig("OmisePublicKey", "PaymentProviders:Omise:PublicKey", secret: true);
+        var omiseSecretKey = builder.AddParameterFromConfig("OmiseSecretKey", "PaymentProviders:Omise:SecretKey", secret: true);
+        var omiseWebhookSecret = builder.AddParameterFromConfig(
+            "OmiseWebhookSecret",
+            "PaymentProviders:Omise:WebhookSecret",
+            secret: true,
+            defaultValue: "whsec_omise_development_secret");
+
+        const string devNotificationEncryptionKey = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+        var notificationEncryptionKey = builder.AddParameter("NotificationEncryptionKey", secret: true);
+        builder.Configuration["Parameters:NotificationEncryptionKey"] =
+            builder.Configuration["Encryption:DataProtectionKey"] ?? devNotificationEncryptionKey;
+
+        return new SharedConfiguration(
+            JwtSecurityKey: jwtSecurityKey,
+            JwtPrivateKey: jwtPrivateKey,
+            JwtPublicKey: jwtPublicKey,
+            JwtIssuer: jwtIssuer,
+            JwtAudience: jwtAudience,
+            GoogleClientId: googleClientId,
+            GoogleDriveClientId: googleDriveClientId,
+            GoogleDriveClientSecret: googleDriveClientSecret,
+            IntranetBffIamLiveCheckCredential: intranetBffIamLiveCheckCredential,
+            IamLiveCheckCredentialHash: iamLiveCheckCredentialHashParameter,
+            LocalServiceIdentitySecrets: localIdentitySecrets,
+            LocalServiceIdentitySecretHashes: localIdentitySecretHashes,
+            TokenIssuanceCapability: tokenIssuanceCapability,
+            AspireTestAdminEnabled: aspireTestAdminEnabled,
+            AspireTestAdminPassword: aspireTestAdminPassword,
+            CorsAllowedOrigins: corsAllowedOrigins,
+            GcpProjectId: gcpProjectId,
+            GcpServiceAccountKeyBase64: gcpServiceAccountKeyBase64,
+            OmisePublicKey: omisePublicKey,
+            OmiseSecretKey: omiseSecretKey,
+            OmiseWebhookSecret: omiseWebhookSecret,
+            NotificationEncryptionKey: notificationEncryptionKey,
+            WebGoogleMapsApiKey: webGoogleMapsApiKey,
+            BusinessRegistryDdbApiKey: businessRegistryDdbApiKey
+            );
     }
 
     /// <summary>
@@ -60,44 +486,102 @@ static partial class Program
     /// </summary>
     public static Infrastructure ConfigureInfrastructure(IDistributedApplicationBuilder builder)
     {
-        // --- Messaging and Caching ---
-        var erlangCookie = builder.AddParameterFromConfig("ErlangCookie", "RabbitMQ:ErlangCookie", secret: true);
-
-        var rabbitmq = builder.AddRabbitMQ("rabbitmq")
-                                .WithImageTag("4.2-management-alpine")
-                                .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie);
-
-        var redis = builder.AddRedis("redis")
-                            .WithImageTag("8.4-alpine")
-                            .WithRedisInsight(insight =>
-                            {
-                                insight.WithBindMount("redisinsight-data", "/data")
-                                       .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard");
-                            });
-
-        // --- PostgreSQL Database Server ---
-        var postgres = builder.AddPostgres("postgres-server")
-                              .WithImageTag("18-alpine")
-                              .WithArgs("-c", "max_connections=500") // Increase for many microservices
-                              .WithPgAdmin(option => 
-                              {
-                                  option.WithImageTag("8.14")
-                                        .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard");
-                              });
+        var rabbitmq = ConfigureRabbitMQ(builder);
+        var redis = ConfigureRedis(builder);
+        var postgres = ConfigurePostgres(builder);
 
         return new Infrastructure(rabbitmq, redis, postgres);
+
+        // --- Local Infrastructure Component Functions ---
+
+        static IResourceBuilder<RabbitMQServerResource> ConfigureRabbitMQ(IDistributedApplicationBuilder builder)
+        {
+            var erlangCookie = builder.AddParameterFromConfig("ErlangCookie", "RabbitMQ:ErlangCookie", secret: true);
+            var rabbitUser = builder.AddParameterFromConfig("RabbitMQUser", "RabbitMQ:Username");
+            var rabbitPass = builder.AddParameterFromConfig("RabbitMQPass", "RabbitMQ:Password", secret: true);
+
+            return builder.AddRabbitMQ("rabbitmq", userName: rabbitUser, password: rabbitPass)
+                .WithImageTag("4.2-management-alpine")
+                .WithEnvironment("RABBITMQ_ERLANG_COOKIE", erlangCookie)
+                .WithHttpEndpoint(targetPort: 15672, name: "management")
+                .WithUrlForEndpoint("management", u => u.DisplayText = "RabbitMQ Management")
+                .WithContainerRuntimeArgs("--cpus", "1", "--memory", "512m");
+        }
+
+        static IResourceBuilder<RedisResource> ConfigureRedis(IDistributedApplicationBuilder builder)
+        {
+            var redis = builder.AddRedis("redis")
+                .WithImageTag("8.4-alpine")
+                .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
+
+            redis.WithRedisInsight(insight =>
+            {
+                insight.WithVolume("redisinsight-data", "/data")
+                    .WithUrlForEndpoint("http", u => u.DisplayText = "RedisInsight Dashboard")
+                    .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
+
+                // RedisInsight is a cache-inspection UI, not a service under test. Defer to
+                // explicit (one-click) start in local dev to save ~256 MB of always-on RAM.
+                if (builder.Environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                {
+                    insight.WithExplicitStart();
+                }
+            });
+
+            return redis;
+        }
+
+        static IResourceBuilder<PostgresServerResource> ConfigurePostgres(IDistributedApplicationBuilder builder)
+        {
+            return builder.AddPostgres("postgres-server")
+                .WithImageTag("18-alpine")
+                // Local-dev tuning: shared_buffers 512MB→128MB (Postgres default; the OS page
+                // cache covers the rest) and a 2GB container ceiling (was 4GB). Postgres idles
+                // ~400MB even with all 37 databases, so this frees headroom inside the capped
+                // WSL VM for the rest of the always-on stack without risking OOM under seeding.
+                .WithArgs("-c", "max_connections=150", "-c", "shared_buffers=128MB")
+                .WithContainerRuntimeArgs("--cpus", "2", "--memory", "2048m")
+                .WithEnvironment("PGGSSENCMODE", "disable") // Disable GSSAPI for internal container probes (pg_isready)
+                .WithPgAdmin(option =>
+                {
+                    option.WithImageTag("9.11")
+                        .WithEnvironment("PGGSSENCMODE", "disable") // Disable GSSAPI for pgAdmin connections
+                        .WithEnvironment("PYTHONWARNINGS", "ignore") // Suppress SyntaxWarnings from sshtunnel in Python 3.14+
+                        .WithUrlForEndpoint("http", u => u.DisplayText = "pgAdmin Dashboard")
+                        .WithContainerRuntimeArgs("--cpus", "0.5", "--memory", "256m");
+
+                    // pgAdmin is a DB-inspection UI, not a service under test. Defer to
+                    // explicit (one-click) start in local dev to save ~256 MB of always-on RAM.
+                    if (builder.Environment.EnvironmentName.Equals("Development", StringComparison.OrdinalIgnoreCase))
+                    {
+                        option.WithExplicitStart();
+                    }
+                });
+        }
     }
 
     private static IResourceBuilder<ParameterResource> AddParameterFromConfig(
-        this IDistributedApplicationBuilder builder, 
-        string parameterName, 
-        string configKey, 
-        bool secret = false)
+        this IDistributedApplicationBuilder builder,
+        string parameterName,
+        string configKey,
+        bool secret = false,
+        string? defaultValue = null)
     {
+        var configuredValue = builder.Configuration[configKey];
+
+        if (string.IsNullOrWhiteSpace(configuredValue) && defaultValue is not null)
+        {
+            return builder.AddParameter(parameterName, defaultValue, secret: secret);
+        }
+
         var parameter = builder.AddParameter(parameterName, secret: secret);
-        builder.Configuration[$"Parameters:{parameterName}"] = builder.Configuration[configKey];
+        builder.Configuration[$"Parameters:{parameterName}"] = configuredValue;
         return parameter;
     }
+
+    private static bool IsLocalEnvironment(string environmentName) =>
+        string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(environmentName, "Testing", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Configures all service databases using the -app-db naming pattern.
@@ -111,12 +595,15 @@ static partial class Program
             Chatbot: postgres.AddDatabase("chatbot-app-db"),
             Compensation: postgres.AddDatabase("compensation-app-db"),
             Compliance: postgres.AddDatabase("compliance-app-db"),
+            Commerce: postgres.AddDatabase("commerce-app-db"),
             Contact: postgres.AddDatabase("contact-app-db"),
             Country: postgres.AddDatabase("country-app-db"),
             Currency: postgres.AddDatabase("currency-app-db"),
             Customer: postgres.AddDatabase("customer-app-db"),
+            Delivery: postgres.AddDatabase("delivery-app-db"),
             Employee: postgres.AddDatabase("employee-app-db"),
             IAM: postgres.AddDatabase("iam-app-db"),
+            Intranet: postgres.AddDatabase("intranet-app-db"),
             Invoice: postgres.AddDatabase("invoice-app-db"),
             Leave: postgres.AddDatabase("leave-app-db"),
             Lifecycle: postgres.AddDatabase("lifecycle-app-db"),
@@ -126,11 +613,19 @@ static partial class Program
             Payment: postgres.AddDatabase("payment-app-db"),
             Pdf: postgres.AddDatabase("pdf-app-db"),
             Performance: postgres.AddDatabase("performance-app-db"),
+            Prediction: postgres.AddDatabase("prediction-app-db"),
+            Pricing: postgres.AddDatabase("pricing-app-db"),
             PurchaseOrder: postgres.AddDatabase("purchaseorder-app-db"),
             Quotation: postgres.AddDatabase("quotation-app-db"),
             Receipt: postgres.AddDatabase("receipt-app-db"),
+            Registry: postgres.AddDatabase("registry-app-db"),
+            Search: postgres.AddDatabase("search-app-db"),
             Supplier: postgres.AddDatabase("supplier-app-db"),
-            Upload: postgres.AddDatabase("upload-app-db")
+            Upload: postgres.AddDatabase("upload-app-db"),
+            Facility: postgres.AddDatabase("facility-app-db"),
+            Inventory: postgres.AddDatabase("inventory-app-db"),
+            Job: postgres.AddDatabase("job-app-db"),
+            Project: postgres.AddDatabase("project-app-db")
         );
     }
 
@@ -143,116 +638,330 @@ static partial class Program
         Infrastructure infrastructure,
         ServiceDatabases databases,
         SharedConfiguration config,
-        IResourceBuilder<ContainerResource> grafana)
+        IResourceBuilder<ContainerResource> grafana,
+        IResourceBuilder<ContainerResource> otelCollector,
+        IResourceBuilder<ProjectResource> intranetBff,
+        IResourceBuilder<ProjectResource> quoteEngineBff,
+        IResourceBuilder<ProjectResource> webBff)
     {
+        var environmentName = builder.Environment.EnvironmentName;
+        var isLocalEnvironment = IsLocalEnvironment(environmentName);
+        var localTokenIssuanceCapability = isLocalEnvironment
+            ? config.TokenIssuanceCapability ?? throw new InvalidOperationException(
+                "Local token-issuance capability material is required in Development or Testing.")
+            : null;
+        if (!isLocalEnvironment && config.TokenIssuanceCapability is not null)
+        {
+            throw new InvalidOperationException(
+                "Local token-issuance capability material cannot be wired outside Development or Testing.");
+        }
+
+        IResourceBuilder<ParameterResource>? localTokenIssuanceCapabilityPrivateKey = null;
+        if (localTokenIssuanceCapability is not null)
+        {
+            localTokenIssuanceCapabilityPrivateKey = builder.AddParameter(
+                "AuthTokenIssuanceCapabilityPrivateKey",
+                secret: true);
+            builder.Configuration["Parameters:AuthTokenIssuanceCapabilityPrivateKey"] =
+                localTokenIssuanceCapability.PrivateKeyPem;
+        }
+
+        void ConfigureAspireTestAdminSeeder(IResourceBuilder<ExecutableResource> seeder)
+        {
+            seeder
+                .WithEnvironment("AspireTestAdmin__Enabled", config.AspireTestAdminEnabled)
+                .WithEnvironment("AspireTestAdmin__Password", config.AspireTestAdminPassword);
+
+            if (isLocalEnvironment)
+            {
+                seeder.WithEnvironment("AspireLocalServiceIdentity__Enabled", "true");
+            }
+        }
+
         // --- Core Services (dependencies for Auth) ---
         var iamService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_IAMService_Api>("maliev-iamservice-api")
+            builder.AddProject<Projects.Maliev_IAMService_Api>("IAMService")
                 .WithReference(databases.IAM, "IamDbContext")
                 .WaitFor(databases.IAM)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
-                .WithHttpHealthCheck("/iam/readiness"),
-            config);
+                .WithEnvironment("IAM__LivePermissionChecks__CredentialHashes__IntranetBff", config.IamLiveCheckCredentialHash)
+                .WithTestingSafeHttpHealthCheck("/iam/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .SeedDatabase<IAMDatabaseSeeder>(
+                databases.IAM,
+                configureSeeder: ConfigureAspireTestAdminSeeder,
+                runAutomatically: isLocalEnvironment);
+
+        if (localTokenIssuanceCapability is not null)
+        {
+            iamService.WithEnvironment(
+                $"IAM__TokenIssuanceCapability__PublicKeys__{localTokenIssuanceCapability.ActiveKeyId}",
+                localTokenIssuanceCapability.PublicKey);
+        }
 
         // Note: CountryService must be declared before CustomerService to be referenced
         var countryService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CountryService_Api>("maliev-countryservice-api")
+            builder.AddProject<Projects.Maliev_CountryService_Api>("CountryService")
                 .WithReference(databases.Country, "CountryDbContext")
                 .WaitFor(databases.Country)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/country/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/country/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .SeedDatabase<CountryDatabaseSeeder>(databases.Country);
+
+        var registryService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_RegistryService_Api>("RegistryService")
+                .WithReference(databases.Registry, "RegistryDbContext")
+                .WaitFor(databases.Registry)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/registry/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        var facilityService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_FacilityService_Api>("FacilityService")
+                .WithReference(databases.Facility, "FacilityDbContext")
+                .WaitFor(databases.Facility)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/facility/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        var uploadServiceProject = builder.AddProject<Projects.Maliev_UploadService_Api>("UploadService")
+            .WithReference(databases.Upload, "UploadDbContext")
+            .WaitFor(databases.Upload)
+            .WithReference(infrastructure.RabbitMQ)
+            .WaitFor(infrastructure.RabbitMQ)
+            .WithReference(infrastructure.Redis)
+            .WithReference(iamService)
+            .WaitFor(iamService)
+            .WithTestingSafeHttpHealthCheck("/upload/aspire-liveness");
+
+        var uploadService = WithSharedSecrets(
+            uploadServiceProject,
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithEnvironment("GoogleCloud__Enabled", "false")
+            .WithEnvironment("GCP__ProjectId", config.GcpProjectId)
+            .WithEnvironment("GCP__ServiceAccountKeyBase64", config.GcpServiceAccountKeyBase64)
+            // MockStorageService (used when GoogleCloud is disabled) signs URLs that the
+            // browser loads directly. Point it at UploadService's own externally-reachable
+            // endpoint instead of letting it infer the host from whichever caller (e.g. the
+            // BFF, via service discovery) happened to request the signed URL — that caller's
+            // resolved address isn't guaranteed to be reachable from the browser.
+            .WithEnvironment("MockStorage__PublicBaseUrl", uploadServiceProject.GetEndpoint("https"));
 
         var customerService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CustomerService_Api>("maliev-customerservice-api")
+            builder.AddProject<Projects.Maliev_CustomerService_Api>("CustomerService")
                 .WithReference(databases.Customer, "CustomerDbContext")
                 .WaitFor(databases.Customer)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
-                .WithReference(countryService)  // Enable service discovery
+                .WithReference(countryService)
+                .WaitFor(countryService)
+                .WithReference(uploadService)
+                .WaitFor(uploadService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/customer/readiness")
-                .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http")),  // Reference grafana to trigger monitoring stack
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/customer/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var employeeService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_EmployeeService_Api>("maliev-employeeservice-api")
+            builder.AddProject<Projects.Maliev_EmployeeService_Api>("EmployeeService")
                 .WithReference(databases.Employee, "EmployeeDbContext")
                 .WaitFor(databases.Employee)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/employee/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/employee/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .SeedDatabase<EmployeeDatabaseSeeder>(databases.Employee, configureSeeder: ConfigureAspireTestAdminSeeder);
 
         var authService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_AuthService_Api>("maliev-authservice-api")
+            builder.AddProject<Projects.Maliev_AuthService_Api>("AuthService")
                 .WithReference(databases.Auth, "AuthDbContext")
                 .WaitFor(databases.Auth)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(customerService)
+                .WaitFor(customerService)
                 .WithReference(employeeService)
+                .WaitFor(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/auth/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/auth/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithEnvironment("GoogleIdentity__Employee__Audiences__intranet__0", config.GoogleClientId)
+            .WithEnvironment("GoogleIdentity__Customer__Audiences__web__0", config.GoogleClientId)
+            .WithEnvironment("GoogleIdentity__Customer__Audiences__quote-engine__0", config.GoogleClientId)
+            .WithEnvironment("WebAuthn__RPId", "localhost")
+            .WithEnvironment("WebAuthn__AllowedOrigins", "https://localhost:56139");
+
+        if (localTokenIssuanceCapability is not null)
+        {
+            authService
+                .WithEnvironment(
+                    "Auth__TokenIssuanceCapability__ActiveKeyId",
+                    localTokenIssuanceCapability.ActiveKeyId)
+                .WithEnvironment(
+                    "Auth__TokenIssuanceCapability__PrivateKey",
+                    localTokenIssuanceCapabilityPrivateKey!);
+        }
+
+        if (isLocalEnvironment &&
+            config.LocalServiceIdentitySecrets is not null &&
+            config.LocalServiceIdentitySecretHashes is not null)
+        {
+            authService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.AuthService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.AuthService.WorkloadId]);
+
+            authService = authService.SeedDatabase<AuthServiceIdentityDatabaseSeeder>(
+                databases.Auth,
+                configureSeeder: seeder => seeder
+                    .WithEnvironment("CONNECTION_NAME", "AuthDbContext")
+                    .WithEnvironment("AspireLocalServiceIdentity__Enabled", "true")
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__auth-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.AuthService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__contact-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.ContactService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__search-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.SearchService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__registry-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.RegistryService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__country-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.CountryService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__currency-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.CurrencyService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__accounting-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.AccountingService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__pricing-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.PricingService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__material-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.MaterialService.WorkloadId])
+                    .WithEnvironment(
+                        "AspireLocalServiceIdentity__Profiles__lifecycle-service__SecretHash",
+                        config.LocalServiceIdentitySecretHashes[
+                            LocalServiceIdentityProfileCatalog.LifecycleService.WorkloadId])
+                    .WithReference(databases.IAM, "IamDbContext")
+                    .WaitFor(iamService),
+                runAutomatically: true);
+        }
 
         // --- Business Services ---
         var accountingService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_AccountingService_Api>("maliev-accountingservice-api")
+            builder.AddProject<Projects.Maliev_AccountingService_Api>("AccountingService")
                 .WithReference(databases.Accounting, "AccountingDbContext")
                 .WaitFor(databases.Accounting)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
+                .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/accounting/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/accounting/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithoutJwtSigningMaterial();
 
-        var chatbotService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_ChatbotService_Api>("maliev-chatbotservice-api")
-                .WithReference(databases.Chatbot, "ChatbotDbContext")
-                .WaitFor(databases.Chatbot)
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis)
-                .WithReference(iamService)
-                .WithHttpHealthCheck("/chatbot/readiness"),
-            config);
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            accountingService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.AccountingService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.AccountingService.WorkloadId]);
+        }
+
+
 
         var notificationService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_NotificationService_Api>("maliev-notificationservice-api")
+            builder.AddProject<Projects.Maliev_NotificationService_Api>("NotificationService")
                 .WithReference(databases.Notification, "NotificationDbContext")
                 .WaitFor(databases.Notification)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
+                .WithReference(customerService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/notification/readiness"),
-            config);
-
-        var uploadService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_UploadService_Api>("maliev-uploadservice-api")
-                .WithReference(databases.Upload, "UploadDbContext")
-                .WaitFor(databases.Upload)
-                .WithReference(infrastructure.RabbitMQ)
-                .WaitFor(infrastructure.RabbitMQ)
-                .WithReference(infrastructure.Redis)
-                .WithReference(iamService)
-                .WithEnvironment("ASPNETCORE_HTTPS_PORT", "0") // Disable HTTPS redirection in development/testing
-                .WithHttpHealthCheck("/upload/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/notification/aspire-liveness")
+                .WithEnvironment("Encryption__DataProtectionKey", config.NotificationEncryptionKey),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var careerService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CareerService_Api>("maliev-careerservice-api")
+            builder.AddProject<Projects.Maliev_CareerService_Api>("CareerService")
                 .WithReference(databases.Career, "CareerDbContext")
                 .WaitFor(databases.Career)
                 .WithReference(infrastructure.RabbitMQ)
@@ -260,14 +969,20 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(uploadService)
+                .WaitFor(uploadService)
                 .WithReference(countryService)
                 .WithReference(notificationService)
+                .WaitFor(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/career/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/career/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var compensationService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CompensationService_Api>("maliev-compensationservice-api")
+            builder.AddProject<Projects.Maliev_CompensationService_Api>("CompensationService")
                 .WithReference(databases.Compensation, "CompensationDbContext")
                 .WaitFor(databases.Compensation)
                 .WithReference(infrastructure.RabbitMQ)
@@ -275,11 +990,15 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/compensation/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/compensation/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var complianceService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_ComplianceService_Api>("maliev-complianceservice-api")
+            builder.AddProject<Projects.Maliev_ComplianceService_Api>("ComplianceService")
                 .WithReference(databases.Compliance, "ComplianceDbContext")
                 .WaitFor(databases.Compliance)
                 .WithReference(infrastructure.RabbitMQ)
@@ -287,11 +1006,15 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/compliance/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/compliance/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var leaveService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_LeaveService_Api>("maliev-leaveservice-api")
+            builder.AddProject<Projects.Maliev_LeaveService_Api>("LeaveService")
                 .WithReference(databases.Leave, "LeaveDbContext")
                 .WaitFor(databases.Leave)
                 .WithReference(infrastructure.RabbitMQ)
@@ -299,24 +1022,48 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(notificationService)
+                .WaitFor(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/leave/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/leave/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var lifecycleService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_LifecycleService_Api>("maliev-lifecycleservice-api")
+            builder.AddProject<Projects.Maliev_LifecycleService_Api>("LifecycleService")
                 .WithReference(databases.Lifecycle, "LifecycleDbContext")
                 .WaitFor(databases.Lifecycle)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
+                .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/lifecycle/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/lifecycle/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithoutJwtSigningMaterial();
+
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            lifecycleService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.LifecycleService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.LifecycleService.WorkloadId]);
+        }
 
         var performanceService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_PerformanceService_Api>("maliev-performanceservice-api")
+            builder.AddProject<Projects.Maliev_PerformanceService_Api>("PerformanceService")
                 .WithReference(databases.Performance, "PerformanceDbContext")
                 .WaitFor(databases.Performance)
                 .WithReference(infrastructure.RabbitMQ)
@@ -324,12 +1071,17 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(employeeService)
                 .WithReference(notificationService)
+                .WaitFor(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/performance/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/performance/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var contactService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_ContactService_Api>("maliev-contactservice-api")
+            builder.AddProject<Projects.Maliev_ContactService_Api>("ContactService")
                 .WithReference(databases.Contact, "ContactDbContext")
                 .WaitFor(databases.Contact)
                 .WithReference(infrastructure.RabbitMQ)
@@ -337,34 +1089,62 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(uploadService)
                 .WithReference(countryService)
+                .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/contact/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/contact/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithoutJwtSigningMaterial();
+
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            contactService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.ContactService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.ContactService.WorkloadId]);
+        }
 
         var currencyService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_CurrencyService_Api>("maliev-currencyservice-api")
+            builder.AddProject<Projects.Maliev_CurrencyService_Api>("CurrencyService")
                 .WithReference(databases.Currency, "CurrencyDbContext")
                 .WaitFor(databases.Currency)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/currency/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/currency/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var quotationService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_QuotationService_Api>("maliev-quotationservice-api")
+            builder.AddProject<Projects.Maliev_QuotationService_Api>("QuotationService")
                 .WithReference(databases.Quotation, "QuotationDbContext")
                 .WaitFor(databases.Quotation)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/quotation/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithReference(customerService)
+                .WithTestingSafeHttpHealthCheck("/quotation/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var invoiceService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_InvoiceService_Api>("maliev-invoiceservice-api")
+            builder.AddProject<Projects.Maliev_InvoiceService_Api>("InvoiceService")
                 .WithReference(databases.Invoice, "InvoiceDbContext")
                 .WaitFor(databases.Invoice)
                 .WithReference(infrastructure.RabbitMQ)
@@ -372,23 +1152,79 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(currencyService)
                 .WithReference(quotationService)
+                .WithReference(customerService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/invoice/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/invoice/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var materialService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_MaterialService_Api>("maliev-materialservice-api")
+            builder.AddProject<Projects.Maliev_MaterialService_Api>("MaterialService")
                 .WithReference(databases.Material, "MaterialDbContext")
                 .WaitFor(databases.Material)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
+                .WithReference(authService)
+                .WaitFor(authService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/material/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/material/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithoutJwtSigningMaterial();
+
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            materialService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.MaterialService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.MaterialService.WorkloadId]);
+        }
+
+        var pricingService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_PricingService_Api>("PricingService")
+                .WithReference(databases.Pricing, "PricingDbContext")
+                .WaitFor(databases.Pricing)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(materialService)
+                .WithReference(currencyService)
+                .WithReference(authService)
+                .WaitFor(authService)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/pricing/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithoutJwtSigningMaterial();
+
+        if (isLocalEnvironment && config.LocalServiceIdentitySecrets is not null)
+        {
+            pricingService
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientId",
+                    LocalServiceIdentityProfileCatalog.PricingService.ClientId)
+                .WithEnvironment(
+                    "ServiceAuthentication__ClientSecret",
+                    config.LocalServiceIdentitySecrets[
+                        LocalServiceIdentityProfileCatalog.PricingService.WorkloadId]);
+        }
 
         var orderService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_OrderService_Api>("maliev-orderservice-api")
+            builder.AddProject<Projects.Maliev_OrderService_Api>("OrderService")
                 .WithReference(databases.Order, "OrderDbContext")
                 .WaitFor(databases.Order)
                 .WithReference(infrastructure.RabbitMQ)
@@ -397,49 +1233,111 @@ static partial class Program
                 .WithReference(customerService)
                 .WithReference(materialService)
                 .WithReference(uploadService)
+                .WaitFor(uploadService)
                 .WithReference(authService)
                 .WithReference(employeeService)
                 .WithReference(notificationService)
+                .WaitFor(notificationService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/order/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/order/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        var deliveryService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_DeliveryService_Api>("DeliveryService")
+                .WithReference(databases.Delivery, "DeliveryDbContext")
+                .WaitFor(databases.Delivery)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(orderService)
+                .WithReference(customerService)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/delivery/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var paymentService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_PaymentService_Api>("maliev-paymentservice-api")
+            builder.AddProject<Projects.Maliev_PaymentService_Api>("PaymentService")
                 .WithReference(databases.Payment, "PaymentDbContext")
                 .WaitFor(databases.Payment)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/payment/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/payment/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithEnvironment("PaymentProviders__Omise__PublicKey", config.OmisePublicKey)
+            .WithEnvironment("PaymentProviders__Omise__SecretKey", config.OmiseSecretKey)
+            .WithEnvironment("PaymentProviders__Omise__WebhookSecret", config.OmiseWebhookSecret)
+            .WithEnvironment("PaymentProviders__Omise__ApiBaseUrl", "https://api.omise.co");
+
+        var commerceService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_CommerceService_Api>("CommerceService")
+                .WithReference(databases.Commerce, "CommerceDbContext")
+                .WaitFor(databases.Commerce)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithReference(customerService)
+                .WithTestingSafeHttpHealthCheck("/commerce/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var pdfService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_PdfService_Api>("maliev-pdfservice-api")
+            builder.AddProject<Projects.Maliev_PdfService_Api>("PdfService")
                 .WithReference(databases.Pdf, "PdfDbContext")
                 .WaitFor(databases.Pdf)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(uploadService)
+                .WaitFor(uploadService)
+                .WithReference(deliveryService)
+                .WithReference(invoiceService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/pdf/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/pdf/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        quotationService = quotationService
+            .WithReference(pdfService)
+            .WaitFor(pdfService);
 
         var purchaseOrderService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_PurchaseOrderService_Api>("maliev-purchaseorderservice-api")
+            builder.AddProject<Projects.Maliev_PurchaseOrderService_Api>("PurchaseOrderService")
                 .WithReference(databases.PurchaseOrder, "PurchaseOrderDbContext")
                 .WaitFor(databases.PurchaseOrder)
                 .WithReference(infrastructure.RabbitMQ)
                 .WaitFor(infrastructure.RabbitMQ)
                 .WithReference(infrastructure.Redis)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/purchase-order/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/purchase-order/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var receiptService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_ReceiptService_Api>("maliev-receiptservice-api")
+            builder.AddProject<Projects.Maliev_ReceiptService_Api>("ReceiptService")
                 .WithReference(databases.Receipt, "ReceiptDbContext")
                 .WaitFor(databases.Receipt)
                 .WithReference(infrastructure.RabbitMQ)
@@ -447,11 +1345,15 @@ static partial class Program
                 .WithReference(infrastructure.Redis)
                 .WithReference(invoiceService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/receipt/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/receipt/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
         var supplierService = WithSharedSecrets(
-            builder.AddProject<Projects.Maliev_SupplierService_Api>("maliev-supplierservice-api")
+            builder.AddProject<Projects.Maliev_SupplierService_Api>("SupplierService")
                 .WithReference(databases.Supplier, "SupplierDbContext")
                 .WaitFor(databases.Supplier)
                 .WithReference(infrastructure.RabbitMQ)
@@ -461,16 +1363,343 @@ static partial class Program
                 .WithReference(invoiceService)
                 .WithReference(materialService)
                 .WithReference(iamService)
-                .WithHttpHealthCheck("/supplier/readiness"),
-            config);
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/supplier/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
 
-        // --- Python Services ---
-        var geometryService = builder.AddPythonApp("geometry-service", "../../Maliev.GeometryService", "src/main.py")
+        materialService = materialService
+            .WithReference(supplierService)
+            .WaitFor(supplierService);
+
+        purchaseOrderService = purchaseOrderService
+            .WithReference(supplierService)
+            .WithReference(orderService)
+            .WithReference(currencyService)
+            .WaitFor(supplierService)
+            .WaitFor(orderService)
+            .WaitFor(currencyService);
+
+        var chatbotService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_ChatbotService_Api>("ChatbotService")
+                .WithReference(databases.Chatbot, "ChatbotDbContext")
+                .WaitFor(databases.Chatbot)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithReference(countryService)
+                .WaitFor(countryService)
+                .WithReference(registryService)
+                .WithReference(uploadService)
+                .WithReference(customerService)
+                .WithReference(employeeService)
+                .WithReference(authService)
+                .WithReference(accountingService)
+                .WithReference(notificationService)
+                .WithReference(careerService)
+                .WithReference(compensationService)
+                .WithReference(complianceService)
+                .WithReference(leaveService)
+                .WithReference(lifecycleService)
+                .WithReference(performanceService)
+                .WithReference(contactService)
+                .WithReference(currencyService)
+                .WithReference(quotationService)
+                .WithReference(invoiceService)
+                .WithReference(materialService)
+                .WithReference(pricingService)
+                .WithReference(orderService)
+                .WithReference(deliveryService)
+                .WithReference(paymentService)
+                .WithReference(pdfService)
+                .WithReference(purchaseOrderService)
+                .WithReference(receiptService)
+                .WithReference(supplierService)
+                // QuoteEngine BFF discovery so ChatbotService can call back the Quote Agent
+                // tool endpoint (/quote/v1/agent/tools/*). No WaitFor: quoteEngineBff already
+                // references chatbotService, so a WaitFor here would create a startup cycle.
+                .WithReference(quoteEngineBff)
+                .WithTestingSafeHttpHealthCheck("/chatbot/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName)
+            .WithEnvironment("Chatbot__AllowedThinkingCallbackOrigins__0", quoteEngineBff.GetEndpoint("https"));
+
+        var projectService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_ProjectService_Api>("ProjectService")
+                .WithReference(databases.Project, "ProjectDbContext")
+                .WaitFor(databases.Project)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithReference(customerService)
+                .WithReference(pricingService)
+                .WithReference(quotationService)
+                .WithReference(orderService)
+                .WithReference(notificationService)
+                .WithTestingSafeHttpHealthCheck("/project/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        var searchService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_SearchService_Api>("SearchService")
+                .WithReference(databases.Search, "SearchDbContext")
+                .WaitFor(databases.Search)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/search/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+
+
+        var inventoryService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_InventoryService_Api>("InventoryService")
+                .WithReference(databases.Inventory, "InventoryDbContext")
+                .WaitFor(databases.Inventory)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithReference(materialService)
+                .WithTestingSafeHttpHealthCheck("/inventory/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        var jobService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_JobService_Api>("JobService")
+                .WithReference(databases.Job, "JobDbContext")
+                .WaitFor(databases.Job)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis)
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithReference(orderService)
+                .WithReference(facilityService)
+                .WithReference(materialService)
+                .WithReference(notificationService)
+                .WaitFor(notificationService)
+                .WithTestingSafeHttpHealthCheck("/job/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        // PricingService queries JobService for queue depth — wire the reference here
+        // because jobService is declared after pricingService.
+        pricingService = pricingService.WithReference(jobService).WaitFor(jobService);
+
+        var predictionService = WithSharedSecrets(
+            builder.AddProject<Projects.Maliev_PredictionService_Api>("PredictionService")
+                .WithReference(databases.Prediction, "PredictionDatabase")
+                .WaitFor(databases.Prediction)
+                .WithReference(infrastructure.RabbitMQ)
+                .WaitFor(infrastructure.RabbitMQ)
+                .WithReference(infrastructure.Redis, "Redis")
+                .WithReference(iamService)
+                .WaitFor(iamService)
+                .WithTestingSafeHttpHealthCheck("/predictionservice/aspire-liveness"),
+            config,
+            grafana,
+            otelCollector,
+            environmentName);
+
+        // --- Geometry Service (Python FastAPI — Linux Docker container) ---
+        //
+        // GeometryService is a Python/FastAPI workload, not a .NET project. It runs inside a
+        // Linux Docker container both locally (via Aspire) and in production (Kubernetes Engine
+        // on Linux). Keeping local and production identical eliminates an entire class of
+        // platform-specific bugs (e.g. Linux-only rendering libraries, OSMesa, headless Xvfb).
+        //
+        // AddDockerfile rebuilds the image from source on every debug start (F5), so there is
+        // never a risk of running stale code. The build context is the Maliev.GeometryService
+        // directory; the Dockerfile uses a two-stage python:3.12-slim build with Poetry.
+        //
+        // Because this is not a .NET project it does NOT go through WithSharedSecrets.
+        // JWT keys and service URLs are injected directly as flat environment variables,
+        // which is how pydantic-settings reads them on the Python side.
+        var geometryService = builder.AddDockerfile("GeometryService", "../../Maliev.GeometryService")
             .WithReference(infrastructure.RabbitMQ)
+            .WaitFor(infrastructure.RabbitMQ)
+            .WithReference(uploadService)
+            .WaitFor(uploadService)
             .WithEnvironment("RABBITMQ_URI", infrastructure.RabbitMQ)
-            .WithHttpEndpoint(targetPort: 8080, name: "http")
-            .WithHttpHealthCheck("/geometry/readiness")
-            .WithVirtualEnvironment(".venv");
+            .WithEnvironment("UPLOAD_SERVICE_URL", uploadService.GetEndpoint("http"))
+            .WithEnvironment("JWT_PRIVATE_KEY", config.JwtPrivateKey)
+            .WithEnvironment("JWT_PUBLIC_KEY", config.JwtPublicKey)
+            .WithEnvironment("JWT_SECURITY_KEY", config.JwtSecurityKey)
+            .WithEnvironment("JWT_ISSUER", config.JwtIssuer)
+            .WithEnvironment("JWT_AUDIENCE", config.JwtAudience)
+            .WithEnvironment("OTEL_EXPORTER_OTLP_ENDPOINT", otelCollector.GetEndpoint("grpc"));
+
+        if (!environmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+        {
+            geometryService = geometryService.WaitFor(otelCollector);
+        }
+
+        geometryService = geometryService
+            .WithEnvironment("GEOMETRY_MAIN_WORKERS", "1")
+            .WithEnvironment("GEOMETRY_DFM_WORKERS", "1")
+            .WithEnvironment("GEOMETRY_PREVIEW_RENDER_WORKERS", "1")
+            .WithEnvironment("GEOMETRY_DFM_BODY_WORKERS", "1")
+            .WithEnvironment("GEOMETRY_FILE_INGEST_CONCURRENCY", "1")
+            .WithEnvironment("GEOMETRY_ARTIFACT_CONCURRENCY", "1")
+            .WithEnvironment("GEOMETRY_RABBITMQ_PREFETCH", "1")
+            .WithHttpEndpoint(targetPort: 8081, env: "PORT")
+            .WithUrlForEndpoint("http", u => { u.Url = "/geometry/scalar"; u.DisplayText = "Geometry Scalar"; })
+            .WithTestingSafeHttpHealthCheck("/geometry/aspire-liveness")
+            .WithContainerRuntimeArgs("--cpus", "2", "--memory", "2048m");
+
+        // Wire GeometryService into BFFs for service discovery.
+        // GeometryService is a Docker container (not a .NET project), so its endpoint is injected
+        // via EndpointReference — which Aspire translates to the services__GeometryService__http__0
+        // environment variable that AddServiceDiscovery() reads on the BFF side.
+        intranetBff
+            .WithReference(geometryService.GetEndpoint("http"))
+            .WithEnvironment("SystemHealth__ProbeTimeouts__GeometryService__LivenessSeconds", "20")
+            .WithEnvironment("SystemHealth__ProbeTimeouts__GeometryService__ReadinessSeconds", "20");
+        quoteEngineBff.WithReference(geometryService.GetEndpoint("http"));
+
+        // ──────────────────────────────────────────────
+        // Frontend service wiring (infrastructure + service references)
+        // ──────────────────────────────────────────────
+        intranetBff
+            .WithReference(infrastructure.RabbitMQ).WaitFor(infrastructure.RabbitMQ)
+            .WithReference(infrastructure.Redis)
+            .WithReference(databases.Intranet, "IntranetDbContext").WaitFor(databases.Intranet)
+            .WithReference(authService)
+            .WithReference(customerService)
+            .WithReference(orderService)
+            .WithReference(deliveryService)
+            .WithReference(iamService).WaitFor(iamService)
+            .WithReference(countryService).WaitFor(countryService)
+            .WithReference(registryService)
+            .WithReference(uploadService)
+            .WithReference(quotationService)
+            .WithReference(materialService)
+            .WithReference(employeeService)
+            .WithReference(invoiceService)
+            .WithReference(paymentService)
+            .WithReference(pdfService)
+            .WithReference(supplierService)
+            .WithReference(chatbotService)
+            .WithReference(careerService)
+            .WithReference(complianceService)
+            .WithReference(performanceService)
+            .WithReference(compensationService)
+            .WithReference(accountingService)
+            .WithReference(contactService)
+            .WithReference(receiptService)
+            .WithReference(lifecycleService)
+            .WithReference(purchaseOrderService)
+            .WithReference(leaveService)
+            .WithReference(pricingService)
+            .WithReference(notificationService)
+            .WithReference(facilityService)
+            .WithReference(projectService)
+            .WithReference(searchService)
+            .WithReference(currencyService)
+            .WithReference(commerceService)
+            .WithReference(inventoryService)
+            .WithReference(jobService)
+            .WithReference(predictionService)
+            .WithHttpCommand(
+                path: "/api/v1/seed/customers",
+                displayName: "Seed Customer Data",
+                commandOptions: new HttpCommandOptions
+                {
+                    IconName = "Database",
+                    IconVariant = IconVariant.Filled,
+                    IsHighlighted = true,
+                    Description = "Seed Maliev customer data (Company, Customer, Addresses)",
+                    PrepareRequest = context =>
+                    {
+                        var tokenProvider = new ServiceAccountTokenProvider(builder.Configuration, "IntranetBff");
+                        context.Request.Headers.Authorization =
+                            new AuthenticationHeaderValue("Bearer", tokenProvider.GetToken());
+
+                        return Task.CompletedTask;
+                    }
+                });
+
+        quoteEngineBff
+            .WithReference(infrastructure.RabbitMQ).WaitFor(infrastructure.RabbitMQ)
+            .WithReference(infrastructure.Redis)
+            .WithReference(authService)
+            .WithReference(iamService).WaitFor(iamService)
+            .WithReference(customerService)
+            .WithReference(registryService)
+            .WithReference(uploadService)
+            .WithReference(materialService)
+            .WithReference(pricingService)
+            .WithReference(projectService)
+            .WithReference(quotationService)
+            .WithReference(invoiceService)
+            .WithReference(pdfService)
+            .WithReference(orderService)
+            .WithReference(paymentService)
+            .WithReference(deliveryService)
+            .WithReference(chatbotService)
+            .WithReference(receiptService)
+            .WithReference(searchService)
+            .WithReference(currencyService);
+
+        webBff
+            .WithReference(authService).WaitFor(authService)
+            .WithReference(iamService).WaitFor(iamService)
+            .WithReference(customerService).WaitFor(customerService)
+            .WithReference(countryService)
+            .WithReference(registryService)
+            .WithReference(contactService)
+            .WithReference(deliveryService)
+            .WithReference(materialService)
+            .WithReference(orderService)
+            .WithReference(paymentService)
+            .WithReference(pricingService)
+            .WithReference(uploadService)
+            .WithReference(commerceService)
+            .WithReference(chatbotService)
+            .WithReference(pdfService);
+
+        // ──────────────────────────────────────────────
+        // Apply shared secrets to frontends
+        // ──────────────────────────────────────────────
+        intranetBff = WithSharedSecrets(intranetBff, config, grafana, otelCollector, environmentName)
+            .WithEnvironment("IAM__LivePermissionChecks__Credential", config.IntranetBffIamLiveCheckCredential);
+        quoteEngineBff = WithSharedSecrets(quoteEngineBff, config, grafana, otelCollector, environmentName)
+            .WithEnvironment("Web__BaseUrl", webBff.GetEndpoint("https"))
+            .WithEnvironment("QuoteAgent__EnableThinkingCallbacks", "true")
+            .WithEnvironment("QuoteAgent__ThinkingCallbackBaseUrl", quoteEngineBff.GetEndpoint("https"))
+            .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey)
+            // Make Studio renders GIS and forwards the nonce-bound credential to AuthService.
+            .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
+            // Dedicated Drive-only OAuth client. Its secret is never used for sign-in.
+            .WithEnvironment("GoogleDrive__ClientId", config.GoogleDriveClientId)
+            .WithEnvironment("GoogleDrive__ClientSecret", config.GoogleDriveClientSecret);
+        webBff = WithSharedSecrets(webBff, config, grafana, otelCollector, environmentName)
+            .WithEnvironment("QuoteEngine__BaseUrl", quoteEngineBff.GetEndpoint("https"))
+            // Customer Web uses the shared public GIS client ID; sign-in has no client secret.
+            .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
+            .WithEnvironment("GoogleMaps__BrowserApiKey", config.WebGoogleMapsApiKey)
+            .WithEnvironment("BusinessRegistry__DdbApiKey", config.BusinessRegistryDdbApiKey);
     }
 
     /// <summary>
@@ -478,26 +1707,133 @@ static partial class Program
     /// </summary>
     private static IResourceBuilder<ProjectResource> WithSharedSecrets(
         IResourceBuilder<ProjectResource> project,
-        SharedConfiguration config)
+        SharedConfiguration config,
+        IResourceBuilder<ContainerResource> grafana,
+        IResourceBuilder<ContainerResource> otelCollector,
+        string environmentName)
     {
         return project
-            .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+            .WithServiceScalarUrl()
+            .WithEnvironment("ASPNETCORE_ENVIRONMENT", environmentName)
+            .WithEnvironment("DOTNET_ENVIRONMENT", environmentName)
             .WithEnvironment("Jwt__PublicKey", config.JwtPublicKey)
-            .WithEnvironment("Jwt__SecurityKey", "test-key-at-least-32-characters-long-for-integration-tests") // Symmetric fallback
+            .WithEnvironment("Jwt__SecurityKey", config.JwtSecurityKey)
+            .WithEnvironment("Jwt__PrivateKey", config.JwtPrivateKey)
             .WithEnvironment("Jwt__Issuer", config.JwtIssuer)
             .WithEnvironment("Jwt__Audience", config.JwtAudience)
-            .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins);
+            .WithEnvironment("Authentication__Google__ClientId", config.GoogleClientId)
+            .WithEnvironment("CORS__AllowedOrigins", config.CorsAllowedOrigins)
+            .WithEnvironment("GRAFANA_URL", grafana.GetEndpoint("http"))
+            .WithEnvironment("Observability__TracingEnabled", "false")
+            .WithEnvironment("Observability__RuntimeMetricsEnabled", "false")
+            .WithEnvironment("DOTNET_gcServer", "0")
+            .WithEnvironment("COMPlus_gcServer", "0")
+            // Cap each service's GC heap at 2% of host RAM (~636 MB on 31.8 GB) so the
+            // ~40 services starting in parallel don't collectively exceed physical RAM.
+            .WithEnvironment("DOTNET_GCHeapHardLimitPercent", "2")
+            .WithEnvironment("COMPlus_GCHeapHardLimitPercent", "2")
+            // Conserve memory level 3 (scale 0–9): tells the GC to return freed pages
+            // to the OS promptly rather than hoarding them. Prevents per-service RSS
+            // from accumulating during the seeding burst; CPU cost at level 3 is minimal.
+            .WithEnvironment("DOTNET_GCConserveMemory", "3")
+            .WithEnvironment("COMPlus_GCConserveMemory", "3")
+            .WithEnvironment("NPGSQL_GSSAPI_AUTHENTICATION", "false")
+            .WithEnvironment("PGGSSENCMODE", "disable");
     }
+
+    private static IResourceBuilder<ProjectResource> WithServiceScalarUrl(
+        this IResourceBuilder<ProjectResource> project)
+    {
+        if (!ServiceScalarRoutes.TryGetValue(project.Resource.Name, out var route))
+        {
+            return project;
+        }
+
+        return project
+            .WithUrlForEndpoint("http", url =>
+            {
+                url.Url = route.Path;
+                url.DisplayText = route.DisplayText;
+            })
+            .WithUrlForEndpoint("https", url =>
+            {
+                url.Url = route.Path;
+                url.DisplayText = route.DisplayText;
+            });
+    }
+
+    private static readonly IReadOnlyDictionary<string, ScalarRoute> ServiceScalarRoutes =
+        new Dictionary<string, ScalarRoute>(StringComparer.Ordinal)
+        {
+            ["AccountingService"] = new("/accounting/scalar", "Accounting Scalar"),
+            ["AuthService"] = new("/auth/scalar", "Auth Scalar"),
+            ["CareerService"] = new("/career/scalar", "Career Scalar"),
+            ["ChatbotService"] = new("/chatbot/scalar", "Chatbot Scalar"),
+            ["CommerceService"] = new("/commerce/scalar", "Commerce Scalar"),
+            ["CompensationService"] = new("/compensation/scalar", "Compensation Scalar"),
+            ["ComplianceService"] = new("/compliance/scalar", "Compliance Scalar"),
+            ["ContactService"] = new("/contact/scalar", "Contact Scalar"),
+            ["CountryService"] = new("/country/scalar", "Country Scalar"),
+            ["CurrencyService"] = new("/currency/scalar", "Currency Scalar"),
+            ["CustomerService"] = new("/customer/scalar", "Customer Scalar"),
+            ["DeliveryService"] = new("/delivery/scalar", "Delivery Scalar"),
+            ["EmployeeService"] = new("/employee/scalar", "Employee Scalar"),
+            ["FacilityService"] = new("/facility/scalar", "Facility Scalar"),
+            ["IAMService"] = new("/iam/scalar", "IAM Scalar"),
+            ["InventoryService"] = new("/inventory/scalar", "Inventory Scalar"),
+            ["InvoiceService"] = new("/invoice/scalar", "Invoice Scalar"),
+            ["JobService"] = new("/job/scalar", "Job Scalar"),
+            ["LeaveService"] = new("/leave/scalar", "Leave Scalar"),
+            ["LifecycleService"] = new("/lifecycle/scalar", "Lifecycle Scalar"),
+            ["MaterialService"] = new("/material/scalar", "Material Scalar"),
+            ["NotificationService"] = new("/notification/scalar", "Notification Scalar"),
+            ["OrderService"] = new("/order/scalar", "Order Scalar"),
+            ["PaymentService"] = new("/payment/scalar", "Payment Scalar"),
+            ["PdfService"] = new("/pdf/scalar", "PDF Scalar"),
+            ["PerformanceService"] = new("/performance/scalar", "Performance Scalar"),
+            ["PredictionService"] = new("/predictionservice/scalar", "Prediction Scalar"),
+            ["PricingService"] = new("/pricing/scalar", "Pricing Scalar"),
+            ["ProjectService"] = new("/project/scalar", "Project Scalar"),
+            ["PurchaseOrderService"] = new("/purchase-order/scalar", "Purchase Order Scalar"),
+            ["QuotationService"] = new("/quotation/scalar", "Quotation Scalar"),
+            ["ReceiptService"] = new("/receipt/scalar", "Receipt Scalar"),
+            ["RegistryService"] = new("/registry/scalar", "Registry Scalar"),
+            ["SearchService"] = new("/search/scalar", "Search Scalar"),
+            ["SupplierService"] = new("/supplier/scalar", "Supplier Scalar"),
+            ["UploadService"] = new("/upload/scalar", "Upload Scalar")
+        };
 }
+
+internal sealed record ScalarRoute(string Path, string DisplayText);
 
 /// <summary>
 /// Shared configuration values loaded from configuration sources.
 /// </summary>
-record SharedConfiguration(
+public record SharedConfiguration(
+    IResourceBuilder<ParameterResource> JwtSecurityKey,
+    IResourceBuilder<ParameterResource> JwtPrivateKey,
     IResourceBuilder<ParameterResource> JwtPublicKey,
     IResourceBuilder<ParameterResource> JwtIssuer,
     IResourceBuilder<ParameterResource> JwtAudience,
-    IResourceBuilder<ParameterResource> CorsAllowedOrigins);
+    IResourceBuilder<ParameterResource> GoogleClientId,
+    IResourceBuilder<ParameterResource> GoogleDriveClientId,
+    IResourceBuilder<ParameterResource> GoogleDriveClientSecret,
+    IResourceBuilder<ParameterResource> IntranetBffIamLiveCheckCredential,
+    IResourceBuilder<ParameterResource> IamLiveCheckCredentialHash,
+    IReadOnlyDictionary<string, IResourceBuilder<ParameterResource>>? LocalServiceIdentitySecrets,
+    IReadOnlyDictionary<string, string>? LocalServiceIdentitySecretHashes,
+    LocalTokenIssuanceCapabilityMaterial? TokenIssuanceCapability,
+    IResourceBuilder<ParameterResource> AspireTestAdminEnabled,
+    IResourceBuilder<ParameterResource> AspireTestAdminPassword,
+    IResourceBuilder<ParameterResource> CorsAllowedOrigins,
+    IResourceBuilder<ParameterResource> GcpProjectId,
+    IResourceBuilder<ParameterResource> GcpServiceAccountKeyBase64,
+    IResourceBuilder<ParameterResource> OmisePublicKey,
+    IResourceBuilder<ParameterResource> OmiseSecretKey,
+    IResourceBuilder<ParameterResource> OmiseWebhookSecret,
+    IResourceBuilder<ParameterResource> NotificationEncryptionKey,
+    IResourceBuilder<ParameterResource> WebGoogleMapsApiKey,
+    IResourceBuilder<ParameterResource> BusinessRegistryDdbApiKey);
 
 /// <summary>
 /// Infrastructure resource references (messaging, caching, database server).
@@ -517,12 +1853,15 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Chatbot,
     IResourceBuilder<PostgresDatabaseResource> Compensation,
     IResourceBuilder<PostgresDatabaseResource> Compliance,
+    IResourceBuilder<PostgresDatabaseResource> Commerce,
     IResourceBuilder<PostgresDatabaseResource> Contact,
     IResourceBuilder<PostgresDatabaseResource> Country,
     IResourceBuilder<PostgresDatabaseResource> Currency,
     IResourceBuilder<PostgresDatabaseResource> Customer,
+    IResourceBuilder<PostgresDatabaseResource> Delivery,
     IResourceBuilder<PostgresDatabaseResource> Employee,
     IResourceBuilder<PostgresDatabaseResource> IAM,
+    IResourceBuilder<PostgresDatabaseResource> Intranet,
     IResourceBuilder<PostgresDatabaseResource> Invoice,
     IResourceBuilder<PostgresDatabaseResource> Leave,
     IResourceBuilder<PostgresDatabaseResource> Lifecycle,
@@ -532,8 +1871,16 @@ record ServiceDatabases(
     IResourceBuilder<PostgresDatabaseResource> Payment,
     IResourceBuilder<PostgresDatabaseResource> Pdf,
     IResourceBuilder<PostgresDatabaseResource> Performance,
+    IResourceBuilder<PostgresDatabaseResource> Prediction,
+    IResourceBuilder<PostgresDatabaseResource> Pricing,
     IResourceBuilder<PostgresDatabaseResource> PurchaseOrder,
     IResourceBuilder<PostgresDatabaseResource> Quotation,
     IResourceBuilder<PostgresDatabaseResource> Receipt,
+    IResourceBuilder<PostgresDatabaseResource> Registry,
+    IResourceBuilder<PostgresDatabaseResource> Search,
     IResourceBuilder<PostgresDatabaseResource> Supplier,
-    IResourceBuilder<PostgresDatabaseResource> Upload);
+    IResourceBuilder<PostgresDatabaseResource> Upload,
+    IResourceBuilder<PostgresDatabaseResource> Facility,
+    IResourceBuilder<PostgresDatabaseResource> Inventory,
+    IResourceBuilder<PostgresDatabaseResource> Job,
+    IResourceBuilder<PostgresDatabaseResource> Project);

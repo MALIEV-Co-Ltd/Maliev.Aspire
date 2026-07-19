@@ -19,7 +19,18 @@
 
     <!-- Suppress prerelease dependency warning - OpenTelemetry.Exporter.Prometheus.AspNetCore beta is required for .NET 10.0 -->
     <NoWarn>$(NoWarn);NU5104</NoWarn>
+    <SharedLibraryVersion Condition="'$(SharedLibraryVersion)' == ''">1.0.*-*</SharedLibraryVersion>
+    <UsePackageReferences Condition="'$(UsePackageReferences)' == '' and '$(GITHUB_ACTIONS)' == 'true'">true</UsePackageReferences>
+    <UsePackageReferences Condition="'$(UsePackageReferences)' == ''">false</UsePackageReferences>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(UsePackageReferences)' != 'true'">
+    <ProjectReference Include="..\..\Maliev.MessagingContracts\generated\csharp\Maliev.MessagingContracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(UsePackageReferences)' == 'true'">
+    <PackageReference Include="Maliev.MessagingContracts" Version="$(SharedLibraryVersion)" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
@@ -29,10 +40,8 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
 
     <!-- Health Checks -->
-    <PackageReference Include="AspNetCore.HealthChecks.NpgSql" Version="9.0.0" />
     <PackageReference Include="AspNetCore.HealthChecks.Rabbitmq" Version="9.0.0" />
     <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
-    <PackageReference Include="AspNetCore.HealthChecks.UI.Client" Version="9.0.0" />
 
     <!-- OpenTelemetry -->
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
@@ -47,7 +56,8 @@
     <!-- Infrastructure -->
     <PackageReference Include="RabbitMQ.Client" Version="7.2.1" />
     <PackageReference Include="MassTransit.RabbitMQ" Version="8.5.10" />
-    <PackageReference Include="StackExchange.Redis" Version="2.13.17" />
+    <PackageReference Include="MassTransit.Abstractions" Version="8.5.10" />
+    <PackageReference Include="StackExchange.Redis" Version="3.0.17" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.10" />
@@ -63,7 +73,7 @@
     <PackageReference Include="Scalar.AspNetCore" Version="2.16.15" />
 
     <!-- API Versioning -->
-    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.1" />
+    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="10.0.0" />
   </ItemGroup>
 
 </Project>

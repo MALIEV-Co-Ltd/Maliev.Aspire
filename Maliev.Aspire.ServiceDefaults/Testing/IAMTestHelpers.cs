@@ -1,12 +1,15 @@
+using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.IdentityModel.Tokens;
 
 namespace Maliev.Aspire.ServiceDefaults.Testing;
 
+/// <summary>
+/// Provides helper methods for generating test JWT tokens and configuring test authentication in integration tests.
+/// </summary>
 public static class IAMTestHelpers
 {
     private static RSA? _testRsa;
@@ -37,12 +40,12 @@ public static class IAMTestHelpers
         SigningCredentials creds;
         if (_testRsa != null)
         {
-            var key = new RsaSecurityKey(_testRsa);
+            var key = new RsaSecurityKey(_testRsa) { KeyId = "test-rsa-key" };
             creds = new SigningCredentials(key, SecurityAlgorithms.RsaSha256);
         }
         else
         {
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-key-at-least-32-characters-long-for-integration-tests"));
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-key-at-least-32-characters-long-for-integration-tests")) { KeyId = "test-symmetric-key" };
             creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         }
 

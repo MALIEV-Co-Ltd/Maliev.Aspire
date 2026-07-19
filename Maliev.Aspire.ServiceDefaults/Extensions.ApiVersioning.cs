@@ -1,6 +1,5 @@
 using Asp.Versioning;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace Microsoft.Extensions.Hosting;
 
@@ -26,7 +25,7 @@ public static class ApiVersioningExtensions
             options.ApiVersionReader = new UrlSegmentApiVersionReader();
         }).AddApiExplorer(options =>
         {
-            options.GroupNameFormat = "'v'VVV";
+            options.GroupNameFormat = "'v'V";
             options.SubstituteApiVersionInUrl = true;
         });
 

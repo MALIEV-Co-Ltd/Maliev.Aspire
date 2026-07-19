@@ -1,0 +1,39 @@
+using Maliev.Aspire.Tests.Infrastructure;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Xunit.Abstractions;
+
+namespace Maliev.Aspire.Tests.Domain.HR;
+
+/// <summary>
+/// Integration tests for the compensation service.
+/// </summary>
+[Collection("AspireDomainTests")]
+public class CompensationServiceTests(AspireTestFixture fixture, ITestOutputHelper output)
+{
+    private readonly AspireTestFixture _fixture = fixture;
+    private readonly ITestOutputHelper _output = output;
+
+    /// <summary>
+    /// Tests that an admin can retrieve compensation data.
+    /// </summary>
+    [Fact]
+    public async Task GetCompensationData_AsAdmin_ReturnsOk()
+    {
+        var compClient = _fixture.CreateAuthenticatedClient("CompensationService");
+
+        // 1. Create an employee
+        var employee = await AspireTestData.CreateEmployeeAsync(_fixture, "COMP");
+        var employeeId = employee.GetProperty("id").GetGuid();
+
+        // 2. Get compensation data
+        var response = await compClient.GetAsync($"/compensation/v1/employees/{employeeId}/compensation");
+
+        // It should be OK (200) or NotFound (404) if no record exists yet.
+        // Based on controller logic, it returns NotFound if result == null.
+        // We'll assert OK or NotFound to verify service reachability and IAM.
+        _output.WriteLine($"Compensation status for {employeeId}: {response.StatusCode}");
+        Assert.True(response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.NotFound);
+    }
+}

@@ -6,12 +6,22 @@ using System.Text.Json;
 
 namespace Maliev.Aspire.ServiceDefaults.Middleware;
 
+/// <summary>
+/// Middleware that catches unhandled exceptions and returns appropriate JSON error responses.
+/// Maps common exception types to HTTP status codes and includes stack traces in development.
+/// </summary>
 public class ExceptionHandlingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<ExceptionHandlingMiddleware> _logger;
     private readonly IHostEnvironment _environment;
 
+    /// <summary>
+    /// Initializes a new instance of the ExceptionHandlingMiddleware.
+    /// </summary>
+    /// <param name="next">The next middleware in the pipeline.</param>
+    /// <param name="logger">The logger for exception handling.</param>
+    /// <param name="environment">The host environment to determine if running in development.</param>
     public ExceptionHandlingMiddleware(
         RequestDelegate next,
         ILogger<ExceptionHandlingMiddleware> logger,
@@ -22,6 +32,11 @@ public class ExceptionHandlingMiddleware
         _environment = environment;
     }
 
+    /// <summary>
+    /// Processes the HTTP request and catches any unhandled exceptions.
+    /// </summary>
+    /// <param name="context">The HTTP context.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
     public async Task InvokeAsync(HttpContext context)
     {
         try
@@ -43,6 +58,13 @@ public class ExceptionHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
+        if (context.Response.HasStarted)
+        {
+            _logger.LogWarning("Response has already started; cannot write JSON error response for {ExceptionType}: {Message}",
+                exception.GetType().Name, exception.Message);
+            return;
+        }
+
         var (statusCode, message) = MapExceptionToResponse(exception);
 
         var response = new
