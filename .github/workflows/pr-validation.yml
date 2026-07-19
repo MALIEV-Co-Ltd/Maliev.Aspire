@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: pr-validation-${{ github.event.pull_request.number }}
@@ -56,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NUGET_USERNAME: ${{ github.actor }}
-      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
+      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT || github.token }}
     
     steps:
       - name: Checkout code
@@ -123,7 +124,7 @@ jobs:
     timeout-minutes: 20
     env:
       NUGET_USERNAME: ${{ github.actor }}
-      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
+      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT || github.token }}
 
     steps:
       - name: Checkout code
@@ -173,7 +174,7 @@ jobs:
     needs: [prep, build-and-test]
     env:
       NUGET_USERNAME: ${{ github.actor }}
-      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}
+      NUGET_PASSWORD: ${{ secrets.GITOPS_PAT || github.token }}
     
     steps:
       - name: Checkout code
