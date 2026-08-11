@@ -10,11 +10,10 @@ public sealed class PrValidationWorkflowContractTests
     private static readonly string RepositoryRoot = FindRepositoryRoot();
 
     /// <summary>
-    /// Dependabot cannot access repository secrets, so package restore must fall back to the
-    /// pull-request job token with explicit package-read permission.
+    /// Dependabot validation must build an immutable public shared-source revision without credentials.
     /// </summary>
     [Fact]
-    public void PackageRestore_UsesDependabotSafeTokenFallback()
+    public void PackageRestore_UsesCredentialFreePinnedSharedSource()
     {
         var source = File.ReadAllText(Path.Combine(
             RepositoryRoot,
@@ -22,9 +21,12 @@ public sealed class PrValidationWorkflowContractTests
             "workflows",
             "pr-validation.yml"));
 
-        Assert.Contains("permissions:\n  contents: read\n  packages: read", source, StringComparison.Ordinal);
-        Assert.Equal(3, CountOccurrences(source, "NUGET_PASSWORD: ${{ secrets.GITOPS_PAT || github.token }}"));
-        Assert.DoesNotContain("NUGET_PASSWORD: ${{ secrets.GITOPS_PAT }}", source, StringComparison.Ordinal);
+        Assert.Contains("repository: MALIEV-Co-Ltd/Maliev.MessagingContracts", source, StringComparison.Ordinal);
+        Assert.Contains("ref: 53173003ba9ab72d2ea140fbe30d71ae0885f8b7", source, StringComparison.Ordinal);
+        Assert.Contains("-p:UsePackageReferences=false", source, StringComparison.Ordinal);
+        Assert.Contains("-p:SharedSourceRoot=${{ github.workspace }}/shared", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("NUGET_PASSWORD", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("secrets.GITOPS_PAT", source, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -43,20 +45,6 @@ public sealed class PrValidationWorkflowContractTests
 
         Assert.NotEmpty(references);
         Assert.All(references, reference => Assert.Matches("^[0-9a-f]{40}$", reference));
-    }
-
-    private static int CountOccurrences(string source, string value)
-    {
-        var count = 0;
-        var offset = 0;
-
-        while ((offset = source.IndexOf(value, offset, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            offset += value.Length;
-        }
-
-        return count;
     }
 
     private static string FindRepositoryRoot()
