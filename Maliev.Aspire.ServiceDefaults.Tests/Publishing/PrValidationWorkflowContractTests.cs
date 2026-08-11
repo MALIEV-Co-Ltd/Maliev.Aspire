@@ -22,7 +22,7 @@ public sealed class PrValidationWorkflowContractTests
             "pr-validation.yml"));
 
         Assert.Contains("repository: MALIEV-Co-Ltd/Maliev.MessagingContracts", source, StringComparison.Ordinal);
-        Assert.Contains("ref: 53173003ba9ab72d2ea140fbe30d71ae0885f8b7", source, StringComparison.Ordinal);
+        Assert.Contains("ref: 9f581b02758fd1dd4252581deece3cb57b10f342", source, StringComparison.Ordinal);
         Assert.Contains("-p:UsePackageReferences=false", source, StringComparison.Ordinal);
         Assert.Contains("-p:SharedSourceRoot=${{ github.workspace }}/shared", source, StringComparison.Ordinal);
         Assert.DoesNotContain("NUGET_PASSWORD", source, StringComparison.Ordinal);
