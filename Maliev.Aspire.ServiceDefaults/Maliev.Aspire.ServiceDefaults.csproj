@@ -22,10 +22,11 @@
     <SharedLibraryVersion Condition="'$(SharedLibraryVersion)' == ''">1.0.*-*</SharedLibraryVersion>
     <UsePackageReferences Condition="'$(UsePackageReferences)' == '' and '$(GITHUB_ACTIONS)' == 'true'">true</UsePackageReferences>
     <UsePackageReferences Condition="'$(UsePackageReferences)' == ''">false</UsePackageReferences>
+    <SharedSourceRoot Condition="'$(SharedSourceRoot)' == ''">..\..</SharedSourceRoot>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(UsePackageReferences)' != 'true'">
-    <ProjectReference Include="..\..\Maliev.MessagingContracts\generated\csharp\Maliev.MessagingContracts.csproj" />
+    <ProjectReference Include="$(SharedSourceRoot)\Maliev.MessagingContracts\generated\csharp\Maliev.MessagingContracts.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UsePackageReferences)' == 'true'">
