@@ -44,6 +44,10 @@ public static class MiddlewareExtensions
     {
         var options = app.ApplicationServices.GetService<MiddlewareOptions>() ?? new MiddlewareOptions();
 
+        // Catch the diagnostic through the same application failure boundary.
+        app.UseMiddleware<ExceptionHandlingMiddleware>();
+        // Check actual loopback before any forwarded-header rewriting.
+        app.UseMiddleware<Maliev.Diagnostics.ProductionObservabilityMiddleware>();
         // Order matters! 
         // ForwardedHeaders must be first to ensure other middleware sees the correct IP/Protocol
         app.UseForwardedHeaders();
@@ -55,8 +59,6 @@ public static class MiddlewareExtensions
         {
             app.UseMiddleware<RequestLoggingMiddleware>();
         }
-
-        app.UseMiddleware<ExceptionHandlingMiddleware>();
 
         return app;
     }

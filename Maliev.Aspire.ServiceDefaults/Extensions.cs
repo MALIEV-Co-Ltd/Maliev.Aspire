@@ -6,6 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 using Maliev.Aspire.ServiceDefaults.Telemetry;
+using Maliev.Diagnostics;
+using Microsoft.Extensions.Logging.Console;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -54,34 +56,46 @@ public static class Extensions
         builder.Logging.AddFilter("Microsoft.Extensions.Diagnostics.HealthChecks.DefaultHealthCheckService", LogLevel.Warning);
 
         // Service discovery and resilience (temporarily verbose for debugging)
-        builder.Logging.AddFilter("Microsoft.Extensions.ServiceDiscovery", LogLevel.Information);
+        builder.Logging.AddFilter("Microsoft.Extensions.ServiceDiscovery", LogLevel.Warning);
         builder.Logging.AddFilter("Polly", LogLevel.Error);
 
         // Infrastructure components
         builder.Logging.AddFilter("StackExchange.Redis", LogLevel.Warning); // Redis connection noise
         builder.Logging.AddFilter("Npgsql", LogLevel.Warning); // PostgreSQL connection noise
         builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
-        builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Critical);
+        builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Error);
 
         // MassTransit/RabbitMQ - Warning level for transport; Information for message processing
         builder.Logging.AddFilter("MassTransit", LogLevel.Warning);
-        builder.Logging.AddFilter("MassTransit.Messages", LogLevel.Information);
+        builder.Logging.AddFilter("MassTransit.Messages", LogLevel.Warning);
 
         // IAM and Authorization
         builder.Logging.AddFilter("IAM.Handler.Factory", LogLevel.Warning);
         builder.Logging.AddFilter("Microsoft.AspNetCore.Authorization", LogLevel.Warning);
 
-        // --- OpenTelemetry ---
-        builder.Logging.AddOpenTelemetry(logging =>
+        if (!builder.Environment.IsDevelopment() && !builder.Environment.IsEnvironment("Testing"))
         {
-            logging.IncludeFormattedMessage = true;
-            logging.IncludeScopes = true;
+            builder.Logging.ClearProviders();
+            builder.Logging.AddConsoleFormatter<ProductionConsoleFormatter, ConsoleFormatterOptions>();
+            builder.Logging.AddConsole(options => options.FormatterName = ProductionConsoleFormatter.FormatterName);
+            builder.Logging.AddFilter<ConsoleLoggerProvider>((_, level) => level >= LogLevel.Warning);
+            // Preserve terminal resilience errors without emitting each warning-level retry attempt.
+            builder.Logging.AddFilter<ConsoleLoggerProvider>("Polly", LogLevel.Error);
+            builder.Logging.AddFilter<ConsoleLoggerProvider>("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Error);
+        }
 
-            if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+        // --- OpenTelemetry ---
+        if (builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing"))
+            builder.Logging.AddOpenTelemetry(logging =>
             {
-                logging.AddOtlpExporter();
-            }
-        });
+                logging.IncludeFormattedMessage = true;
+                logging.IncludeScopes = true;
+
+                if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]))
+                {
+                    logging.AddOtlpExporter();
+                }
+            });
 
         var useOtlpExporter = !string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"]);
         var enableTracing = useOtlpExporter ||
@@ -145,6 +159,17 @@ public static class Extensions
 
         // --- Service Discovery and Resilience ---
         builder.Services.AddServiceDiscovery();
+        builder.Services.AddHttpContextAccessor();
+        // Resolve the actual named client at pipeline construction, rather than the defaults builder's null name.
+        builder.Services.ConfigureAll<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(handlerBuilder =>
+            {
+                var services = handlerBuilder.Services;
+                handlerBuilder.AdditionalHandlers.Insert(0, new DependencyFailureHandler(
+                    services.GetRequiredService<ILogger<DependencyFailureHandler>>(), handlerBuilder.Name,
+                    token => services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.IsCancellationRequested
+                        || services.GetRequiredService<IHttpContextAccessor>().HttpContext?.RequestAborted.IsCancellationRequested == true));
+            }));
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
             // Turn on resilience by default with optimized timeouts

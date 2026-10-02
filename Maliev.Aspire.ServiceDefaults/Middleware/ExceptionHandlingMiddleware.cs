@@ -43,25 +43,39 @@ public class ExceptionHandlingMiddleware
         {
             await _next(context);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
-            _logger.LogWarning("Request was cancelled");
-            await HandleExceptionAsync(context, new OperationCanceledException("Request was cancelled"));
+            // A disconnected caller is not an application failure; do not write to an aborted response.
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "An unhandled exception occurred: {Message}. Exception type: {ExceptionType}. Stack trace: {StackTrace}",
-                ex.Message, ex.GetType().Name, ex.StackTrace);
+            // The inner request scope has unwound; retain only its validated correlation identifier.
+            var correlation = context.Items["CorrelationId"] as string;
+            using var failureScope = _logger.BeginScope(new Dictionary<string, object?>
+            {
+                ["CorrelationId"] = Guid.TryParse(correlation, out var id) ? id.ToString("N") : null,
+            });
+            var (status, _) = MapExceptionToResponse(ex);
+            if ((int)status >= 500 || ex is TimeoutException or OperationCanceledException or InvalidOperationException or ArgumentNullException)
+            {
+                _logger.LogError(new EventId(5100, "UnhandledRequestFailure"), ex,
+                    "{EventName} Operation={Operation} StatusCode={StatusCode}",
+                    "UnhandledRequestFailure", "HttpRequest", (int)status);
+            }
+            if (ex is Maliev.Diagnostics.ProductionObservabilityDiagnosticException diagnostic)
+            {
+                context.Response.Headers["X-Maliev-Diagnostic-Id"] = diagnostic.DiagnosticId;
+                _logger.LogCritical(new EventId(5102, "ObservabilityDiagnosticFailure"), ex,
+                    "{EventName}", "ObservabilityDiagnosticFailure");
+            }
             await HandleExceptionAsync(context, ex);
         }
     }
-
     private async Task HandleExceptionAsync(HttpContext context, Exception exception)
     {
         if (context.Response.HasStarted)
         {
-            _logger.LogWarning("Response has already started; cannot write JSON error response for {ExceptionType}: {Message}",
-                exception.GetType().Name, exception.Message);
+            // The terminal failure was already logged above; avoid a duplicate record.
             return;
         }
 

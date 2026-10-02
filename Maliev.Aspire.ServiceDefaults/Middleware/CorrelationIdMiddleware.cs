@@ -43,10 +43,7 @@ public class CorrelationIdMiddleware
         var scopeProperties = new Dictionary<string, object?>
         {
             ["CorrelationId"] = correlationId,
-            ["RequestPath"] = context.Request.Path.Value,
             ["RequestMethod"] = context.Request.Method,
-            ["UserAgent"] = context.Request.Headers.UserAgent.ToString(),
-            ["RemoteIp"] = context.Connection.RemoteIpAddress?.ToString()
         };
 
         using (_logger.BeginScope(scopeProperties))
@@ -59,7 +56,7 @@ public class CorrelationIdMiddleware
     {
         if (context.Request.Headers.TryGetValue(CorrelationIdHeaderName, out var correlationId))
         {
-            return correlationId.ToString();
+            if (Guid.TryParse(correlationId.ToString(), out var parsed)) return parsed.ToString("N");
         }
 
         return Guid.NewGuid().ToString();
